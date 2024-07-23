@@ -1,4 +1,4 @@
-const { InjectManifest } = require('workbox-webpack-plugin');
+const path = require('path');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -10,6 +10,9 @@ const nextConfig = {
   compiler: {
     // Enables the styled-components SWC transform
     styledComponents: true,
+  },
+  sassOptions: {
+    includePaths: [path.join(__dirname, 'styles')],
   },
   webpack(config, { isServer, dev }) {
     // Grab the existing rule that handles SVG imports
