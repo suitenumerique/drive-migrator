@@ -5,7 +5,7 @@ WORKDIR /home/frontend/
 COPY ./src/frontend/package.json ./package.json
 COPY ./src/frontend/yarn.lock ./yarn.lock
 COPY ./src/frontend/apps/main/package.json ./apps/main/package.json
-COPY ./src/frontend/packages/eslint-config/package.json ./packages/eslint-config/package.json
+COPY ./src/frontend/packages/eslint-config-main/package.json ./packages/eslint-config-main/package.json
 
 RUN yarn install --frozen-lockfile
 

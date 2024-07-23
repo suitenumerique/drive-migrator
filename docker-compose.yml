@@ -146,11 +146,11 @@ services:
     build: 
       context: .
       dockerfile: ./src/frontend/Dockerfile
-      target: impress-dev
+      target: main-dev
     ports:
       - "3000:3000"
     volumes:
-      - ./src/frontend/apps/impress:/home/frontend/apps/impress
+      - ./src/frontend/apps/main:/home/frontend/apps/main
       - /home/frontend/node_modules/
     depends_on:
       - celery-dev
