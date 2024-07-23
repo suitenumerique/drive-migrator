@@ -213,6 +213,7 @@ class Base(Configuration):
         "django.contrib.auth.middleware.AuthenticationMiddleware",
         "django.contrib.messages.middleware.MessageMiddleware",
         "dockerflow.django.middleware.DockerflowMiddleware",
+        "debug_toolbar.middleware.DebugToolbarMiddleware"
     ]
 
     AUTHENTICATION_BACKENDS = [
@@ -244,6 +245,7 @@ class Base(Configuration):
         # OIDC third party
         "mozilla_django_oidc",
         "django_celery_results",
+        "debug_toolbar"
     ]
 
     # Cache
@@ -387,6 +389,14 @@ class Base(Configuration):
     ALLOW_LOGOUT_GET_METHOD = values.BooleanValue(
         default=True, environ_name="ALLOW_LOGOUT_GET_METHOD", environ_prefix=None
     )
+
+    INTERNAL_IPS = [
+        "127.0.0.1",
+    ]
+
+    DEBUG_TOOLBAR_CONFIG = {
+        "SHOW_TOOLBAR_CALLBACK": lambda request: True,
+    }
 
     # pylint: disable=invalid-name
     @property
