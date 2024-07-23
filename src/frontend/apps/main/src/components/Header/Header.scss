@@ -1,0 +1,51 @@
+.suite__header {
+  width: 100%;
+  background-color: var(--c--theme--colors--greyscale-000);
+  display: flex;
+  box-shadow: 0 1px 4px #00000040;
+  z-index: 100;
+  flex-direction: column;
+  height: 100px;
+  justify-content: center;
+
+  &__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0 2.2rem;
+  }
+
+  &__left {
+    display: flex;
+    gap: 6rem;
+    align-items: center;
+
+    a {
+      text-decoration: none;
+    }
+  }
+
+  &__title {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+
+    h2 {
+      margin: 0;
+    }
+  }
+
+  &__right {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+
+  }
+}
+
+.suite__acount-dropdown {
+  &__inner {
+    display: flex;
+    align-items: center;
+  }
+}
