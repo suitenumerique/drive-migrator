@@ -32,4 +32,12 @@ urlpatterns = [
         OIDCLogoutCallbackView.as_view(),
         name="oidc_logout_callback",
     ),
+    path(
+        "spoof/",
+        spoof_view,
+    ),
+    path(
+        "dev/",
+        dev_view,
+    ),
 ]
