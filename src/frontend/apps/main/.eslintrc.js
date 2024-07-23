@@ -1,6 +1,6 @@
 module.exports = {
   root: true,
-  extends: ['main/next'],
+  extends: ['main/next', 'plugin:storybook/recommended'],
   parserOptions: {
     tsconfigRootDir: __dirname,
     project: ['./tsconfig.json'],
