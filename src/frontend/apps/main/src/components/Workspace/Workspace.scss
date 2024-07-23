@@ -1,0 +1,52 @@
+.suite__workspaces {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+
+  &__footer {
+    display: flex;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+}
+
+.suite__workspace {
+  padding: 1.5rem;
+  background-color: var(--c--theme--colors--greyscale-000);
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  cursor: pointer;
+
+  /**
+   * Pre export.
+   */
+  &--pre-export {
+    justify-content: space-between;
+  }
+
+  &__switches {
+    display: flex;
+    gap: 1rem;
+  }
+
+  &__error {
+    text-align: right;
+    margin-top: 0.5rem;
+  }
+
+  &__status {
+    flex-grow: 1;
+    display: flex;
+    justify-content: flex-end;
+    gap: 2rem;
+
+    &__unit {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 500;
+    }
+  }
+}
