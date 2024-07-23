@@ -1,0 +1,30 @@
+.suite__badge {
+  padding: 0 8px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  border-radius: 4px;
+  font-size: 14px;
+
+  &--info {
+    background-color: var(--c--theme--colors--info-200);
+    color: var(--c--theme--colors--info-600);
+  }
+
+  &--error {
+    background-color: var(--c--theme--colors--danger-200);
+    color: var(--c--theme--colors--danger-600);
+  }
+
+  &--success {
+    background-color: var(--c--theme--colors--success-200);
+    color: var(--c--theme--colors--success-600);
+  }
+
+  &--warning {
+    background-color: var(--c--theme--colors--warning-200);
+    color: var(--c--theme--colors--warning-600);
+  }
+}
