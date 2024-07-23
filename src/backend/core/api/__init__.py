@@ -6,6 +6,7 @@ from rest_framework import exceptions as drf_exceptions
 from rest_framework import views as drf_views
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+from rest_framework.exceptions import APIException as ExistingAPIException
 
 
 def exception_handler(exc, context):
@@ -26,3 +27,9 @@ def exception_handler(exc, context):
         exc = drf_exceptions.ValidationError(detail=detail)
 
     return drf_views.exception_handler(exc, context)
+
+
+class APIException(ExistingAPIException):
+    def __init__(self, name="Generic"):
+        self.default_detail = {"error_name": name}
+        super().__init__()
