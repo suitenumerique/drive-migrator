@@ -11,6 +11,7 @@ from django.core import mail, validators
 from django.db import models
 from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
+from django_celery_results.models import TaskResult
 
 from timezone_field import TimeZoneField
 
@@ -53,6 +54,48 @@ class BaseModel(models.Model):
         self.full_clean()
         super().save(*args, **kwargs)
 
+# TODO: Add meta data field a jsonb
+class Workspace(BaseModel):
+
+    class Status(models.TextChoices):
+        NONE = 'NONE'
+        PENDING = 'PENDING'
+        FAILURE = 'FAILURE'
+        SUCCESS = 'SUCCESS'
+
+    osmose_id = models.CharField(
+        help_text=_("id of the Osmose workspace"),
+        unique=True
+    )
+
+    title = models.CharField()
+
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.NONE,
+    )
+
+    status_archive = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.NONE,
+    )
+
+    status_resana = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.NONE,
+    )
+
+class ExtraTaskInfo(models.Model):
+
+    task_result = models.OneToOneField(
+        TaskResult,
+        on_delete=models.CASCADE,
+    )
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
 
 class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
     """User model to work with OIDC only authentication."""
@@ -115,6 +158,8 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
             "Unselect this instead of deleting accounts."
         ),
     )
+
+    workspaces = models.ManyToManyField(Workspace)
 
     objects = auth_models.UserManager()
 
