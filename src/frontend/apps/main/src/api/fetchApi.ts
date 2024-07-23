@@ -14,12 +14,14 @@ function getCSRFToken() {
     .pop();
 }
 
+export interface fetchAPIOptions {
+  logoutOn401?: boolean;
+}
+
 export const fetchAPI = async (
   input: string,
   init?: RequestInit,
-  options?: {
-    logoutOn401?: boolean;
-  },
+  options?: fetchAPIOptions,
 ) => {
   const apiUrl = `${baseApiUrl('1.0')}${input}`;
   const csrfToken = getCSRFToken();
@@ -35,7 +37,6 @@ export const fetchAPI = async (
   });
 
   if ((options?.logoutOn401 ?? true) && response.status === 401) {
-    // if (response.status === 401) {
     logout();
   }
 
