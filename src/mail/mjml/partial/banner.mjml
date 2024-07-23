@@ -1,0 +1,5 @@
+<mj-section background-url="{% base64_static 'images/mail-header-background.png' %}" background-size="cover" background-repeat="no-repeat" background-position="0 -30px">
+    <mj-column>
+        <mj-image align="center" src="{% base64_static 'images/logo-suite-numerique.png' %}" width="250px" align="left" alt="{%trans 'La Suite Numérique' %}" />
+    </mj-column>
+</mj-section>

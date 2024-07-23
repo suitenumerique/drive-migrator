@@ -1,0 +1,35 @@
+<mjml>
+  <mj-include path="./partial/header.mjml" />
+
+  <mj-body mj-class="bg--blue-100">
+    <mj-wrapper css-class="wrapper" padding="0 40px 40px 40px">
+      <mj-include path="./partial/banner.mjml" />
+      <mj-section mj-class="bg--white-100" padding="30px 20px 60px 20px">
+        <mj-column>
+          <!-- Welcome Message -->
+          <mj-text>
+            <h1>{% blocktrans %}Votre espace Resana est prêt !{% endblocktrans %}</h1>
+          </mj-text>
+          <mj-divider border-width="1px" border-style="solid" border-color="#DDDDDD" width="30%" align="left"/>
+
+          <!-- Main Message -->
+          <mj-text>{% blocktrans %}Suite à votre demande, la migration de votre espace Osmose {{workspace_name}} vers Resana est finalisée.{% endblocktrans %}</mj-text>
+          <mj-text>{% blocktrans %}Connectez vous à votre compte Resana afin de retrouver votre nouvel espace de travail.{% endblocktrans %}</mj-text>
+
+          <mj-button href="{{url}}" background-color="#000091" color="white" padding-bottom="30px">
+            {% trans "Voir mon espace Resana"%}
+          </mj-button>
+          <mj-text>{% trans "En cas de problème, vous pouvez contacter le support." %}</mj-text>
+
+          <!-- Signature -->
+          <mj-text>
+            <p>{% trans "La Suite Numérique Team" %}</p>
+          </mj-text>
+        </mj-column>
+      </mj-section>
+    </mj-wrapper>
+    <mj-include path="./partial/footer.mjml" />
+  </mj-body>
+
+</mjml>
+
