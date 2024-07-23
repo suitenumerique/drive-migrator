@@ -211,7 +211,7 @@ const config = {
           'secondary-800': '#341f1f',
           'secondary-900': '#2b1919',
           'greyscale-text': '#303C4B',
-          'greyscale-000': '#f6f6f6',
+          'greyscale-000': '#ffffff',
           'greyscale-100': '#eeeeee',
           'greyscale-200': '#e5e5e5',
           'greyscale-300': '#e1e1e1',
@@ -272,6 +272,7 @@ const config = {
       components: {
         alert: {
           'border-radius': '0',
+          'background-color': 'var(--c--theme--colors--greyscale-000)',
         },
         button: {
           'medium-height': '48px',

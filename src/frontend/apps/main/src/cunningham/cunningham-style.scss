@@ -1,9 +1,9 @@
 @import url('@openfun/cunningham-react/icons');
 @import url('@openfun/cunningham-react/style');
 @import url('@openfun/cunningham-react/fonts');
-@import url('./cunningham-tokens.css');
-@import url('./cunningham-custom-tokens.css');
-@import url('../assets/fonts/Marianne/Marianne-font.css');
+@import './cunningham-tokens';
+@import './cunningham-custom-tokens';
+@import '../assets/fonts/Marianne/Marianne-font';
 
 .c__input,
 .c__field,
@@ -474,4 +474,18 @@ input:-webkit-autofill:focus {
 */
 .c__toast__container {
   z-index: 10000;
+}
+
+/**
+ * Alert
+ */
+
+.c__alert--success {
+  border-color: var(--c--theme--colors--success-600);
+}
+.c__alert--info {
+  border-color: var(--c--theme--colors--info-600);
+}
+.c__alert--error {
+  border-color: var(--c--theme--colors--danger-600);
 }
