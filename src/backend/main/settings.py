@@ -231,6 +231,7 @@ class Base(Configuration):
         "corsheaders",
         "dockerflow.django",
         "rest_framework",
+        'django_filters',
         "parler",
         "easy_thumbnails",
         # Django
