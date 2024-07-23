@@ -10,6 +10,8 @@ services:
 
   redis:
     image: redis:5
+    ports:
+        - "16379:6379"
 
   mailcatcher:
     image: sj26/mailcatcher:latest
@@ -70,7 +72,18 @@ services:
   celery-dev:
     user: ${DOCKER_USER:-1000}
     image: impress:backend-development
-    command: ["celery", "-A", "impress.celery_app", "worker", "-l", "DEBUG"]
+    command: ["celery", "-A", "main.celery_app", "worker", "-l", "INFO"]
+    environment:
+      - DJANGO_CONFIGURATION=Development
+    env_file:
+      - env.d/development/common
+      - env.d/development/postgresql
+    volumes:
+      - ./src/backend:/app
+      - ./data/static:/data/static
+    depends_on:
+      - app-dev
+
     environment:
       - DJANGO_CONFIGURATION=Development
     env_file:

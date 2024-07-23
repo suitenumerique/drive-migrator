@@ -116,6 +116,15 @@ stop: ## stop the development server using Docker
 
 # -- Backend
 
+
+run-celery-dev:
+	@$(COMPOSE) up --force-recreate -d celery-dev
+.PHONY: run-celery-dev
+
+run-celery-dev-follow:
+	@$(COMPOSE) up --force-recreate -d celery-dev
+	@$(COMPOSE) logs -f celery-dev
+.PHONY: run-celery-dev
 demo: ## flush db then create a demo for load testing purpose
 	@$(MAKE) resetdb
 	@$(MANAGE) create_demo
