@@ -43,7 +43,6 @@ COMPOSE_EXEC        = $(COMPOSE) exec
 COMPOSE_EXEC_APP    = $(COMPOSE_EXEC) app-dev
 COMPOSE_RUN         = $(COMPOSE) run --rm
 COMPOSE_RUN_APP     = $(COMPOSE_RUN) app-dev
-COMPOSE_RUN_CROWDIN = $(COMPOSE_RUN) crowdin crowdin
 WAIT_DB             = @$(COMPOSE_RUN) dockerize -wait tcp://$(DB_HOST):$(DB_PORT) -timeout 60s
 
 # -- Backend
@@ -71,7 +70,6 @@ data/static:
 create-env-files: ## Copy the dist env files to env files
 create-env-files: \
 	env.d/development/common \
-	env.d/development/crowdin \
 	env.d/development/postgresql \
 	env.d/development/kc_postgresql
 .PHONY: create-env-files
@@ -85,7 +83,6 @@ bootstrap: \
 	run-frontend-dev \
 	migrate \
 	demo \
-	back-i18n-compile \
 	mails-install \
 	mails-build
 .PHONY: bootstrap
@@ -180,14 +177,6 @@ superuser: ## Create an admin superuser with password "admin"
 	@$(MANAGE) createsuperuser --email admin@example.com --password admin
 .PHONY: superuser
 
-back-i18n-compile: ## compile the gettext files
-	@$(MANAGE) compilemessages --ignore="venv/**/*"
-.PHONY: back-i18n-compile
-
-back-i18n-generate: ## create the .pot files used for i18n
-	@$(MANAGE) makemessages -a --keep-pot
-.PHONY: back-i18n-generate
-
 shell: ## connect to database shell
 	@$(MANAGE) shell #_plus
 .PHONY: dbshell
@@ -213,48 +202,6 @@ env.d/development/postgresql:
 
 env.d/development/kc_postgresql:
 	cp -n env.d/development/kc_postgresql.dist env.d/development/kc_postgresql
-
-# -- Internationalization
-
-env.d/development/crowdin:
-	cp -n env.d/development/crowdin.dist env.d/development/crowdin
-
-crowdin-download: ## Download translated message from crowdin
-	@$(COMPOSE_RUN_CROWDIN) download -c crowdin/config.yml
-.PHONY: crowdin-download
-
-crowdin-download-sources: ## Download sources from Crowdin
-	@$(COMPOSE_RUN_CROWDIN) download sources -c crowdin/config.yml
-.PHONY: crowdin-download-sources
-
-crowdin-upload: ## Upload source translations to crowdin
-	@$(COMPOSE_RUN_CROWDIN) upload sources -c crowdin/config.yml
-.PHONY: crowdin-upload
-
-i18n-compile: ## compile all translations
-i18n-compile: \
-	back-i18n-compile \
-	frontend-i18n-compile
-.PHONY: i18n-compile
-
-i18n-generate: ## create the .pot files and extract frontend messages
-i18n-generate: \
-	back-i18n-generate \
-	frontend-i18n-generate
-.PHONY: i18n-generate
-
-i18n-download-and-compile: ## download all translated messages and compile them to be used by all applications
-i18n-download-and-compile: \
-  crowdin-download \
-  i18n-compile
-.PHONY: i18n-download-and-compile
-
-i18n-generate-and-upload: ## generate source translations for all applications and upload them to Crowdin
-i18n-generate-and-upload: \
-  i18n-generate \
-  crowdin-upload
-.PHONY: i18n-generate-and-upload
-
 
 # -- Mail generator
 
@@ -299,20 +246,6 @@ help:
 run-frontend-dev: ## Install and run the frontend dev  
 	@$(COMPOSE) up --force-recreate -d frontend-dev
 .PHONY: run-frontend-dev
-
-frontend-i18n-extract: ## Extract the frontend translation inside a json to be used for crowdin
-	cd $(PATH_FRONT) && yarn i18n:extract
-.PHONY: frontend-i18n-extract
-
-frontend-i18n-generate: ## Generate the frontend json files used for crowdin
-frontend-i18n-generate: \
-	crowdin-download-sources \
-	frontend-i18n-extract
-.PHONY: frontend-i18n-generate
-
-frontend-i18n-compile: ## Format the crowin json files used deploy to the apps
-	cd $(PATH_FRONT) && yarn i18n:deploy
-.PHONY: frontend-i18n-compile
 
 # -- K8S
 build-k8s-cluster: ## build the kubernetes cluster using kind
