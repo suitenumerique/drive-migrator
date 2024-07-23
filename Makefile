@@ -125,6 +125,21 @@ run-celery-dev-follow:
 	@$(COMPOSE) up --force-recreate -d celery-dev
 	@$(COMPOSE) logs -f celery-dev
 .PHONY: run-celery-dev
+
+brun-celery-flower:
+	@$(COMPOSE) up --build -d celery-flower
+	@$(COMPOSE) logs -f celery-flower
+.PHONY: run-celery-flower
+
+run-celery-flower:
+	@$(COMPOSE) up --force-recreate -d celery-flower
+	@$(COMPOSE) logs -f celery-flower
+.PHONY: run-celery-flower
+
+stop-celery-flower:
+	@$(COMPOSE) stop celery-flower
+.PHONY: run-celery-flower
+
 demo: ## flush db then create a demo for load testing purpose
 	@$(MAKE) resetdb
 	@$(MANAGE) create_demo
