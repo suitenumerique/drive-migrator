@@ -14,10 +14,5 @@ for url in mozzila_oidc_urls:
 urlpatterns = [
     # Override the default 'logout/' path from Mozilla Django OIDC with our custom view.
     path("logout/", OIDCLogoutView.as_view(), name="oidc_logout_custom"),
-    path(
-        "logout-callback/",
-        OIDCLogoutCallbackView.as_view(),
-        name="oidc_logout_callback",
-    ),
     *mozzila_oidc_urls_kept,
 ]

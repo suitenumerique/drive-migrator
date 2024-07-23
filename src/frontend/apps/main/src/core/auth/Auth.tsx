@@ -1,5 +1,5 @@
 import { Loader } from '@openfun/cunningham-react';
-import { PropsWithChildren, useEffect, useState } from 'react';
+import React, { PropsWithChildren, useEffect, useState } from 'react';
 
 import { fetchAPI } from '@/api/fetchApi';
 import { User } from '@/core/auth/types';
@@ -9,9 +9,16 @@ export const logout = () => {
   window.location.replace(new URL('logout/', baseApiUrl()).href);
 };
 
+interface AuthContextInterface {
+  user?: User;
+}
+
+export const AuthContext = React.createContext<AuthContextInterface>({});
+
+export const useAuth = () => React.useContext(AuthContext);
+
 export const Auth = ({ children }: PropsWithChildren) => {
   const [user, setUser] = useState<User>();
-  console.log('user', user);
 
   const init = async () => {
     const response = await fetchAPI(`users/me/`, undefined, {
@@ -33,5 +40,13 @@ export const Auth = ({ children }: PropsWithChildren) => {
     return <Loader />;
   }
 
-  return children;
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
 };

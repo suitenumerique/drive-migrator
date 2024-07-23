@@ -27,4 +27,9 @@ urlpatterns = [
         OIDCAuthenticationCallbackView.as_view(),
         name="oidc_authentication_callback",
     ),
+    path(
+        "logout/",
+        OIDCLogoutCallbackView.as_view(),
+        name="oidc_logout_callback",
+    ),
 ]
