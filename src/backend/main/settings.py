@@ -150,6 +150,23 @@ class Base(Configuration):
 
     S3_VERSIONS_PAGE_SIZE = 50
 
+    # Osmose
+    OSMOSE_PKI_RSA_PRIVATE_KEY = values.Value(
+        environ_name="OSMOSE_PKI_RSA_PRIVATE_KEY", environ_prefix=None
+    )
+    OSMOSE_PKI_RSA_PRIVATE_KEY_PASSPHRASE = values.Value(
+        environ_name="OSMOSE_PKI_RSA_PRIVATE_KEY_PASSPHRASE", environ_prefix=None
+    )
+    OSMOSE_API_ENDPOINT = values.Value(
+        environ_name="OSMOSE_API_ENDPOINT", environ_prefix=None
+    )
+    OSMOSE_BASE_ENDPOINT = values.Value(
+        environ_name="OSMOSE_BASE_ENDPOINT", environ_prefix=None
+    )
+    OSMOSE_JWT_SUB = values.Value(
+        environ_name="OSMOSE_JWT_SUB", environ_prefix=None
+    )
+
     # Internationalization
     # https://docs.djangoproject.com/en/3.1/topics/i18n/
 
@@ -295,6 +312,9 @@ class Base(Configuration):
         "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
         "REDOC_DIST": "SIDECAR",
     }
+
+    # Osmose
+    OSMOSE_BACKEND = values.Value("core.osmose.osmose_real_backend.OsmoseRealBackend")
 
     # Mail
     EMAIL_BACKEND = values.Value("django.core.mail.backends.smtp.EmailBackend")
