@@ -13,6 +13,7 @@ from django.core.management.base import BaseCommand, CommandError
 from faker import Faker
 
 from core import models
+from core.factories import WorkspaceFactory
 
 from demo import defaults
 
@@ -108,6 +109,8 @@ def create_demo(stdout):
     The code is engineered to create a huge number of objects fast.
     """
 
+
+
     queue = BulkQueue(stdout)
 
     with Timeit(stdout, "Creating users"):
@@ -124,6 +127,29 @@ def create_demo(stdout):
                 )
             )
         queue.flush()
+
+
+    with Timeit(stdout, "Creating workspaces"):
+        for i in range(defaults.NB_OBJECTS["users"] * defaults.NB_OBJECTS["workspacesPerUser"]):
+            w = WorkspaceFactory.build()
+            queue.push(w)
+        queue.flush()
+
+    with Timeit(stdout, "Creating workspaces - user relations"):
+        users = models.User.objects.filter(is_superuser=False).iterator(chunk_size=20)
+        workspaces = models.Workspace.objects.iterator()
+        ThroughModel = models.User.workspaces.through
+        relations = []
+        for user in users:
+            for i in range(defaults.NB_OBJECTS["workspacesPerUser"]):
+                workspace = next(workspaces)
+                relations.append(ThroughModel(user_id=user.id, workspace_id=workspace.id))
+        # We do it in an efficient way all at once.
+        ThroughModel.objects.bulk_create(relations)
+
+    print("QUERIES %", len(db.connection.queries))
+    for query in db.connection.queries:
+        print(query["sql"])
 
 
 class Command(BaseCommand):

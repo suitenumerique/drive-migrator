@@ -2,4 +2,5 @@
 
 NB_OBJECTS = {
     "users": 100,
+    "workspacesPerUser": 20
 }
