@@ -166,6 +166,12 @@ class Base(Configuration):
     OSMOSE_JWT_SUB = values.Value(
         environ_name="OSMOSE_JWT_SUB", environ_prefix=None
     )
+    OSMOSE_BACKEND = values.Value(
+        environ_name="OSMOSE_BACKEND", environ_prefix=None
+    )
+    OSMOSE_BACKEND_DEBUG = values.BooleanValue(
+        environ_name="OSMOSE_BACKEND_DEBUG", environ_prefix=None, default=False
+    )
 
     # Internationalization
     # https://docs.djangoproject.com/en/3.1/topics/i18n/
@@ -312,9 +318,6 @@ class Base(Configuration):
         "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
         "REDOC_DIST": "SIDECAR",
     }
-
-    # Osmose
-    OSMOSE_BACKEND = values.Value("core.osmose.osmose_real_backend.OsmoseRealBackend")
 
     # Mail
     EMAIL_BACKEND = values.Value("django.core.mail.backends.smtp.EmailBackend")

@@ -8,6 +8,7 @@ import time
 import requests
 import json
 import urllib.request
+import os
 
 class OsmoseRealBackend(OsmoseBackend):
 
@@ -52,6 +53,14 @@ class OsmoseRealBackend(OsmoseBackend):
         workspace = self.fetch('/data/' + workspace_id)
         return OsmoseWorkspace(id=workspace["id"], title=workspace["title"], raw_data=workspace)
 
+    def debug_into_file(self, filename, data):
+        if not settings.OSMOSE_BACKEND_DEBUG:
+            return
+        path = "debug"
+        if not os.path.exists(path):
+            os.mkdir(path)
+        with open(f"{path}/{filename}.json", "w") as f:
+            f.write(json.dumps(data, indent=4))
 
     def get_workspaces(self, user):
 
@@ -67,8 +76,7 @@ class OsmoseRealBackend(OsmoseBackend):
             "member": osmose_user["id"]
         })
 
-        with open("debug.json", "w") as f:
-            f.write(json.dumps(data, indent=4))
+        self.debug_into_file("workspaces", data)
 
         workspaces = []
         for workspace in data["dataSet"]:
@@ -94,16 +102,14 @@ class OsmoseRealBackend(OsmoseBackend):
 
             # Fetch root category data
             root_data = self.fetch("/data/" + root_category["id"])
-            with open("root_data.json", "w") as f:
-                f.write(json.dumps(root_data, indent=4))
+            self.debug_into_file("root_data", root_data)
             root_categories.append(root_data)
 
             # Fetch children of root category
             data = self.fetch("/search/category", params={
                 "rootCid": root_category["id"]
             })
-            with open("cat.json", "w") as f:
-                f.write(json.dumps(data, indent=4))
+            self.debug_into_file("cat", data)
 
             for cat in data["dataSet"]:
                 categories.append(cat)
@@ -127,8 +133,7 @@ class OsmoseRealBackend(OsmoseBackend):
             "exactCat": True,
             "pageSize": "1000",
         })
-        with open(f"files-{folder.raw_data['id']}", "w") as f:
-            f.write(json.dumps(data, indent=4))
+        self.debug_into_file(f"files-{folder.raw_data['id']}", data)
         for file_raw in data["dataSet"]:
             file = OsmoseFile(raw_data=file_raw)
             folder.files.append(file)
@@ -137,8 +142,7 @@ class OsmoseRealBackend(OsmoseBackend):
         data = self.fetch('/search/member', params={
             "email": email,
         })
-        with open("user.json", "w") as f:
-            f.write(json.dumps(data, indent=4))
+        self.debug_into_file("user", data)
 
         if len(data["dataSet"]) == 0:
             return None
