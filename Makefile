@@ -52,7 +52,6 @@ TSCLIENT_YARN       = $(COMPOSE_RUN) -w /app/src/tsclient node yarn
 
 # -- Frontend
 PATH_FRONT          = ./src/frontend
-PATH_FRONT_IMPRESS  = $(PATH_FRONT)/apps/impress
 
 # ==============================================================================
 # RULES
