@@ -1,22 +1,26 @@
 from celery import states
-from celery.signals import before_task_publish, task_success, task_failure
+from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
+
 from core.mails_manager import MailsManager
-from core.models import ExtraTaskInfo, Workspace, User
+from core.models import ExtraTaskInfo, User, Workspace
 from core.osmose.osmose_backend import OsmoseManager
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.processing.s3_resana_manager import S3ResanaManager
+
 from main.celery_app import app
 
 logger = get_task_logger(__name__)
 
-@app.task(bind=True)
-def export(self, data):
-    logger.info("Starting workspace %s ..." % data["workspace"]["id"])
 
-    workspace = Workspace.objects.get(id=data["workspace"]["id"])
+@app.task(bind=True)
+def export(self, data):  # pylint: disable=unused-argument
+    workspace_id = data["workspace"]["id"]
+    logger.info(f"Starting workspace {workspace_id} ...")
+
+    workspace = Workspace.objects.get(id=workspace_id)
     user = User.objects.get(id=data["user"]["id"])
 
     backend = OsmoseManager().get_backend()
@@ -56,9 +60,10 @@ def export(self, data):
 
     return True
 
+
 # From https://github.com/celery/django-celery-results/issues/286#issuecomment-1279161047
 @before_task_publish.connect
-def create_task_result_on_publish(sender=None, headers=None, body=None, **kwargs):
+def create_task_result_on_publish(sender=None, headers=None, body=None, **kwargs):  # pylint: disable=unused-argument
     if "task" not in headers:
         return
 
@@ -73,13 +78,15 @@ def create_task_result_on_publish(sender=None, headers=None, body=None, **kwargs
         task_kwargs=headers["kwargsrepr"],
     )
 
+
 @task_success.connect
-def task_success(sender=None, **kwargs):
+def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
     task_result = TaskResult.objects.get(task_id=sender.request.id)
     extra_task = ExtraTaskInfo.objects.get(task_result=task_result)
     workspace = extra_task.workspace
     workspace.status = Workspace.Status.SUCCESS
     workspace.save()
+
 
 @task_failure.connect
 def task_failure(sender=None, **kwargs):
@@ -93,4 +100,3 @@ def task_failure(sender=None, **kwargs):
     if workspace.status_resana == Workspace.Status.PENDING:
         workspace.status_resana = Workspace.Status.FAILURE
     workspace.save()
-

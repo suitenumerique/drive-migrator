@@ -163,12 +163,8 @@ class Base(Configuration):
     OSMOSE_BASE_ENDPOINT = values.Value(
         environ_name="OSMOSE_BASE_ENDPOINT", environ_prefix=None
     )
-    OSMOSE_JWT_SUB = values.Value(
-        environ_name="OSMOSE_JWT_SUB", environ_prefix=None
-    )
-    OSMOSE_BACKEND = values.Value(
-        environ_name="OSMOSE_BACKEND", environ_prefix=None
-    )
+    OSMOSE_JWT_SUB = values.Value(environ_name="OSMOSE_JWT_SUB", environ_prefix=None)
+    OSMOSE_BACKEND = values.Value(environ_name="OSMOSE_BACKEND", environ_prefix=None)
     OSMOSE_BACKEND_DEBUG = values.BooleanValue(
         environ_name="OSMOSE_BACKEND_DEBUG", environ_prefix=None, default=False
     )
@@ -236,7 +232,7 @@ class Base(Configuration):
         "django.contrib.auth.middleware.AuthenticationMiddleware",
         "django.contrib.messages.middleware.MessageMiddleware",
         "dockerflow.django.middleware.DockerflowMiddleware",
-        "debug_toolbar.middleware.DebugToolbarMiddleware"
+        "debug_toolbar.middleware.DebugToolbarMiddleware",
     ]
 
     AUTHENTICATION_BACKENDS = [
@@ -254,7 +250,7 @@ class Base(Configuration):
         "corsheaders",
         "dockerflow.django",
         "rest_framework",
-        'django_filters',
+        "django_filters",
         "parler",
         "easy_thumbnails",
         # Django
@@ -269,7 +265,7 @@ class Base(Configuration):
         # OIDC third party
         "mozilla_django_oidc",
         "django_celery_results",
-        "debug_toolbar"
+        "debug_toolbar",
     ]
 
     # Cache
@@ -348,14 +344,13 @@ class Base(Configuration):
     # Celery
     CELERY_BROKER_URL = values.Value("redis://redis:6379/0")
     CELERY_BROKER_TRANSPORT_OPTIONS = values.DictValue({})
-    CELERY_RESULT_BACKEND = 'django-db'
-    CELERY_CACHE_BACKEND = 'django-cache'
-    CELERY_TASK_SERIALIZER = 'json'
-    CELERY_RESULT_SERIALIZER = 'json'
-    CELERY_ACCEPT_CONTENT = ['json']
+    CELERY_RESULT_BACKEND = "django-db"
+    CELERY_CACHE_BACKEND = "django-cache"
+    CELERY_TASK_SERIALIZER = "json"
+    CELERY_RESULT_SERIALIZER = "json"
+    CELERY_ACCEPT_CONTENT = ["json"]
     CELERY_RESULT_EXTENDED = True
     CELERY_TRACK_STARTED = True
-
 
     # Session
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"

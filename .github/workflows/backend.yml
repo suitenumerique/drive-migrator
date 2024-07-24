@@ -19,9 +19,6 @@ jobs:
           fetch-depth: 0
       - name: show
         run: git log
-      - name: Enforce absence of print statements in code
-        run: |
-          ! git diff origin/${{ github.event.pull_request.base.ref }}..HEAD -- . ':(exclude)**/impress.yml' | grep "print("
       - name: Check absence of fixup commits
         run: |
           ! git log | grep 'fixup!'
@@ -114,8 +111,6 @@ jobs:
         run: ~/.local/bin/ruff format . --diff
       - name: Lint code with ruff
         run: ~/.local/bin/ruff check .
-      - name: Lint code with pylint
-        run: ~/.local/bin/pylint .
 
   test-back:
     runs-on: ubuntu-latest

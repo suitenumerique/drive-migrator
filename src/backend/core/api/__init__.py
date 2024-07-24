@@ -1,11 +1,8 @@
-"""Impress core API endpoints"""
-from django.conf import settings
+"""API endpoints"""
 from django.core.exceptions import ValidationError
 
 from rest_framework import exceptions as drf_exceptions
 from rest_framework import views as drf_views
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
 from rest_framework.exceptions import APIException as ExistingAPIException
 
 

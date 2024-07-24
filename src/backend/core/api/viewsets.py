@@ -5,9 +5,11 @@ from rest_framework import (
     viewsets,
 )
 from rest_framework.response import Response
+
 from core import models
 
 from . import permissions, serializers
+
 
 class Pagination(pagination.PageNumberPagination):
     """Pagination to display no more than 100 objects per page sorted by creation date."""
@@ -38,9 +40,4 @@ class UserViewSet(
         Return information on currently logged user
         """
         context = {"request": request}
-        return Response(
-            self.serializer_class(request.user, context=context).data
-        )
-
-
-
+        return Response(self.serializer_class(request.user, context=context).data)

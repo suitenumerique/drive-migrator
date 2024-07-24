@@ -1,9 +1,9 @@
 """Admin classes and registrations for core app."""
 from django.contrib import admin
 from django.contrib.auth import admin as auth_admin
+from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
-from django.urls import reverse
 
 from . import models
 from .models import ExtraTaskInfo
@@ -66,15 +66,32 @@ class UserAdmin(auth_admin.UserAdmin):
     readonly_fields = ("id", "sub", "email", "created_at", "updated_at")
     search_fields = ("id", "sub", "admin_email", "email")
 
+
 class ExtraTaskInfoAdminInline(admin.TabularInline):
     model = models.ExtraTaskInfo
     can_delete = False
-    readonly_fields = ['task_result', 'get_task', 'get_task_status', 'get_task_date_created', 'get_task_date_done']
+    readonly_fields = [
+        "task_result",
+        "get_task",
+        "get_task_status",
+        "get_task_date_created",
+        "get_task_date_done",
+    ]
     max_num = 0
 
     def get_task(self, obj):
-        return mark_safe('<a href="%s">%s</a>' % (reverse('admin:django_celery_results_taskresult_change', args=(obj.task_result.id,)), obj.task_result.id))
-    get_task.short_description = 'Task'
+        return mark_safe(  # noqa: S308
+            '<a href="%s">%s</a>'
+            % (
+                reverse(
+                    "admin:django_celery_results_taskresult_change",
+                    args=(obj.task_result.id,),
+                ),
+                obj.task_result.id,
+            )
+        )
+
+    get_task.short_description = "Task"
 
     def get_task_status(self, obj):
         return obj.task_result.status
@@ -88,24 +105,54 @@ class ExtraTaskInfoAdminInline(admin.TabularInline):
 
 @admin.register(models.Workspace)
 class WorkspaceAdmin(admin.ModelAdmin):
-    list_display = ('id', 'osmose_id', 'title', 'status', 'status_archive', 'status_resana')
-    list_filter = ('status', 'status_archive', 'status_resana')
-    search_fields = ('id', 'osmose_id', 'title')
+    list_display = (
+        "id",
+        "osmose_id",
+        "title",
+        "status",
+        "status_archive",
+        "status_resana",
+    )
+    list_filter = ("status", "status_archive", "status_resana")
+    search_fields = ("id", "osmose_id", "title")
     inlines = [ExtraTaskInfoAdminInline]
 
 
 @admin.register(models.ExtraTaskInfo)
 class ExtraTaskInfoAdmin(admin.ModelAdmin):
-    list_display = ['id', 'get_workspace', 'get_task', 'get_task_status', 'get_task_date_created', 'get_task_date_done']
-
+    list_display = [
+        "id",
+        "get_workspace",
+        "get_task",
+        "get_task_status",
+        "get_task_date_created",
+        "get_task_date_done",
+    ]
 
     def get_workspace(self, obj):
-        return mark_safe('<a href="%s">%s</a>' % (reverse('admin:core_workspace_change', args=(obj.workspace.id,)), obj.workspace.title))
-    get_workspace.short_description = 'Workspace'
+        return mark_safe(  # noqa: S308
+            '<a href="%s">%s</a>'
+            % (
+                reverse("admin:core_workspace_change", args=(obj.workspace.id,)),
+                obj.workspace.title,
+            )
+        )
+
+    get_workspace.short_description = "Workspace"
 
     def get_task(self, obj):
-        return mark_safe('<a href="%s">%s</a>' % (reverse('admin:django_celery_results_taskresult_change', args=(obj.task_result.id,)), obj.task_result.id))
-    get_task.short_description = 'Task'
+        return mark_safe(  # noqa: S308
+            '<a href="%s">%s</a>'
+            % (
+                reverse(
+                    "admin:django_celery_results_taskresult_change",
+                    args=(obj.task_result.id,),
+                ),
+                obj.task_result.id,
+            )
+        )
+
+    get_task.short_description = "Task"
 
     def get_task_status(self, obj):
         return obj.task_result.status

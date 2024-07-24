@@ -10,6 +10,7 @@ from faker import Faker
 
 from core import models
 
+
 class UserFactory(factory.django.DjangoModelFactory):
     """A factory to random users for testing purposes."""
 
@@ -21,8 +22,8 @@ class UserFactory(factory.django.DjangoModelFactory):
     language = factory.fuzzy.FuzzyChoice([lang[0] for lang in settings.LANGUAGES])
     password = make_password("password")
 
-class WorkspaceFactory(factory.django.DjangoModelFactory):
 
+class WorkspaceFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = models.Workspace
 

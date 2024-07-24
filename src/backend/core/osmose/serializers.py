@@ -14,7 +14,15 @@ class OsmoseWorkspaceSerializer(serializers.Serializer):
         # Convert enum to its value
         return obj.status.value if obj.status else None
 
+
 class WorkspaceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Workspace
-        fields = ['id', 'title', 'status', 'osmose_id', 'status_resana', 'status_archive']
+        fields = [
+            "id",
+            "title",
+            "status",
+            "osmose_id",
+            "status_resana",
+            "status_archive",
+        ]

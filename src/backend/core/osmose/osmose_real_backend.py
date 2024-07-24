@@ -1,30 +1,42 @@
-from core.models import Workspace
-from core.osmose.osmose_backend import OsmoseBackend, OsmoseWorkspace, OsmoseFolder, OsmoseFile
-import jwt
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
-from django.conf import settings
-import time
-import requests
 import json
-import urllib.request
 import os
+import time
+import urllib.request
+
+from django.conf import settings
+
+import jwt
+import requests
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+
+from core.models import Workspace
+from core.osmose.osmose_backend import (
+    OsmoseBackend,
+    OsmoseFile,
+    OsmoseFolder,
+    OsmoseWorkspace,
+)
+
 
 class OsmoseRealBackend(OsmoseBackend):
-
     def __init__(self):
         self.jwt = None
 
-    def create_jwt(self, user):
+    def create_jwt(self, user):  # pylint: disable=unused-argument
         private_key = serialization.load_pem_private_key(
-            bytes(settings.OSMOSE_PKI_RSA_PRIVATE_KEY, 'utf-8'),
-            password=bytes(settings.OSMOSE_PKI_RSA_PRIVATE_KEY_PASSPHRASE, 'utf-8'), backend=default_backend()
+            bytes(settings.OSMOSE_PKI_RSA_PRIVATE_KEY, "utf-8"),
+            password=bytes(settings.OSMOSE_PKI_RSA_PRIVATE_KEY_PASSPHRASE, "utf-8"),
+            backend=default_backend(),
         )
 
         expiration = int(time.time()) + 120
 
-        encoded = jwt.encode({"sub": "admin", "iss": "JPlatform Workplace", "exp": expiration}, private_key,
-                             algorithm="RS256")
+        encoded = jwt.encode(
+            {"sub": "admin", "iss": "JPlatform Workplace", "exp": expiration},
+            private_key,
+            algorithm="RS256",
+        )
         return encoded
 
     def init_jwt(self):
@@ -34,24 +46,30 @@ class OsmoseRealBackend(OsmoseBackend):
     def download_file(self, download_url, destination):
         self.init_jwt()
         opener = urllib.request.build_opener()
-        opener.addheaders = [('Authorization', 'Bearer ' + self.jwt)]
+        opener.addheaders = [("Authorization", "Bearer " + self.jwt)]
         urllib.request.install_opener(opener)
-        urllib.request.urlretrieve(download_url, destination)
+        urllib.request.urlretrieve(download_url, destination)  # noqa: S310
 
     def fetch(self, url, params=None):
         self.init_jwt()
-        response = requests.get(settings.OSMOSE_API_ENDPOINT + url,
-                                params=params,
-                                headers={"Authorization": "Bearer " + self.jwt,
-                                         'Content-Type': 'application/json',
-                                         'Accept': 'application/json'})
+        response = requests.get(  # noqa: S113
+            settings.OSMOSE_API_ENDPOINT + url,
+            params=params,
+            headers={
+                "Authorization": "Bearer " + self.jwt,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
         response.raise_for_status()
         data = response.json()
         return data
 
     def get_workspace(self, workspace_id):
-        workspace = self.fetch('/data/' + workspace_id)
-        return OsmoseWorkspace(id=workspace["id"], title=workspace["title"], raw_data=workspace)
+        workspace = self.fetch("/data/" + workspace_id)
+        return OsmoseWorkspace(
+            id=workspace["id"], title=workspace["title"], raw_data=workspace
+        )
 
     def debug_into_file(self, filename, data):
         if not settings.OSMOSE_BACKEND_DEBUG:
@@ -63,18 +81,20 @@ class OsmoseRealBackend(OsmoseBackend):
             f.write(json.dumps(data, indent=4))
 
     def get_workspaces(self, user):
-
         osmose_user = self.__get_user(user.email)
         if not osmose_user:
             raise Exception(f"User {user.email} not found in Osmose")
 
         # "start" parameter could be used for pagination.
         # belongsToWorkspace=true&member=${user.id}
-        data = self.fetch('/search/workspace', params={
-            "pageSize": "1000",
-            "belongsToWorkspace": True,
-            "member": osmose_user["id"]
-        })
+        data = self.fetch(
+            "/search/workspace",
+            params={
+                "pageSize": "1000",
+                "belongsToWorkspace": True,
+                "member": osmose_user["id"],
+            },
+        )
 
         self.debug_into_file("workspaces", data)
 
@@ -82,11 +102,17 @@ class OsmoseRealBackend(OsmoseBackend):
         for workspace in data["dataSet"]:
             if workspace["model"]:
                 continue
-            if not any(admin["id"] == osmose_user["id"] for admin in workspace["administrators"]):
+            if not any(
+                admin["id"] == osmose_user["id"]
+                for admin in workspace["administrators"]
+            ):
                 continue
-            workspaces.append(OsmoseWorkspace(id=workspace["id"], title=workspace["title"], raw_data=workspace))
+            workspaces.append(
+                OsmoseWorkspace(
+                    id=workspace["id"], title=workspace["title"], raw_data=workspace
+                )
+            )
         return workspaces
-
 
     def get_workspace_documents_structure(self, workspace: Workspace):
         """
@@ -99,16 +125,15 @@ class OsmoseRealBackend(OsmoseBackend):
         root_categories = []
         categories = []
         for root_category in osmose_workspace.raw_data["catSet"]:
-
             # Fetch root category data
             root_data = self.fetch("/data/" + root_category["id"])
             self.debug_into_file("root_data", root_data)
             root_categories.append(root_data)
 
             # Fetch children of root category
-            data = self.fetch("/search/category", params={
-                "rootCid": root_category["id"]
-            })
+            data = self.fetch(
+                "/search/category", params={"rootCid": root_category["id"]}
+            )
             self.debug_into_file("cat", data)
 
             for cat in data["dataSet"]:
@@ -125,23 +150,29 @@ class OsmoseRealBackend(OsmoseBackend):
         for child in folder.children:
             self.__fetch_files_in_folders(child)
 
-    # TODO: Handle pagination ?
+    # TODO: Handle pagination ? # pylint: disable=fixme
     def get_folder_files(self, folder: OsmoseFolder):
-        data = self.fetch("/search", params={
-            "documentKinds": "filedocument",
-            "cids": folder.raw_data["id"],
-            "exactCat": True,
-            "pageSize": "1000",
-        })
+        data = self.fetch(
+            "/search",
+            params={
+                "documentKinds": "filedocument",
+                "cids": folder.raw_data["id"],
+                "exactCat": True,
+                "pageSize": "1000",
+            },
+        )
         self.debug_into_file(f"files-{folder.raw_data['id']}", data)
         for file_raw in data["dataSet"]:
             file = OsmoseFile(raw_data=file_raw)
             folder.files.append(file)
 
     def __get_user(self, email):
-        data = self.fetch('/search/member', params={
-            "email": email,
-        })
+        data = self.fetch(
+            "/search/member",
+            params={
+                "email": email,
+            },
+        )
         self.debug_into_file("user", data)
 
         if len(data["dataSet"]) == 0:
@@ -149,8 +180,8 @@ class OsmoseRealBackend(OsmoseBackend):
 
         return data["dataSet"][0]
 
-class FolderBuilder:
 
+class FolderBuilder:
     def build(self, root_categories, categories):
         """
         Build a OsmoseFolder hierarchy from root categories and categories.

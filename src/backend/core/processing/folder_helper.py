@@ -1,13 +1,16 @@
 import os.path
 import shutil
+import urllib.parse
+
+from django.conf import settings
+
+import boto3
 
 from core.models import Workspace
 from core.processing.folder_creator import FolderCreator
-from django.conf import settings
-import boto3
-import urllib.parse
-class ArchiveManager:
 
+
+class ArchiveManager:
     archive_format = "zip"
 
     def zip_workspace_folder(self, workspace: Workspace):
@@ -20,7 +23,7 @@ class ArchiveManager:
         path = folder_creator.get_workspace_path(workspace) + "." + self.archive_format
 
         s3 = boto3.resource(
-            's3',
+            "s3",
             endpoint_url=settings.AWS_S3_ENDPOINT_URL,
             aws_access_key_id=settings.AWS_S3_ACCESS_KEY_ID,
             aws_secret_access_key=settings.AWS_S3_SECRET_ACCESS_KEY,
@@ -30,10 +33,11 @@ class ArchiveManager:
         destination = os.path.basename(path)
         bucket.upload_file(path, destination)
 
-        url = s3.meta.client.generate_presigned_url('get_object',
-                                Params={'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
-                                        'Key': destination},
-                                ExpiresIn=3600*24)
+        url = s3.meta.client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.AWS_STORAGE_BUCKET_NAME, "Key": destination},
+            ExpiresIn=3600 * 24,
+        )
 
         # This part could look weird but in local when using docker url netloc is "http://minio:9000"
         # which is not reachable outside docker, so we replace it with the "localhost" url in order to be

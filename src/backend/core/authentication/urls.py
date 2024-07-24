@@ -4,7 +4,7 @@ from django.urls import path
 
 from mozilla_django_oidc.urls import urlpatterns as mozzila_oidc_urls
 
-from .views import OIDCLogoutCallbackView, OIDCLogoutView
+from .views import OIDCLogoutView
 
 mozzila_oidc_urls_kept = []
 for url in mozzila_oidc_urls:

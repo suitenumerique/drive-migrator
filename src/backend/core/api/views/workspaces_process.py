@@ -1,28 +1,33 @@
 from django_celery_results.models import TaskResult
-from .. import APIException
+from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.osmose.serializers import WorkspaceSerializer
-from ..serializers import UserSerializer
+
 from ...models import ExtraTaskInfo, Workspace
 from ...processing.tasks import export
-from rest_framework.response import Response
+from .. import APIException
+from ..serializers import UserSerializer
 
 
 class WorkspacesProcessAPIView(APIView):
-
     def create_export(self, user, workspace, types):
         if workspace.status != Workspace.Status.NONE:
             raise APIException("WorkspaceAlreadyExporting")
         # Create Celery task.
-        result = export.delay(data={"workspace": WorkspaceSerializer(workspace).data, "user": UserSerializer(user).data})
+        result = export.delay(
+            data={
+                "workspace": WorkspaceSerializer(workspace).data,
+                "user": UserSerializer(user).data,
+            }
+        )
         # Fetch task from db created by django-celery-results.
-        dbResult = TaskResult.objects.get(task_id=result.id)
+        db_result = TaskResult.objects.get(task_id=result.id)
         # Create extra task with information required for querying.
-        extraTask = ExtraTaskInfo()
-        extraTask.workspace = workspace
-        extraTask.task_result = dbResult
-        extraTask.save()
+        extra_task = ExtraTaskInfo()
+        extra_task.workspace = workspace
+        extra_task.task_result = db_result
+        extra_task.save()
 
         workspace.status = Workspace.Status.PENDING
         if "resana" in types:
