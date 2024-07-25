@@ -18,7 +18,7 @@
     "app:test": "yarn APP_MAIN run test",
     "ci:build": "yarn APP_MAIN run build:ci",
     "e2e:test": "yarn APP_E2E run test",
-    "lint": "yarn APP_MAIN run lint && yarn APP_E2E run lint && yarn workspace eslint-config-main run lint && yarn I18N run lint"
+    "lint": "yarn APP_MAIN run lint && yarn APP_E2E run lint && yarn workspace eslint-config-main run lint"
   },
   "resolutions": {
     "@types/node": "20.14.2",

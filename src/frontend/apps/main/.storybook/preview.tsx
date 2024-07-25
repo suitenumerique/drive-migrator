@@ -1,8 +1,7 @@
 import type { Preview } from '@storybook/react';
 
-import "../src/app/global.scss"
+import '../src/app/global.scss';
 import { AppProvider } from '@/core/AppProvider';
-
 
 const preview: Preview = {
   parameters: {
@@ -15,9 +14,11 @@ const preview: Preview = {
   },
   decorators: [
     (Story) => (
-      <AppProvider><Story/></AppProvider>
-    )
-  ]
+      <AppProvider>
+        <Story />
+      </AppProvider>
+    ),
+  ],
 };
 
 export default preview;

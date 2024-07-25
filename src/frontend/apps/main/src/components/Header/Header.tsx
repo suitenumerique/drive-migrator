@@ -1,17 +1,12 @@
-import Image from 'next/image';
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 
 import LogoGouv from '@/components/LogoGouv/LogoGouv';
 
 import { AccountDropdown } from './AccountDropdown';
-import { LaGaufre } from './LaGaufre';
-import { default as IconDocs } from './assets/icon-docs.svg?url';
-
-export const HEADER_HEIGHT = '100px';
-
 import './Header.scss';
+import { LaGaufre } from './LaGaufre';
+export const HEADER_HEIGHT = '100px';
 
 const RedStripe = styled.div`
   position: absolute;
@@ -22,8 +17,6 @@ const RedStripe = styled.div`
 `;
 
 export const Header = () => {
-  const { t } = useTranslation();
-
   return (
     <header className="suite__header">
       <RedStripe />

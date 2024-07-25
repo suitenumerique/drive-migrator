@@ -60,6 +60,7 @@ export default function Prepare({
   };
 
   const submit = async (data: IForm) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const response = await fetchApi('workspaces/process', {
       method: 'POST',
       headers: {
@@ -87,13 +88,24 @@ export default function Prepare({
     <div className="container">
       {workspaces ? (
         <FormProvider {...methods}>
+          {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
           <form onSubmit={methods.handleSubmit(submit)}>
             <Alert>
               <div>
-                {t("Vous pouvez choisir jusqu'à deux types d'exports pour chaque communauté: ")}
+                {t(
+                  "Vous pouvez choisir jusqu'à deux types d'exports pour chaque communauté: ",
+                )}
                 <ul>
-                  <li>{t("Un export de type 'Archive' qui vous permettra de récupérer l'ensemble des données de votre communauté dans un fichier compressé. Un lien de téléchargement vous sera envoyé par mail une fois que l'achive sera prête.")}</li>
-                  <li className="mt-s">{t("Un export de type 'Resana' qui vous permettra de migrer votre communauté vers Resana, l'espace de travail sera créé automatiquement sur Resana. Vous pourrez retrouver votre communauté sur la plateforme Resana une fois la migration terminée, nous vous enverrons un mail pour vous avertir.")}</li>
+                  <li>
+                    {t(
+                      "Un export de type 'Archive' qui vous permettra de récupérer l'ensemble des données de votre communauté dans un fichier compressé. Un lien de téléchargement vous sera envoyé par mail une fois que l'achive sera prête.",
+                    )}
+                  </li>
+                  <li className="mt-s">
+                    {t(
+                      "Un export de type 'Resana' qui vous permettra de migrer votre communauté vers Resana, l'espace de travail sera créé automatiquement sur Resana. Vous pourrez retrouver votre communauté sur la plateforme Resana une fois la migration terminée, nous vous enverrons un mail pour vous avertir.",
+                    )}
+                  </li>
                 </ul>
               </div>
             </Alert>

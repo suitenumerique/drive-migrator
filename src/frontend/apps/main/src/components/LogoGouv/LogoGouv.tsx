@@ -2,11 +2,10 @@ import Image from 'next/image';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import './LogoGouv.scss';
-
 import { default as IconDevise } from '@/assets/icons/icon-devise.svg?url';
 import { default as IconMarianne } from '@/assets/icons/icon-marianne.svg?url';
 
+import './LogoGouv.scss';
 interface LogoGouvProps {
   imagesWidth?: number;
 }

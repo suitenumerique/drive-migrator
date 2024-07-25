@@ -1,14 +1,13 @@
 'use client';
 
 import { Button, Loader } from '@openfun/cunningham-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Workspace, WorkspaceStatus } from '@/components/Workspace/Workspace';
+import { useApi } from '@/hooks/useApi';
 
 import './page.scss';
-
-import { useApi } from '@/hooks/useApi';
 
 export type WorkspaceByStatus = Record<WorkspaceStatus, Workspace[]>;
 

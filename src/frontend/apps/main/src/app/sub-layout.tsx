@@ -1,9 +1,9 @@
 'use client';
 import { PropsWithChildren } from 'react';
 
+import { Footer } from '@/components/Footer/Footer';
 import { Header } from '@/components/Header/Header';
 import { AppProvider } from '@/core/AppProvider';
-import { Footer } from '@/components/Footer/Footer';
 
 export default function SubLayout({ children }: PropsWithChildren) {
   return (
@@ -11,7 +11,7 @@ export default function SubLayout({ children }: PropsWithChildren) {
       <div className="suite__app">
         <Header />
         <main>{children}</main>
-        <Footer/>
+        <Footer />
       </div>
     </AppProvider>
   );

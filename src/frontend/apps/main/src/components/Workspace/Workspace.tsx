@@ -1,11 +1,11 @@
-import './Workspace.scss';
-
 import { Checkbox, Switch, VariantType } from '@openfun/cunningham-react';
 import React, { PropsWithChildren, ReactNode } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/Badge/Badge';
+
+import './Workspace.scss';
 
 export enum WorkspaceStatus {
   NONE = 'NONE',
@@ -47,8 +47,6 @@ const WorkspaceStatusBadge = ({
 };
 
 export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
-  const methods = useFormContext();
-  const fieldName = `${workspace.id}`;
   const { t } = useTranslation();
   return (
     <GenericWorkspace workspace={workspace}>

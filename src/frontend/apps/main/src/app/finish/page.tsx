@@ -15,7 +15,9 @@ export default function Finish() {
       <div className="page-finish__logo">
         <Image src={SystemImage} alt={t('Chargement en cours')} width={200} />
         <p className="clr-greyscale-900">
-            {t("Vos exports sont en cours de traitement, cela peut prendre un certain temps. Vous pourrez retrouver l'état d'avancement des exports sur l'écran principal. Dans chacun des cas nous vous enverrons un mail lorsque l'export sera terminé afin de vous avertir.")}
+          {t(
+            "Vos exports sont en cours de traitement, cela peut prendre un certain temps. Vous pourrez retrouver l'état d'avancement des exports sur l'écran principal. Dans chacun des cas nous vous enverrons un mail lorsque l'export sera terminé afin de vous avertir.",
+          )}
         </p>
 
         <Button className="mt-b" href="/dashboard">

@@ -124,7 +124,7 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB: impress
+          POSTGRES_DB: main
           POSTGRES_USER: dinum
           POSTGRES_PASSWORD: pass
         ports:
@@ -134,18 +134,19 @@ jobs:
 
     env:
       DJANGO_CONFIGURATION: Test
-      DJANGO_SETTINGS_MODULE: impress.settings
+      DJANGO_SETTINGS_MODULE: main.settings
       DJANGO_SECRET_KEY: ThisIsAnExampleKeyForTestPurposeOnly
       OIDC_OP_JWKS_ENDPOINT: /endpoint-for-test-purpose-only
       DB_HOST: localhost
-      DB_NAME: impress
+      DB_NAME: main
       DB_USER: dinum
       DB_PASSWORD: pass
       DB_PORT: 5432
       STORAGES_STATICFILES_BACKEND: django.contrib.staticfiles.storage.StaticFilesStorage
       AWS_S3_ENDPOINT_URL: http://localhost:9000
-      AWS_S3_ACCESS_KEY_ID: impress
+      AWS_S3_ACCESS_KEY_ID: dinum
       AWS_S3_SECRET_ACCESS_KEY: password
+      REDIS_URL: redis://localhost:6379/1
 
     steps:
       - name: Checkout repository
@@ -168,7 +169,7 @@ jobs:
           docker pull minio/minio
           docker run -d --name minio \
             -p 9000:9000 \
-            -e "MINIO_ACCESS_KEY=impress" \
+            -e "MINIO_ACCESS_KEY=dinum" \
             -e "MINIO_SECRET_KEY=password" \
             -v /data/media:/data \
             minio/minio server --console-address :9001 /data
@@ -177,10 +178,13 @@ jobs:
         run: |
           MINIO=$(docker ps | grep minio/minio | sed -E 's/.*\s+([a-zA-Z0-9_-]+)$/\1/')
           docker exec ${MINIO} sh -c \
-            "mc alias set impress http://localhost:9000 impress password && \
-            mc alias ls && \
-            mc mb impress/impress-media-storage && \
-            mc version enable impress/impress-media-storage"
+            "mc alias set dinum http://localhost:9000 dinum password && \
+            mc alias ls"
+
+      - name: Start Redis
+        run: |
+          docker pull redis:5
+          docker run -d --name redis -p 6379:6379 redis:5
 
       - name: Install Python
         uses: actions/setup-python@v3
