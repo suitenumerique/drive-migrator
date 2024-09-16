@@ -1,0 +1,129 @@
+image:
+  repository: lasuite/migration-backend
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+commonEnvVars: &commonEnvVars
+  <<: []
+
+ingress:
+  enabled: false
+  className: null
+  host: impress.example.com
+  path: /
+  hosts: []
+  tls:
+    enabled: true
+    additional: []
+
+  customBackends: []
+
+ingressAdmin:
+  enabled: false
+  className: null
+  host: impress.example.com
+  path: /admin
+  hosts: [ ]
+  tls:
+    enabled: true
+    additional: []
+
+backend:
+  command: []
+  args: []
+  replicas: 3
+  shareProcessNamespace: false
+  sidecars: []
+  migrateJobAnnotations: {}
+  securityContext: null
+  envVars:
+    <<: *commonEnvVars
+
+  podAnnotations: {}
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8000
+    annotations: {}
+  migrate:
+    command:
+      - "python"
+      - "manage.py"
+      - "migrate"
+      - "--no-input"
+    restartPolicy: Never
+  probes:
+    liveness:
+      path: /__heartbeat__
+      initialDelaySeconds: 10
+    readiness:
+      path: /__lbheartbeat__
+      initialDelaySeconds: 10
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  persistence: {}
+  extraVolumeMounts: []
+  extraVolumes: []
+
+frontend:
+  image:
+    repository: lasuite/impress-frontend
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  command: []
+  args: []
+  replicas: 3
+  shareProcessNamespace: false
+  sidecars: []
+  securityContext: null
+  envVars:
+    <<: *commonEnvVars
+  podAnnotations: {}
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+    annotations: {}
+  probes: {}
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  persistence: {}
+  extraVolumeMounts: []
+  extraVolumes: []
+
+celery:
+  command: []
+  args: []
+  replicas: 1
+  shareProcessNamespace: false
+  sidecars: []
+  migrateJobAnnotations: {}
+  securityContext: null
+  envVars:
+    <<: *commonEnvVars
+
+  podAnnotations: {}
+  probes:
+    liveness:
+      initialDelaySeconds: 45
+      periodSeconds: 60
+      exec:
+        command:
+        - "/bin/bash"
+        - "-c"
+        - "celery -A main.celery_app inspect ping -d celery@$(hostname) | grep -q OK"
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  persistence: {}
+  extraVolumeMounts: []
+  extraVolumes: []
+

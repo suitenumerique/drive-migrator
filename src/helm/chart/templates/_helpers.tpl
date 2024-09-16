@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "impress.name" -}}
+{{- define "template.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -10,7 +10,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "impress.fullname" -}}
+{{- define "template.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -26,16 +26,16 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "impress.chart" -}}
+{{- define "template.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
-impress.labels
+template.labels
 */}}
-{{- define "impress.labels" -}}
-helm.sh/chart: {{ include "impress.chart" . }}
-{{ include "impress.selectorLabels" . }}
+{{- define "template.labels" -}}
+helm.sh/chart: {{ include "template.chart" . }}
+{{ include "template.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -45,14 +45,14 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "impress.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "impress.name" . }}
+{{- define "template.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "template.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 transform dictionnary of environment variables
-Usage : {{ include "impress.env.transformDict" .Values.envVars }}
+Usage : {{ include "template.env.transformDict" .Values.envVars }}
 
 Example:
 envVars:
@@ -69,7 +69,7 @@ envVars:
       name: secret-name
       key: "key_in_secret"
 */}}
-{{- define "impress.env.transformDict" -}}
+{{- define "template.env.transformDict" -}}
 {{- range $key, $value := . }}
 - name: {{ $key | quote }}
 {{- if $value | kindIs "map" }}
@@ -82,12 +82,12 @@ envVars:
 
 
 {{/*
-impress env vars
+template.env vars
 */}}
-{{- define "impress.common.env" -}}
+{{- define "template.common.env" -}}
 {{- $topLevelScope := index . 0 -}}
 {{- $workerScope := index . 1 -}}
-{{- include "impress.env.transformDict" $workerScope.envVars -}}
+{{- include "template.env.transformDict" $workerScope.envVars -}}
 {{- end }}
 
 {{/*
@@ -95,10 +95,10 @@ Common labels
 
 Requires array with top level scope and component name
 */}}
-{{- define "impress.common.labels" -}}
+{{- define "template.common.labels" -}}
 {{- $topLevelScope := index . 0 -}}
 {{- $component := index . 1 -}}
-{{- include "impress.labels" $topLevelScope }}
+{{- include "template.labels" $topLevelScope }}
 app.kubernetes.io/component: {{ $component }}
 {{- end }}
 
@@ -107,14 +107,14 @@ Common selector labels
 
 Requires array with top level scope and component name
 */}}
-{{- define "impress.common.selectorLabels" -}}
+{{- define "template.common.selectorLabels" -}}
 {{- $topLevelScope := index . 0 -}}
 {{- $component := index . 1 -}}
-{{- include "impress.selectorLabels" $topLevelScope }}
+{{- include "template.selectorLabels" $topLevelScope }}
 app.kubernetes.io/component: {{ $component }}
 {{- end }}
 
-{{- define "impress.probes.abstract" -}}
+{{- define "template.probes.abstract" -}}
 {{- if .exec -}}
 exec:
 {{- toYaml .exec | nindent 2 }}
@@ -135,8 +135,8 @@ Full name for the backend
 
 Requires top level scope
 */}}
-{{- define "impress.backend.fullname" -}}
-{{ include "impress.fullname" . }}-backend
+{{- define "template.backend.fullname" -}}
+{{ include "template.fullname" . }}-backend
 {{- end }}
 
 {{/*
@@ -144,41 +144,41 @@ Full name for the frontend
 
 Requires top level scope
 */}}
-{{- define "impress.frontend.fullname" -}}
-{{ include "impress.fullname" . }}-frontend
+{{- define "template.frontend.fullname" -}}
+{{ include "template.fullname" . }}-frontend
 {{- end }}
 
 {{/*
-Full name for the webrtc
+Full name for the celery
 
 Requires top level scope
 */}}
-{{- define "impress.webrtc.fullname" -}}
-{{ include "impress.fullname" . }}-webrtc
+{{- define "template.celery.fullname" -}}
+{{ include "template.fullname" . }}-celery
 {{- end }}
 
 {{/*
-Usage : {{ include "impress.secret.dockerconfigjson.name" (dict "fullname" (include "impress.fullname" .) "imageCredentials" .Values.path.to.the.image1) }}
+Usage : {{ include "template.secret.dockerconfigjson.name" (dict "fullname" (include "template.fullname" .) "imageCredentials" .Values.path.to.the.image1) }}
 */}}
-{{- define "impress.secret.dockerconfigjson.name" }}
+{{- define "template.secret.dockerconfigjson.name" }}
 {{- if (default (dict) .imageCredentials).name }}{{ .imageCredentials.name }}{{ else }}{{ .fullname | trunc 63 | trimSuffix "-" }}-dockerconfig{{ end -}}
 {{- end }}
 
 {{/*
-Usage : {{ include "impress.secret.dockerconfigjson" (dict "fullname" (include "impress.fullname" .) "imageCredentials" .Values.path.to.the.image1) }}
+Usage : {{ include "template.secret.dockerconfigjson" (dict "fullname" (include "template.fullname" .) "imageCredentials" .Values.path.to.the.image1) }}
 */}}
-{{- define "impress.secret.dockerconfigjson" }}
+{{- define "template.secret.dockerconfigjson" }}
 {{- if .imageCredentials -}}
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ template "impress.secret.dockerconfigjson.name" (dict "fullname" .fullname "imageCredentials" .imageCredentials) }}
+  name: {{ template "template.secret.dockerconfigjson.name" (dict "fullname" .fullname "imageCredentials" .imageCredentials) }}
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": before-hook-creation
 type: kubernetes.io/dockerconfigjson
 data:
-  .dockerconfigjson: {{ template "impress.secret.dockerconfigjson.data" .imageCredentials }}
+  .dockerconfigjson: {{ template "template.secret.dockerconfigjson.data" .imageCredentials }}
 {{- end -}}
 {{- end }}

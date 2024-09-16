@@ -146,7 +146,7 @@ ARG IMPRESS_STATIC_ROOT=/data/static
 
 # Gunicorn
 RUN mkdir -p /usr/local/etc/gunicorn
-COPY docker/files/usr/local/etc/gunicorn/impress.py /usr/local/etc/gunicorn/impress.py
+COPY docker/files/usr/local/etc/gunicorn/main.py /usr/local/etc/gunicorn/main.py
 
 # Un-privileged user running the application
 ARG DOCKER_USER
@@ -159,4 +159,4 @@ COPY --from=link-collector ${IMPRESS_STATIC_ROOT} ${IMPRESS_STATIC_ROOT}
 COPY --from=mail-builder /mail/backend/core/templates/mail /app/core/templates/mail
 
 # The default command runs gunicorn WSGI server in impress's main module
-CMD ["gunicorn", "-c", "/usr/local/etc/gunicorn/impress.py", "impress.wsgi:application"]
+CMD ["gunicorn", "-c", "/usr/local/etc/gunicorn/main.py", "main.wsgi:application"]

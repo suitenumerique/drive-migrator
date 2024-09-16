@@ -1,9 +1,9 @@
 load('ext://uibutton', 'cmd_button', 'bool_input', 'location')
 load('ext://namespace', 'namespace_create', 'namespace_inject')
-namespace_create('impress')
+namespace_create('migration')
 
 docker_build(
-    'localhost:5001/impress-backend:latest',
+    'localhost:5001/backend:latest',
     context='..',
     dockerfile='../Dockerfile',
     only=['./src/backend', './src/mail', './docker'],
@@ -18,27 +18,27 @@ docker_build(
 )
 
 docker_build(
-    'localhost:5001/impress-frontend:latest',
-    context='..',
-    dockerfile='../src/frontend/Dockerfile',
-    only=['./src/frontend', './docker', './dockerignore'],
-    target = 'impress',
-    live_update=[
-        sync('../src/frontend', '/home/frontend'),
-    ]
+  'localhost:5001/frontend:latest',
+  context='..',
+  dockerfile='../src/frontend/Dockerfile',
+  only=['./src/frontend', './docker', './.dockerignore'],
+  target = 'frontend-production',
+  live_update=[
+      sync('../src/frontend', '/home/frontend'),
+  ]
 )
 
-k8s_yaml(local('cd ../src/helm && helmfile -n impress -e dev template .'))
+k8s_yaml(local('cd ../src/helm && helmfile -n migration -e dev template .'))
 
 migration = '''
 set -eu
 # get k8s pod name from tilt resource name
-POD_NAME="$(tilt get kubernetesdiscovery impress-backend -ojsonpath='{.status.pods[0].name}')"
-kubectl -n impress exec "$POD_NAME" -- python manage.py makemigrations
+POD_NAME="$(tilt get kubernetesdiscovery migration-backend -ojsonpath='{.status.pods[0].name}')"
+kubectl -n migration exec "$POD_NAME" -- python manage.py makemigrations
 '''
 cmd_button('Make migration',
            argv=['sh', '-c', migration],
-           resource='impress-backend',
+           resource='migration-backend',
            icon_name='developer_board',
            text='Run makemigration',
 )
@@ -46,12 +46,12 @@ cmd_button('Make migration',
 pod_migrate = '''
 set -eu
 # get k8s pod name from tilt resource name
-POD_NAME="$(tilt get kubernetesdiscovery impress-backend -ojsonpath='{.status.pods[0].name}')"
-kubectl -n impress exec "$POD_NAME" -- python manage.py migrate --no-input
+POD_NAME="$(tilt get kubernetesdiscovery migration-backend -ojsonpath='{.status.pods[0].name}')"
+kubectl -n migration exec "$POD_NAME" -- python manage.py migrate --no-input
 '''
 cmd_button('Migrate db',
            argv=['sh', '-c', pod_migrate],
-           resource='impress-backend',
+           resource='migration-backend',
            icon_name='developer_board',
            text='Run database migration',
 )

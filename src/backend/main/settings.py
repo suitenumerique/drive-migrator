@@ -9,6 +9,7 @@ https://docs.djangoproject.com/en/3.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/3.1/ref/settings/
 """
+
 import json
 import os
 
@@ -340,7 +341,11 @@ class Base(Configuration):
     THUMBNAIL_ALIASES = {}
 
     # Celery
-    CELERY_BROKER_URL = values.Value("redis://redis:6379/0")
+    CELERY_BROKER_URL = values.Value(
+        "redis://redis:6379/0",
+        environ_name="REDIS_URL",
+        environ_prefix=None,
+    )
     CELERY_BROKER_TRANSPORT_OPTIONS = values.DictValue({})
     CELERY_RESULT_BACKEND = "django-db"
     CELERY_CACHE_BACKEND = "django-cache"
