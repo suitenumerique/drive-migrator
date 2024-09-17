@@ -99,7 +99,10 @@ frontend:
   extraVolumes: []
 
 celery:
-  command: []
+  command:
+    - "/bin/bash"
+    - "-c"
+    - "celery -A main.celery_app worker -l INFO"
   args: []
   replicas: 1
   shareProcessNamespace: false

@@ -157,6 +157,10 @@ Requires top level scope
 {{ include "template.fullname" . }}-celery
 {{- end }}
 
+{{- define "template.secret.dockerconfigjson.data" }}
+{{- printf "{\"auths\":{\"%s\":{\"username\":\"%s\",\"password\":\"%s\",\"auth\":\"%s\"}}}" .registry .username .password (printf "%s:%s" .username .password | b64enc) | b64enc }}
+{{- end }}
+
 {{/*
 Usage : {{ include "template.secret.dockerconfigjson.name" (dict "fullname" (include "template.fullname" .) "imageCredentials" .Values.path.to.the.image1) }}
 */}}
