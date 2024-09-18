@@ -33,7 +33,7 @@ class OsmoseRealBackend(OsmoseBackend):
         expiration = int(time.time()) + 120
 
         encoded = jwt.encode(
-            {"sub": "admin", "iss": "JPlatform Workplace", "exp": expiration},
+            {"sub": "admin", "iss": settings.OSMOSE_JWT_ISS, "exp": expiration},
             private_key,
             algorithm="RS256",
         )
@@ -82,6 +82,7 @@ class OsmoseRealBackend(OsmoseBackend):
 
     def get_workspaces(self, user):
         osmose_user = self.__get_user(user.email)
+        print("osmose_user", osmose_user)
         if not osmose_user:
             raise Exception(f"User {user.email} not found in Osmose")
 
