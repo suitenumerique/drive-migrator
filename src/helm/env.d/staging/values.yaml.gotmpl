@@ -28,6 +28,32 @@ commonEnvVars: &commonEnvVars
   OIDC_RP_SCOPES: "openid email"
   OIDC_REDIRECT_ALLOWED_HOSTS: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
   OIDC_AUTH_REQUEST_EXTRA_PARAMS: "{'acr_values': 'eidas1'}"
+  OSMOSE_PKI_RSA_PRIVATE_KEY:
+    secretKeyRef:
+      name: backend
+      key: OSMOSE_PKI_RSA_PRIVATE_KEY
+  OSMOSE_PKI_RSA_PRIVATE_KEY_PASSPHRASE:
+    secretKeyRef:
+      name: backend
+      key: OSMOSE_PKI_RSA_PRIVATE_KEY_PASSPHRASE
+  OSMOSE_JWT_SUB:
+    secretKeyRef:
+      name: backend
+      key: OSMOSE_JWT_SUB
+  OSMOSE_JWT_ISS:
+    secretKeyRef:
+      name: backend
+      key: OSMOSE_JWT_ISS
+  OSMOSE_API_ENDPOINT:
+    secretKeyRef:
+      name: backend
+      key: OSMOSE_API_ENDPOINT
+  OSMOSE_BASE_ENDPOINT:
+    secretKeyRef:
+      name: backend
+      key: OSMOSE_BASE_ENDPOINT
+  OSMOSE_BACKEND: core.osmose.osmose_real_backend.OsmoseRealBackend
+  OSMOSE_BACKEND_DEBUG: 1
   LOGIN_REDIRECT_URL: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
   LOGIN_REDIRECT_URL_FAILURE: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
   LOGOUT_REDIRECT_URL: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
