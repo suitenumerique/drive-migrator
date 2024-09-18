@@ -166,6 +166,9 @@ ingress:
 ingressAdmin:
   enabled: true
   host: osmose-migration-tool-staging.beta.numerique.gouv.fr
+  annotations:
+    nginx.ingress.kubernetes.io/auth-signin: https://oauth2-proxy-preprod.beta.numerique.gouv.fr/oauth2/start
+    nginx.ingress.kubernetes.io/auth-url: https://oauth2-proxy-preprod.beta.numerique.gouv.fr/oauth2/auth
 
 celery:
   replicas: 1
