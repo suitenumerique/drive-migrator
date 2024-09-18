@@ -1,5 +1,5 @@
 commonEnvVars: &commonEnvVars
-  DJANGO_CSRF_TRUSTED_ORIGINS: https://migration.127.0.0.1.nip.io,http://impress.127.0.0.1.nip.io
+  DJANGO_CSRF_TRUSTED_ORIGINS: https://osmose-migration-tool.127.0.0.1.nip.io,http://impress.127.0.0.1.nip.io
   DJANGO_CONFIGURATION: Production
   DJANGO_ALLOWED_HOSTS: "*"
   DJANGO_SECRET_KEY: {{ .Values.djangoSecretKey }}
@@ -17,11 +17,11 @@ commonEnvVars: &commonEnvVars
   OIDC_RP_CLIENT_SECRET: {{ .Values.oidc.clientSecret }}
   OIDC_RP_SIGN_ALGO: RS256
   OIDC_RP_SCOPES: "openid email"
-  OIDC_REDIRECT_ALLOWED_HOSTS: https://migration.127.0.0.1.nip.io
+  OIDC_REDIRECT_ALLOWED_HOSTS: https://osmose-migration-tool.127.0.0.1.nip.io
   OIDC_AUTH_REQUEST_EXTRA_PARAMS: "{'acr_values': 'eidas1'}"
-  LOGIN_REDIRECT_URL: https://migration.127.0.0.1.nip.io
-  LOGIN_REDIRECT_URL_FAILURE: https://migration.127.0.0.1.nip.io
-  LOGOUT_REDIRECT_URL: https://migration.127.0.0.1.nip.io
+  LOGIN_REDIRECT_URL: https://osmose-migration-tool.127.0.0.1.nip.io
+  LOGIN_REDIRECT_URL_FAILURE: https://osmose-migration-tool.127.0.0.1.nip.io
+  LOGOUT_REDIRECT_URL: https://osmose-migration-tool.127.0.0.1.nip.io
   DB_HOST: postgres-postgresql
   DB_NAME: migration
   DB_USER: dinum
@@ -73,8 +73,8 @@ backend:
 frontend:
   envVars:
     PORT: 8080
-    NEXT_PUBLIC_API_ORIGIN: https://migration.127.0.0.1.nip.io
-    NEXT_PUBLIC_SIGNALING_URL: wss://migration.127.0.0.1.nip.io/ws
+    NEXT_PUBLIC_API_ORIGIN: https://osmose-migration-tool.127.0.0.1.nip.io
+    NEXT_PUBLIC_SIGNALING_URL: wss://osmose-migration-tool.127.0.0.1.nip.io/ws
 
   replicas: 1
 
@@ -85,11 +85,11 @@ frontend:
 
 ingress:
   enabled: true
-  host: migration.127.0.0.1.nip.io
+  host: osmose-migration-tool.127.0.0.1.nip.io
 
 ingressAdmin:
   enabled: true
-  host: migration.127.0.0.1.nip.io
+  host: osmose-migration-tool.127.0.0.1.nip.io
 
 celery:
   replicas: 1
