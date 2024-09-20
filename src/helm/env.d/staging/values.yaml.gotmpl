@@ -7,7 +7,14 @@ commonEnvVars: &commonEnvVars
       name: backend
       key: DJANGO_SECRET_KEY
   DJANGO_SETTINGS_MODULE: main.settings
-  DJANGO_SUPERUSER_PASSWORD: admin
+  DJANGO_SUPERUSER_EMAIL:
+    secretKeyRef:
+      name: backend
+      key: DJANGO_SUPERUSER_EMAIL
+  DJANGO_SUPERUSER_PASSWORD:
+    secretKeyRef:
+      name: backend
+      key: DJANGO_SUPERUSER_PASSWORD
   DJANGO_EMAIL_HOST: "mailcatcher"
   DJANGO_EMAIL_PORT: 1025
   DJANGO_EMAIL_USE_SSL: False
@@ -141,7 +148,7 @@ backend:
       - "/bin/sh"
       - "-c"
       - |
-        python manage.py createsuperuser --email admin@example.com --password admin
+        python manage.py createsuperuser --email $DJANGO_SUPERUSER_EMAIL --password $DJANGO_SUPERUSER_PASSWORD
     restartPolicy: Never
 
 frontend:
