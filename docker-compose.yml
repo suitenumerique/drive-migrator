@@ -169,6 +169,19 @@ services:
     depends_on:
       - celery-dev
 
+  frontend-prod:
+    user: "${DOCKER_USER:-1000}"
+    build:
+      context: .
+      dockerfile: ./src/frontend/Dockerfile
+      target: frontend-production
+      args:
+        NEXT_PUBLIC_API_ORIGIN: http://localhost:8071
+    ports:
+      - "3000:8080"
+    depends_on:
+      - celery-dev
+
   kc_postgresql:
     image: postgres:14.3
     platform: linux/amd64

@@ -29,6 +29,9 @@ CMD [ "yarn", "dev"]
 # to avoid rebuilding the app at every changes.
 FROM main as main-builder
 
+ARG NEXT_PUBLIC_API_ORIGIN
+ENV NEXT_PUBLIC_API_ORIGIN=${NEXT_PUBLIC_API_ORIGIN}
+
 WORKDIR /home/frontend/apps/main
 
 RUN yarn build

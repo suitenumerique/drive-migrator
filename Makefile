@@ -270,6 +270,10 @@ run-frontend-dev: ## Install and run the frontend dev
 	@$(COMPOSE) up --force-recreate -d frontend-dev
 .PHONY: run-frontend-dev
 
+run-frontend-prod: ## Install and run the frontend dev
+	@$(COMPOSE) up --force-recreate -d frontend-prod
+.PHONY: run-frontend-prod
+
 # -- K8S
 build-k8s-cluster: ## build the kubernetes cluster using kind
 	./bin/start-kind.sh
