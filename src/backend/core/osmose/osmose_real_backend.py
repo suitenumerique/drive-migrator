@@ -74,9 +74,10 @@ class OsmoseRealBackend(OsmoseBackend):
     def debug_into_file(self, filename, data):
         if not settings.OSMOSE_BACKEND_DEBUG:
             return
-        path = "debug"
+        path = "/tmp"  # noqa: S108
         if not os.path.exists(path):
             os.mkdir(path)
+        print(f"{path}/{filename}.json")
         with open(f"{path}/{filename}.json", "w") as f:
             f.write(json.dumps(data, indent=4))
 
