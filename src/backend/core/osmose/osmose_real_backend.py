@@ -77,7 +77,6 @@ class OsmoseRealBackend(OsmoseBackend):
         path = "/tmp"  # noqa: S108
         if not os.path.exists(path):
             os.mkdir(path)
-        print(f"{path}/{filename}.json")
         with open(f"{path}/{filename}.json", "w") as f:
             f.write(json.dumps(data, indent=4))
 
