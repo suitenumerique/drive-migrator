@@ -127,14 +127,6 @@ backend:
   replicas: 1
   envVars:
     <<: *commonEnvVars
-  migrate:
-    command:
-      - "/bin/sh"
-      - "-c"
-      - |
-        python manage.py migrate --no-input &&
-        python manage.py create_demo --force
-    restartPolicy: Never
 
   command:
     - "gunicorn"
