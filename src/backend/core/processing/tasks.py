@@ -34,7 +34,7 @@ def export(self, data):  # pylint: disable=unused-argument
 
     mails_manager = MailsManager()
 
-    if workspace.status_resana == Workspace.Status.PENDING:
+    if workspace.status_archive == Workspace.Status.PENDING:
         logger.info("Calling zip_workspace_folder ...")
         helper = ArchiveManager()
         helper.zip_workspace_folder(workspace)
@@ -42,7 +42,7 @@ def export(self, data):  # pylint: disable=unused-argument
         logger.info("Calling upload_archive ...")
         archive_url = helper.upload_archive(workspace)
 
-        logger.info("Sending send_archive_download_mail ...")
+        logger.info(f"Sending send_archive_download_mail ${archive_url} ...")
         mails_manager.send_archive_download_mail(user, workspace, archive_url)
         workspace.status_archive = Workspace.Status.SUCCESS
         workspace.save()
