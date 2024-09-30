@@ -2,6 +2,7 @@ import os.path
 import shutil
 import urllib.parse
 
+from celery.utils.log import get_task_logger
 from django.conf import settings
 
 import boto3
@@ -9,6 +10,7 @@ import boto3
 from core.models import Workspace
 from core.processing.folder_creator import FolderCreator
 
+logger = get_task_logger(__name__)
 
 class ArchiveManager:
     archive_format = "zip"
@@ -39,11 +41,18 @@ class ArchiveManager:
             ExpiresIn=3600 * 24,
         )
 
+        logger.info("ArchiveManager.upload_archive")
+
+        if not settings.AWS_S3_DOWNLOAD_URL:
+            logger.info("ArchiveManager.upload_archive returning url without replacing netloc")
+            return url
+
         # This part could look weird but in local when using docker url netloc is "http://minio:9000"
         # which is not reachable outside docker, so we replace it with the "localhost" url in order to be
         # able to download the file locally.
         url_parsed = urllib.parse.urlparse(url)
         download_url_parsed = urllib.parse.urlparse(settings.AWS_S3_DOWNLOAD_URL)
         replaced = url_parsed._replace(netloc=download_url_parsed.netloc)
+        logger.info("ArchiveManager.upload_archive returning url with replaced netloc")
 
         return replaced.geturl()
