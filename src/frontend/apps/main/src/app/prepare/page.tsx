@@ -1,6 +1,6 @@
 'use client';
 import { Alert, Button, Loader } from '@openfun/cunningham-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -13,18 +13,15 @@ export interface IForm {
   workspaces: Record<string, string[]>;
 }
 
-export default function Prepare({
-  searchParams,
-}: {
-  searchParams: { workspaces_ids: string };
-}) {
+export default function Prepare() {
   const router = useRouter();
   const { workspaces, fetch, hasError } = useWorkspaces();
   const { fetchApi } = useApi();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     try {
-      const ids = searchParams.workspaces_ids.split(',');
+      const ids = searchParams.get('workspaces_ids')!.split(',');
       // "".split(",") === [""]
       if (ids.length === 0 || (ids.length === 1 && !ids[0])) {
         throw new Error('No workspaces ids provided');
