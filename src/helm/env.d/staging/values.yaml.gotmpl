@@ -15,9 +15,18 @@ commonEnvVars: &commonEnvVars
     secretKeyRef:
       name: backend
       key: DJANGO_SUPERUSER_PASSWORD
-  DJANGO_EMAIL_HOST: "mailcatcher"
-  DJANGO_EMAIL_PORT: 1025
-  DJANGO_EMAIL_USE_SSL: False
+  DJANGO_EMAIL_HOST: "smtp.tem.scw.cloud"
+  DJANGO_EMAIL_PORT: 587
+  DJANGO_EMAIL_USE_TLS: True
+  DJANGO_EMAIL_FROM: "noreply@osmo-migration.beta.numerique.gouv.fr"
+  DJANGO_EMAIL_HOST_USER:
+    secretKeyRef:
+      name: backend
+      key: DJANGO_EMAIL_HOST_USER
+  DJANGO_EMAIL_HOST_PASSWORD:
+    secretKeyRef:
+      name: backend
+      key: DJANGO_EMAIL_HOST_PASSWORD
   OIDC_OP_JWKS_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/jwks
   OIDC_OP_AUTHORIZATION_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/authorize
   OIDC_OP_TOKEN_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/token
@@ -121,7 +130,7 @@ commonEnvVars: &commonEnvVars
 image:
   repository: lasuite/osmose-migration-back
   pullPolicy: Always
-  tag: "v0.0.0.5-ci"
+  tag: "v0.0.0.6-ci"
 
 backend:
   replicas: 1
@@ -153,7 +162,7 @@ frontend:
   image:
     repository: lasuite/osmose-migration-front
     pullPolicy: Always
-    tag: "v0.0.0.5-ci"
+    tag: "v0.0.0.6-ci"
 
 ingress:
   enabled: true
@@ -176,5 +185,5 @@ celery:
   image:
     repository: lasuite/osmose-migration-back
     pullPolicy: Always
-    tag: "v0.0.0.5-ci"
+    tag: "v0.0.0.6-ci"
 

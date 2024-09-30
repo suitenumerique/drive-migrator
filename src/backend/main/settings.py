@@ -322,6 +322,7 @@ class Base(Configuration):
     EMAIL_HOST_PASSWORD = values.Value(None)
     EMAIL_PORT = values.PositiveIntegerValue(None)
     EMAIL_USE_TLS = values.BooleanValue(False)
+    EMAIL_USE_SSL = values.BooleanValue(False)
     EMAIL_FROM = values.Value("from@example.com")
 
     AUTH_USER_MODEL = "core.User"
@@ -602,6 +603,14 @@ class Production(Base):
     # Modern browsers require to have the `secure` attribute on cookies with `Samesite=none`
     CSRF_COOKIE_SECURE = True
     SESSION_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 60
+    SECURE_HSTS_PRELOAD = True
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_REDIRECT_EXEMPT = [
+        "^__lbheartbeat__",
+        "^__heartbeat__",
+    ]
 
     # Privacy
     SECURE_REFERRER_POLICY = "same-origin"
