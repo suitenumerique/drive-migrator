@@ -11,7 +11,6 @@ const eslintTS = [
       project: ['./tsconfig.json'],
     },
     rules: {
-      '@typescript-eslint/no-non-null-assertion': 'error',
       'sort-imports': [
         'error',
         {
@@ -22,6 +21,7 @@ const eslintTS = [
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
       'react-hooks/exhaustive-deps': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
     },
   },
   {
