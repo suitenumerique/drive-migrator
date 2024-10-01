@@ -173,6 +173,7 @@ jobs:
             -e "MINIO_SECRET_KEY=password" \
             -v /data/media:/data \
             minio/minio server --console-address :9001 /data
+          sleep 10
 
       - name: Configure MinIO
         run: |
