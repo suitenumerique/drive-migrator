@@ -2,15 +2,16 @@ import os.path
 import shutil
 import urllib.parse
 
-from celery.utils.log import get_task_logger
 from django.conf import settings
 
 import boto3
+from celery.utils.log import get_task_logger
 
 from core.models import Workspace
 from core.processing.folder_creator import FolderCreator
 
 logger = get_task_logger(__name__)
+
 
 class ArchiveManager:
     archive_format = "zip"
@@ -44,7 +45,9 @@ class ArchiveManager:
         logger.info("ArchiveManager.upload_archive")
 
         if not settings.AWS_S3_DOWNLOAD_URL:
-            logger.info("ArchiveManager.upload_archive returning url without replacing netloc")
+            logger.info(
+                "ArchiveManager.upload_archive returning url without replacing netloc"
+            )
             return url
 
         # This part could look weird but in local when using docker url netloc is "http://minio:9000"

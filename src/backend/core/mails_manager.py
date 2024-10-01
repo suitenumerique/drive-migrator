@@ -1,14 +1,13 @@
+from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core import mail
 from django.template.loader import render_to_string
 from django.utils.translation import gettext_lazy as _
-from django.conf import settings
 
 from core.models import Workspace
 
 
 class MailsManager:
-
     def get_recipients(self, user):
         if settings.APP_EMAIL_FORCE_TO:
             return [settings.APP_EMAIL_FORCE_TO]
