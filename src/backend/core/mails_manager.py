@@ -1,13 +1,19 @@
-from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core import mail
 from django.template.loader import render_to_string
 from django.utils.translation import gettext_lazy as _
+from django.conf import settings
 
 from core.models import Workspace
 
 
 class MailsManager:
+
+    def get_recipients(self, user):
+        if settings.APP_EMAIL_FORCE_TO:
+            return [settings.APP_EMAIL_FORCE_TO]
+        return [user.email]
+
     def send_archive_download_mail(self, user, workspace: Workspace, archive_url):
         title = _(
             "Votre archive de l'espace %(title)s est prête !"
@@ -26,7 +32,7 @@ class MailsManager:
             title,
             msg_plain,
             settings.EMAIL_FROM,
-            [user.email],
+            self.get_recipients(user),
             html_message=msg_html,
             fail_silently=False,
         )
@@ -48,7 +54,7 @@ class MailsManager:
             title,
             msg_plain,
             settings.EMAIL_FROM,
-            [user.email],
+            self.get_recipients(user),
             html_message=msg_html,
             fail_silently=False,
         )

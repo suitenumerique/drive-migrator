@@ -117,6 +117,11 @@ class Base(Configuration):
         },
     }
 
+    # App
+    APP_EMAIL_FORCE_TO = values.Value(
+        environ_name="APP_EMAIL_FORCE_TO", environ_prefix=None
+    )
+
     # Media
     AWS_S3_ENDPOINT_URL = values.Value(
         environ_name="AWS_S3_ENDPOINT_URL", environ_prefix=None
