@@ -1,14 +1,18 @@
 import json
 import os
+import re
 import time
 import urllib.request
+from urllib.error import HTTPError, URLError
 
 from django.conf import settings
 
 import jwt
 import requests
+from celery.utils.log import get_task_logger
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
+from retry import retry
 
 from core.models import Workspace
 from core.osmose.osmose_backend import (
@@ -18,10 +22,17 @@ from core.osmose.osmose_backend import (
     OsmoseWorkspace,
 )
 
+logger = get_task_logger(__name__)
+
+
+class OsmoseFailedDownloadException(Exception):
+    pass
+
 
 class OsmoseRealBackend(OsmoseBackend):
     def __init__(self):
         self.jwt = None
+        self.cookies = {}
 
     def create_jwt(self, user):  # pylint: disable=unused-argument
         private_key = serialization.load_pem_private_key(
@@ -43,12 +54,89 @@ class OsmoseRealBackend(OsmoseBackend):
         if not self.jwt:
             self.jwt = self.create_jwt(settings.OSMOSE_JWT_SUB)
 
-    def download_file(self, download_url, destination):
-        self.init_jwt()
+    def __build_opener(self):
         opener = urllib.request.build_opener()
-        opener.addheaders = [("Authorization", "Bearer " + self.jwt)]
+        cookies = "; ".join([f"{k}={v}" for k, v in self.cookies.items()])
+        opener.addheaders = [
+            ("Authorization", "Bearer " + self.jwt),
+            ("Cookie", cookies),
+        ]
+        return opener
+
+    @retry(tries=5, delay=2, backoff=2)
+    def download_file(self, download_url, destination):
+        logger.info(f"Downloading {download_url} to {destination} ...")
+        self.init_jwt()
+        opener = self.__build_opener()
         urllib.request.install_opener(opener)
-        urllib.request.urlretrieve(download_url, destination)  # noqa: S310
+
+        try:
+            local_filename, headers = urllib.request.urlretrieve(  # noqa: S310
+                download_url, destination
+            )
+            self.__handle_validation(headers, destination)
+
+        except HTTPError as e:
+            logger.error(
+                f"HTTP Error: {e.code} while downloading {download_url}: {e.reason}"
+            )
+            raise e
+        except URLError as e:
+            logger.error(
+                f"URL Error: Failed to reach {download_url}. Reason: {e.reason}"
+            )
+            raise e
+        except OSError as e:
+            logger.error(f"OS Error: {e} while writing to {destination}")
+            raise e
+        except Exception as e:
+            logger.error(f"Unexpected error occurred: {e}")
+            raise e
+
+        logger.info(f"Success {download_url} to {destination} ...")
+
+    def __handle_validation(self, headers, destination):
+        if headers.get("Content-Type") != "text/html":
+            return
+
+        with open(destination) as f:
+            content = f.read(10000)
+            if "__blnChallengeStore" in content:
+                logger.info("Challenge detected, solving...")
+
+                # Retrieve the cookie in the page.
+                raw_data = re.findall(r"(?<=__blnChallengeStore=)\{[^\;]+", content)
+                assert raw_data and len(raw_data) == 1  # noqa: S101
+                raw_data = "".join(raw_data)
+                raw_data = json.loads(raw_data)
+
+                challenge_cookie = raw_data["cookie"]
+                # Add it to the cookies for the next retry request.
+                self.cookies[challenge_cookie["name"]] = challenge_cookie["value"]
+
+                # Send the check request.
+                check_params = raw_data["checkChallengeParams"]
+                data = "&".join(["%s=%s" % (k, v) for k, v in check_params.items()])
+
+                url = (
+                    settings.OSMOSE_BASE_ENDPOINT
+                    + "/.well-known/baleen/challengejs/check?%s=%s"
+                    % (challenge_cookie["name"], challenge_cookie["value"])
+                )
+                logger.info(f"Sending check request to {url} with data {data}")
+                response = requests.post(  # noqa: S113
+                    url,
+                    data,
+                    headers={
+                        "Authorization": "Bearer " + self.jwt,
+                    },
+                )
+                response.raise_for_status()
+
+                logger.info("Success challenge, replaying download...")
+                raise OsmoseFailedDownloadException(
+                    "Challenge solved, retrying download..."
+                )
 
     def fetch(self, url, params=None):
         self.init_jwt()

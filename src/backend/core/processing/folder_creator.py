@@ -63,5 +63,5 @@ class FolderCreator:
             destination = os.path.join(
                 path, file.name + os.path.splitext(file.raw_data["originalFilename"])[1]
             )
-            logger.info(f"Downloading {destination} ...")
+
             backend.download_file(download_url, destination)
