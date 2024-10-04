@@ -41,7 +41,7 @@ class OsmoseRealBackend(OsmoseBackend):
             backend=default_backend(),
         )
 
-        expiration = int(time.time()) + 120
+        expiration = int(time.time()) + 60 * 60 * 24
 
         encoded = jwt.encode(
             {"sub": "admin", "iss": settings.OSMOSE_JWT_ISS, "exp": expiration},
@@ -74,12 +74,21 @@ class OsmoseRealBackend(OsmoseBackend):
             local_filename, headers = urllib.request.urlretrieve(  # noqa: S310
                 download_url, destination
             )
-            self.__handle_validation(headers, destination)
+            # self.__handle_validation(headers, destination)
 
         except HTTPError as e:
             logger.error(
-                f"HTTP Error: {e.code} while downloading {download_url}: {e.reason}"
+                f"HTTP Error: {e.code} while downloading {download_url}: {e.reason}. Response body: {e.read().decode()}"
             )
+
+            response = requests.get(  # noqa: S113
+                download_url,
+                headers={
+                    "Authorization": "Bearer " + self.jwt,
+                },
+            )
+            logger.error(f"HTTP Error: Additional request response: {response.text}")
+
             raise e
         except URLError as e:
             logger.error(

@@ -134,7 +134,7 @@ commonEnvVars: &commonEnvVars
 image:
   repository: lasuite/osmose-migration-back
   pullPolicy: Always
-  tag: "v0.0.0.8-ci"
+  tag: "v0.0.0.9-ci"
 
 backend:
   replicas: 1
@@ -166,7 +166,7 @@ frontend:
   image:
     repository: lasuite/osmose-migration-front
     pullPolicy: Always
-    tag: "v0.0.0.8-ci"
+    tag: "v0.0.0.9-ci"
 
 ingress:
   enabled: true
@@ -189,5 +189,5 @@ celery:
   image:
     repository: lasuite/osmose-migration-back
     pullPolicy: Always
-    tag: "v0.0.0.8-ci"
+    tag: "v0.0.0.9-ci"
 
