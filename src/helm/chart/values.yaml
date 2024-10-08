@@ -55,6 +55,12 @@ backend:
       - "migrate"
       - "--no-input"
     restartPolicy: Never
+  refresh_resana_job:
+    command:
+      - "python"
+      - "manage.py"
+      - "refresh_resana_jobs"
+    restartPolicy: Never
   probes:
     liveness:
       path: /__heartbeat__
