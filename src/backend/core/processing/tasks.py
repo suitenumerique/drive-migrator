@@ -8,7 +8,8 @@ from core.models import ExtraTaskInfo, User, Workspace
 from core.osmose.osmose_backend import OsmoseManager
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
-from core.processing.s3_resana_manager import S3ResanaManager
+from core.resana.resana_backend import ResanaBackend
+from core.resana.s3_resana_manager import S3ResanaManager
 
 from main.celery_app import app
 
@@ -48,12 +49,10 @@ def export(self, data):  # pylint: disable=unused-argument
         workspace.save()
 
     if workspace.status_resana == Workspace.Status.PENDING:
-        logger.info("Calling upload_folder ...")
-        s3_manager = S3ResanaManager()
-        s3_manager.upload_folder(workspace)
-        logger.info("Sending send_resana_ready_mail ...")
-        mails_manager.send_resana_ready_mail(user, workspace)
-        workspace.status_resana = Workspace.Status.SUCCESS
+        resana_backend = ResanaBackend()
+        logger.info("Calling resana create_workspace ...")
+        resana_backend.create_workspace(workspace)
+        workspace.status_resana = Workspace.Status.PENDING
         workspace.save()
 
     logger.info("Task done")

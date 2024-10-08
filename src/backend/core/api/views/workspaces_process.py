@@ -30,6 +30,7 @@ class WorkspacesProcessAPIView(APIView):
         extra_task.save()
 
         workspace.status = Workspace.Status.PENDING
+        workspace.migration_user = user
         if "resana" in types:
             workspace.status_resana = Workspace.Status.PENDING
         if "archive" in types:

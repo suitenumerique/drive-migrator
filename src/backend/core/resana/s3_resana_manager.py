@@ -40,3 +40,5 @@ class S3ResanaManager:
                 absolute_file_path = os.path.join(root, name)
                 logger.info(f"Uploading {relative_file_path} ....")
                 bucket.upload_file(absolute_file_path, relative_file_path)
+
+        return bucket_name

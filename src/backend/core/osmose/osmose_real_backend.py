@@ -74,6 +74,8 @@ class OsmoseRealBackend(OsmoseBackend):
             local_filename, headers = urllib.request.urlretrieve(  # noqa: S310
                 download_url, destination
             )
+            # This is no longer needed as Baleen has been disabled
+            # plus, it was slowing down the download process.
             # self.__handle_validation(headers, destination)
 
         except HTTPError as e:

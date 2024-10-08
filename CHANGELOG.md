@@ -40,6 +40,7 @@ and this project adheres to
 - setup admin interface
 - add optional osmose backend debug files
 - add helm files for local and staging envs
+- implement basic Resana API
 
 ### Changed
 

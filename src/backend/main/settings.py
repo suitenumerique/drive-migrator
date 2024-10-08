@@ -153,6 +153,18 @@ class Base(Configuration):
     RESANA_S3_SECRET_ACCESS_KEY = values.Value(
         environ_name="RESANA_S3_SECRET_ACCESS_KEY", environ_prefix=None
     )
+    RESANA_AUTH_ENDPOINT = values.Value(
+        environ_name="RESANA_AUTH_ENDPOINT", environ_prefix=None
+    )
+    RESANA_AUTH_USER = values.Value(
+        environ_name="RESANA_AUTH_USER", environ_prefix=None
+    )
+    RESANA_AUTH_PASSWORD = values.Value(
+        environ_name="RESANA_AUTH_PASSWORD", environ_prefix=None
+    )
+    RESANA_API_ENDPOINT = values.Value(
+        environ_name="RESANA_API_ENDPOINT", environ_prefix=None
+    )
 
     S3_VERSIONS_PAGE_SIZE = 50
 

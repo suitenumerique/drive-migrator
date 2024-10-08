@@ -8,13 +8,13 @@ from django_celery_results.models import TaskResult
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, Workspace
 from core.osmose.osmose_backend import OsmoseFolder
-from core.osmose.osmose_real_backend import OsmoseRealBackend
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
-from core.processing.s3_resana_manager import S3ResanaManager
+from core.resana.s3_resana_manager import S3ResanaManager
 
 from ...osmose.serializers import WorkspaceSerializer
 from ...processing.tasks import export
+from ...resana.resana_backend import ResanaBackend
 from ..serializers import UserSerializer
 
 
@@ -46,13 +46,10 @@ def dev_view(request):
     if not settings.DEBUG:
         raise Http404()
 
-    backend = OsmoseRealBackend()
-    user = request.user
+    workspace = Workspace.objects.get(id="c32241f0-6c11-4ab0-a1ff-a922c35a7937")
 
-    workspace = Workspace.objects.get(osmose_id="c_2000365")
-    create_export(user, workspace, ["resana", "archive"])
-
-    return HttpResponse("dev")
+    resana_backend = ResanaBackend()
+    resana_backend.create_workspace(workspace)
 
     return HttpResponse("dev")
 

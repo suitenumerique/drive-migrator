@@ -15,4 +15,6 @@ class Command(BaseCommand):
             workspace.status = Workspace.Status.NONE
             workspace.status_resana = Workspace.Status.NONE
             workspace.status_archive = Workspace.Status.NONE
+            workspace.resana_id = None
+            workspace.resana_job_id = None
             workspace.save()

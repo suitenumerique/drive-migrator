@@ -65,6 +65,16 @@ class Workspace(BaseModel):
 
     osmose_id = models.CharField(help_text=_("id of the Osmose workspace"), unique=True)
 
+    resana_id = models.CharField(
+        help_text=_("id of the Resana workspace"), null=True, blank=True
+    )
+
+    resana_job_id = models.CharField(
+        help_text=_("id of the Resana job"), null=True, blank=True
+    )
+
+    migration_user = models.ForeignKey("User", models.SET_NULL, blank=True, null=True)
+
     title = models.CharField()
 
     status = models.CharField(
