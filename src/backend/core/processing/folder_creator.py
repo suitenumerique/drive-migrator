@@ -8,12 +8,27 @@ from celery.utils.log import get_task_logger
 
 from core.models import Workspace
 from core.osmose.osmose_backend import OsmoseFolder
+from core.utils import get_dir_size, sizeof_fmt
 
 logger = get_task_logger(__name__)
 
 
 class FolderCreator:
+    def __init__(self):
+        self.files_count = None
+        self.files_success = 0
+        self.files_current = 0
+        self.workspace = None
+
+    def __get_files_count(self, folder: OsmoseFolder):
+        count = len(folder.files)
+        for child in folder.children:
+            count += self.__get_files_count(child)
+        return count
+
     def create_folder(self, workspace: Workspace, folder: OsmoseFolder):
+        self.workspace = workspace
+        self.files_count = self.__get_files_count(folder)
         self.__delete_folder(workspace)
 
         path = self.get_workspace_path(workspace)
@@ -64,4 +79,9 @@ class FolderCreator:
                 path, file.name + os.path.splitext(file.raw_data["originalFilename"])[1]
             )
 
+            self.files_current += 1
+            logger.info(f"Downloading file {self.files_current}/{self.files_count} ...")
             backend.download_file(download_url, destination)
+            size = sizeof_fmt(get_dir_size(self.get_workspace_path(self.workspace)))
+            logger.info(f"Directory size: {size}")
+            self.files_success += 1
