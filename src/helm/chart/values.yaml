@@ -120,15 +120,10 @@ celery:
 
   podAnnotations: {}
   probes:
-    liveness:
-      initialDelaySeconds: 45
-      periodSeconds: 60
-      exec:
-        command:
-        - "/bin/bash"
-        - "-c"
-        - "celery -A main.celery_app inspect ping -d celery@$(hostname) | grep -q OK"
-  resources: {}
+    liveness: {}
+  resources:
+    requests:
+      cpu: 1
   nodeSelector: {}
   tolerations: []
   affinity: {}
