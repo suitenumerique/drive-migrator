@@ -1,3 +1,5 @@
+import os
+from django.conf import settings
 from celery import states
 from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
@@ -10,10 +12,40 @@ from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.resana.resana_backend import ResanaBackend
 from core.resana.s3_resana_manager import S3ResanaManager
+from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app
 
 logger = get_task_logger(__name__)
+
+
+def list_work_dir():
+    logger.info("Listing work dir")
+    with os.scandir(settings.APP_WORK_DIR) as it:
+        for entry in it:
+            size = 0
+            if entry.is_dir():
+                size = get_dir_size(entry.path)
+            elif entry.is_file():
+                size = entry.stat().st_size
+            size_fmt = sizeof_fmt(size)
+            logger.info(f"{entry.name} {size_fmt} ({size})")
+
+def list_workspace_dir(workspace: Workspace):
+    logger.info(f"Listing workspace dir")
+    creator = FolderCreator()
+    path = creator.get_workspace_path(workspace)
+    files = []
+    for (root, _, filenames) in os.walk(path):
+        for filename in filenames:
+            files.append(os.path.join(root, filename))
+
+    logger.info(f"Listing {len(files)} files")
+    for file in files:
+        size = os.stat(file).st_size
+        size_formatted = sizeof_fmt(size)
+        logger.info(f"File: {file} {size_formatted} ({size}) ...")
+
 
 
 @app.task(bind=True)
@@ -25,6 +57,7 @@ def export(self, data):  # pylint: disable=unused-argument
     user = User.objects.get(id=data["user"]["id"])
 
     backend = OsmoseManager().get_backend()
+    list_work_dir()
 
     logger.info("Calling get_workspace_documents_structure ...")
     folder = backend.get_workspace_documents_structure(workspace)
@@ -32,6 +65,8 @@ def export(self, data):  # pylint: disable=unused-argument
     logger.info("Calling create_folder ...")
     creator = FolderCreator()
     creator.create_folder(workspace, folder)
+
+    list_workspace_dir(workspace)
 
     mails_manager = MailsManager()
 

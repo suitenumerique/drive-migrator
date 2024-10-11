@@ -40,7 +40,7 @@ class FolderCreator:
             self.__create_folder(path, workspace, child)
 
     def get_workspace_path(self, workspace):
-        return f"/tmp/workspace_{workspace.id}"  # noqa: S108
+        return f"{settings.APP_WORK_DIR}/workspace_{workspace.id}"
 
     def __delete_folder(self, workspace):
         path = self.get_workspace_path(workspace)
@@ -82,6 +82,7 @@ class FolderCreator:
             self.files_current += 1
             logger.info(f"Downloading file {self.files_current}/{self.files_count} ...")
             backend.download_file(download_url, destination)
-            size = sizeof_fmt(get_dir_size(self.get_workspace_path(self.workspace)))
-            logger.info(f"Directory size: {size}")
+            size = get_dir_size(self.get_workspace_path(self.workspace))
+            size_formatted = sizeof_fmt(size)
+            logger.info(f"Directory size: {size_formatted} ({size})")
             self.files_success += 1

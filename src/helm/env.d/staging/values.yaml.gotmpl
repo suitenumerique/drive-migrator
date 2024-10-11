@@ -126,6 +126,7 @@ commonEnvVars: &commonEnvVars
     secretKeyRef:
       name: media-storage.bucket.libre.sh
       key: bucket
+  APP_WORK_DIR: /data
   APP_EMAIL_FORCE_TO:
     secretKeyRef:
       name: backend
@@ -134,7 +135,7 @@ commonEnvVars: &commonEnvVars
 image:
   repository: lasuite/osmose-migration-back
   pullPolicy: Always
-  tag: "v0.0.0.13-ci"
+  tag: "v0.0.0.16-ci"
 
 backend:
   replicas: 1
@@ -166,7 +167,7 @@ frontend:
   image:
     repository: lasuite/osmose-migration-front
     pullPolicy: Always
-    tag: "v0.0.0.13-ci"
+    tag: "v0.0.0.16-ci"
 
 ingress:
   enabled: true
@@ -189,5 +190,5 @@ celery:
   image:
     repository: lasuite/osmose-migration-back
     pullPolicy: Always
-    tag: "v0.0.0.13-ci"
+    tag: "v0.0.0.16-ci"
 

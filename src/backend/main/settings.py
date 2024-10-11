@@ -121,6 +121,9 @@ class Base(Configuration):
     APP_EMAIL_FORCE_TO = values.Value(
         environ_name="APP_EMAIL_FORCE_TO", environ_prefix=None
     )
+    APP_WORK_DIR = values.Value(
+        environ_name="APP_WORK_DIR", environ_prefix=None
+    )
 
     # Media
     AWS_S3_ENDPOINT_URL = values.Value(

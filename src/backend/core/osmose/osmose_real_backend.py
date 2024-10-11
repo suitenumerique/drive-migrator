@@ -21,6 +21,7 @@ from core.osmose.osmose_backend import (
     OsmoseFolder,
     OsmoseWorkspace,
 )
+from core.utils import sizeof_fmt
 
 logger = get_task_logger(__name__)
 
@@ -105,6 +106,9 @@ class OsmoseRealBackend(OsmoseBackend):
             raise e
 
         logger.info(f"Success {download_url} to {destination} ...")
+        size = os.stat(destination).st_size
+        size_formatted = sizeof_fmt(size)
+        logger.info(f"File: {destination} {size_formatted} ({size}) ...")
 
     def __handle_validation(self, headers, destination):
         if headers.get("Content-Type") != "text/html":

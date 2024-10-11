@@ -2,7 +2,7 @@
 {{- $fullName := include "template.celery.fullname" . -}}
 {{- $component := "celery" -}}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ $fullName }}
   namespace: {{ .Release.Namespace | quote }}
@@ -22,6 +22,10 @@ spec:
       labels:
         {{- include "template.common.selectorLabels" (list . $component) | nindent 8 }}
     spec:
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 0
+        fsGroup: 0
       {{- if $.Values.image.credentials }}
       imagePullSecrets:
         - name: {{ include "template.secret.dockerconfigjson.name" (dict "fullname" (include "template.fullname" .) "imageCredentials" $.Values.image.credentials) }}
@@ -67,6 +71,8 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
+            - name: chart-migration-osmose-celery-storage
+              mountPath: /data
             {{- range $index, $value := .Values.mountFiles }}
             - name: "files-{{ $index }}"
               mountPath: {{ $value.path }}
@@ -130,3 +136,12 @@ spec:
           emptyDir: {}
           {{- end }}
         {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: chart-migration-osmose-celery-storage
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 200Gi
