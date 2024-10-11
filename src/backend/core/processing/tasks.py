@@ -45,14 +45,15 @@ def export(self, data):  # pylint: disable=unused-argument
 
         logger.info(f"Sending send_archive_download_mail ${archive_url} ...")
         mails_manager.send_archive_download_mail(user, workspace, archive_url)
-        workspace.status_archive = Workspace.Status.SUCCESS
+        workspace.set_status_archive(Workspace.Status.SUCCESS)
         workspace.save()
 
     if workspace.status_resana == Workspace.Status.PENDING:
         resana_backend = ResanaBackend()
         logger.info("Calling resana create_workspace ...")
         resana_backend.create_workspace(workspace)
-        workspace.status_resana = Workspace.Status.PENDING
+        # At this point, this is the resana refresh job command that will put the workspace in success state
+        workspace.set_status_resana(Workspace.Status.PENDING)
         workspace.save()
 
     logger.info("Task done")
@@ -83,7 +84,6 @@ def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
     task_result = TaskResult.objects.get(task_id=sender.request.id)
     extra_task = ExtraTaskInfo.objects.get(task_result=task_result)
     workspace = extra_task.workspace
-    workspace.status = Workspace.Status.SUCCESS
     workspace.save()
 
 
@@ -92,10 +92,9 @@ def task_failure(sender=None, **kwargs):
     task_result = TaskResult.objects.get(task_id=sender.request.id)
     extra_task = ExtraTaskInfo.objects.get(task_result=task_result)
     workspace = extra_task.workspace
-    workspace.status = Workspace.Status.FAILURE
 
     if workspace.status_archive == Workspace.Status.PENDING:
-        workspace.status_archive = Workspace.Status.FAILURE
+        workspace.set_status_archive(Workspace.Status.FAILURE)
     if workspace.status_resana == Workspace.Status.PENDING:
-        workspace.status_resana = Workspace.Status.FAILURE
+        workspace.set_status_resana(Workspace.Status.FAILURE)
     workspace.save()

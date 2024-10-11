@@ -29,12 +29,11 @@ class WorkspacesProcessAPIView(APIView):
         extra_task.task_result = db_result
         extra_task.save()
 
-        workspace.status = Workspace.Status.PENDING
         workspace.migration_user = user
         if "resana" in types:
-            workspace.status_resana = Workspace.Status.PENDING
+            workspace.set_status_resana(Workspace.Status.PENDING)
         if "archive" in types:
-            workspace.status_archive = Workspace.Status.PENDING
+            workspace.set_status_archive(Workspace.Status.PENDING)
         workspace.save()
 
     def post(self, request):

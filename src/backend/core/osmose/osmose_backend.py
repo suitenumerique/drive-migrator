@@ -60,7 +60,6 @@ class OsmoseManager:
             print("Workspace", osmoseWorkspace, workspace)  # noqa: T201
             if not workspace:
                 workspace = Workspace()
-                workspace.status = Workspace.Status.NONE
                 workspace.osmose_id = osmoseWorkspace.id
                 workspace.title = osmoseWorkspace.title
             workspace.save()

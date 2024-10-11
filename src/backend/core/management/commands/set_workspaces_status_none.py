@@ -12,9 +12,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         workspaces = Workspace.objects.all()
         for workspace in workspaces:
-            workspace.status = Workspace.Status.NONE
-            workspace.status_resana = Workspace.Status.NONE
-            workspace.status_archive = Workspace.Status.NONE
+            workspace.set_status_resana(Workspace.Status.NONE)
+            workspace.set_status_archive(Workspace.Status.NONE)
             workspace.resana_id = None
             workspace.resana_job_id = None
             workspace.save()

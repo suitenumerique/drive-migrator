@@ -26,19 +26,7 @@ def create_export(user, workspace, types):
             "user": UserSerializer(user).data,
         }
     )
-    # Fetch task from db created by django-celery-results.
-    dbResult = TaskResult.objects.get(task_id=result.id)
-    # Create extra task with information required for querying.
-    extraTask = ExtraTaskInfo()
-    extraTask.workspace = workspace
-    extraTask.task_result = dbResult
-    extraTask.save()
 
-    workspace.status = Workspace.Status.PENDING
-    if "resana" in types:
-        workspace.status_resana = Workspace.Status.PENDING
-    if "archive" in types:
-        workspace.status_archive = Workspace.Status.PENDING
     workspace.save()
 
 

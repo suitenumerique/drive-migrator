@@ -77,23 +77,66 @@ class Workspace(BaseModel):
 
     title = models.CharField()
 
+    """
+    Do not edit this field directly. Use status_archive and status_resana instead.
+    """
     status = models.CharField(
         max_length=10,
         choices=Status.choices,
         default=Status.NONE,
     )
 
+    """
+    Do not update this field directly. Use set_status_archive instead.
+    """
     status_archive = models.CharField(
         max_length=10,
         choices=Status.choices,
         default=Status.NONE,
     )
 
+    """
+    Do not update this field directly. Use set_status_resana instead.
+    """
     status_resana = models.CharField(
         max_length=10,
         choices=Status.choices,
         default=Status.NONE,
     )
+
+    def set_status_archive(self, status):
+        self.status_archive = status
+        self.sync_status()
+
+    def set_status_resana(self, status):
+        self.status_resana = status
+        self.sync_status()
+
+    def sync_status(self):
+        self.status = self.compute_status()
+
+    def compute_status(self):
+        # +---------+---------+---------+---------+---------+
+        # | Status  |  NONE   | PENDING | FAILURE | SUCCESS |
+        # +---------+---------+---------+---------+---------+
+        # | NONE    | NONE    | PENDING | FAILURE | SUCCESS |
+        # | PENDING | PENDING | PENDING | PENDING | PENDING |
+        # | FAILURE | FAILURE | PENDING | FAILURE | FAILURE |
+        # | SUCCESS | SUCCESS | PENDING | FAILURE | SUCCESS |
+
+        if (
+            self.status_archive == Workspace.Status.NONE
+            and self.status_resana == Workspace.Status.NONE
+        ):
+            return Workspace.Status.NONE
+
+        if Workspace.Status.PENDING in (self.status_archive, self.status_resana):
+            return Workspace.Status.PENDING
+
+        if Workspace.Status.FAILURE in (self.status_archive, self.status_resana):
+            return Workspace.Status.FAILURE
+
+        return Workspace.Status.SUCCESS
 
 
 class ExtraTaskInfo(models.Model):

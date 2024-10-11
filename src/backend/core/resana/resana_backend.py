@@ -103,7 +103,7 @@ class ResanaBackend:
         # TODO: set to success equivalent
         if workspace.job_status == "created":
             get_logger().info(f"Setting status to success ...")
-            workspace.status_resana = Workspace.Status.SUCCESS
+            workspace.set_status_resana(Workspace.Status.SUCCESS)
             workspace.save()
             get_logger().info("Sending send_resana_ready_mail ...")
             mails_manager = MailsManager()
