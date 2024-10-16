@@ -1,5 +1,7 @@
 import os
+
 from django.conf import settings
+
 from celery import states
 from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
@@ -31,12 +33,13 @@ def list_work_dir():
             size_fmt = sizeof_fmt(size)
             logger.info(f"{entry.name} {size_fmt} ({size})")
 
+
 def list_workspace_dir(workspace: Workspace):
     logger.info(f"Listing workspace dir")
     creator = FolderCreator()
     path = creator.get_workspace_path(workspace)
     files = []
-    for (root, _, filenames) in os.walk(path):
+    for root, _, filenames in os.walk(path):
         for filename in filenames:
             files.append(os.path.join(root, filename))
 
@@ -45,7 +48,6 @@ def list_workspace_dir(workspace: Workspace):
         size = os.stat(file).st_size
         size_formatted = sizeof_fmt(size)
         logger.info(f"File: {file} {size_formatted} ({size}) ...")
-
 
 
 @app.task(bind=True)

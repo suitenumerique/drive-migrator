@@ -7,7 +7,7 @@ from django_celery_results.models import TaskResult
 
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, Workspace
-from core.osmose.osmose_backend import OsmoseFolder
+from core.osmose.osmose_backend import OsmoseFolder, OsmoseManager
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.resana.s3_resana_manager import S3ResanaManager
@@ -34,10 +34,10 @@ def dev_view(request):
     if not settings.DEBUG:
         raise Http404()
 
-    workspace = Workspace.objects.get(id="c32241f0-6c11-4ab0-a1ff-a922c35a7937")
+    workspace = Workspace.objects.get(id="891a8143-614c-4506-8f23-48155f7d639b")
 
-    resana_backend = ResanaBackend()
-    resana_backend.create_workspace(workspace)
+    backend = OsmoseManager().get_backend()
+    folder = backend.get_workspace_documents_structure(workspace)
 
     return HttpResponse("dev")
 
