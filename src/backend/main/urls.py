@@ -13,6 +13,7 @@ from drf_spectacular.views import (
 )
 
 urlpatterns = [
+    path("admin/hijack/", include("hijack.urls")),
     path("admin/", admin.site.urls),
     path("", include("core.urls")),
     path("__debug__/", include("debug_toolbar.urls")),
