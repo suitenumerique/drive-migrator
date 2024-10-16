@@ -252,6 +252,7 @@ class Base(Configuration):
         "django.contrib.auth.middleware.AuthenticationMiddleware",
         "django.contrib.messages.middleware.MessageMiddleware",
         "dockerflow.django.middleware.DockerflowMiddleware",
+        "hijack.middleware.HijackUserMiddleware",
     ]
 
     AUTHENTICATION_BACKENDS = [
@@ -261,17 +262,6 @@ class Base(Configuration):
 
     # Django applications from the highest priority to the lowest
     INSTALLED_APPS = [
-        # impress
-        "core",
-        "demo",
-        "drf_spectacular",
-        # Third party apps
-        "corsheaders",
-        "dockerflow.django",
-        "rest_framework",
-        "django_filters",
-        "parler",
-        "easy_thumbnails",
         # Django
         "django.contrib.admin",
         "django.contrib.auth",
@@ -281,6 +271,20 @@ class Base(Configuration):
         "django.contrib.sites",
         "django.contrib.messages",
         "django.contrib.staticfiles",
+        # app
+        "core",
+        "demo",
+        # Third party apps
+        "drf_spectacular",
+        "corsheaders",
+        "dockerflow.django",
+        "rest_framework",
+        "django_filters",
+        "parler",
+        "easy_thumbnails",
+        # Third Party apps
+        "hijack",
+        "hijack.contrib.admin",
         # OIDC third party
         "mozilla_django_oidc",
         "django_celery_results",

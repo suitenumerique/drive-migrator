@@ -2,17 +2,14 @@
 from django.conf import settings
 from django.urls import include, path
 
-from mozilla_django_oidc.views import OIDCAuthenticationCallbackView
 from rest_framework.routers import DefaultRouter
 
 from core.api import viewsets
 from core.api.views.dev import dev_view
-from core.api.views.spoof import spoof_view
 from core.api.views.synchronize import SynchronizeAPIView
 from core.api.views.workspaces import WorkspacesViewset
 from core.api.views.workspaces_process import WorkspacesProcessAPIView
 from core.authentication.urls import urlpatterns as oidc_urls
-from core.authentication.views import OIDCLogoutCallbackView
 
 # - Main endpoints
 router = DefaultRouter()
@@ -30,10 +27,6 @@ urlpatterns = [
                 path("workspaces/process", WorkspacesProcessAPIView.as_view()),
             ]
         ),
-    ),
-    path(
-        "spoof/",
-        spoof_view,
     ),
     path(
         "dev/",
