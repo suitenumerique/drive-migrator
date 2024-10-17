@@ -29,7 +29,7 @@ class FolderCreator:
     def create_folder(self, workspace: Workspace, folder: OsmoseFolder):
         self.workspace = workspace
         self.files_count = self.__get_files_count(folder)
-        self.__delete_folder(workspace)
+        self.delete_folder(workspace)
 
         path = self.get_workspace_path(workspace)
         if not os.path.exists(path):
@@ -42,7 +42,7 @@ class FolderCreator:
     def get_workspace_path(self, workspace):
         return f"{settings.APP_WORK_DIR}/workspace_{workspace.id}"
 
-    def __delete_folder(self, workspace):
+    def delete_folder(self, workspace):
         path = self.get_workspace_path(workspace)
         if os.path.exists(path):
             shutil.rmtree(path)

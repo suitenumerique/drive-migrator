@@ -13,7 +13,6 @@ from core.osmose.osmose_backend import OsmoseManager
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.resana.resana_backend import ResanaBackend
-from core.resana.s3_resana_manager import S3ResanaManager
 from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app
@@ -48,6 +47,16 @@ def list_workspace_dir(workspace: Workspace):
         size = os.stat(file).st_size
         size_formatted = sizeof_fmt(size)
         logger.info(f"File: {file} {size_formatted} ({size}) ...")
+
+
+def cleanup_workspace_dir(workspace: Workspace):
+    logger.info(f"Cleaning up {workspace.id} directory ...")
+    creator = FolderCreator()
+    creator.delete_folder(workspace)
+    archive_manager = ArchiveManager()
+    archive_manager.delete_archive(workspace)
+    logger.info(f"Cleaned up {workspace.id} directory !")
+    list_work_dir()
 
 
 @app.task(bind=True)
@@ -123,6 +132,8 @@ def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
     workspace = extra_task.workspace
     workspace.save()
 
+    cleanup_workspace_dir(workspace)
+
 
 @task_failure.connect
 def task_failure(sender=None, **kwargs):
@@ -135,3 +146,5 @@ def task_failure(sender=None, **kwargs):
     if workspace.status_resana == Workspace.Status.PENDING:
         workspace.set_status_resana(Workspace.Status.FAILURE)
     workspace.save()
+
+    cleanup_workspace_dir(workspace)

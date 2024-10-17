@@ -45,6 +45,15 @@ class ArchiveManager:
         path = folder_creator.get_workspace_path(workspace)
         shutil.make_archive(path, self.archive_format, path)
 
+    def get_archive_path(self, workspace: Workspace):
+        folder_creator = FolderCreator()
+        return folder_creator.get_workspace_path(workspace) + "." + self.archive_format
+
+    def delete_archive(self, workspace: Workspace):
+        path = self.get_archive_path(workspace)
+        if os.path.exists(path):
+            os.remove(path)
+
     def upload_archive(self, workspace: Workspace):
         folder_creator = FolderCreator()
         path = folder_creator.get_workspace_path(workspace) + "." + self.archive_format
