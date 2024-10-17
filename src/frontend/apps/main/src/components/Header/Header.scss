@@ -48,3 +48,16 @@
     align-items: center;
   }
 }
+
+.suite__drop-button__popover {
+  li.suite__acount-dropdown__email {
+    font-weight: var(--c--theme--font--weights--light);
+    color: var(--c--theme--colors--greyscale-700);
+    padding: 0.5rem var(--c--theme--spacings--s);
+
+    .suite__acount-dropdown__email__inner {
+      border-bottom: 1px var(--c--theme--colors--greyscale-200) solid;
+      padding-bottom: 1rem;
+    }
+  }
+}

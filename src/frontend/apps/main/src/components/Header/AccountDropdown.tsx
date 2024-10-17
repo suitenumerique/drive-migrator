@@ -2,12 +2,13 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { DropButton } from '@/components/DropButton/DropButton';
-import { logout } from '@/core/auth/Auth';
+import { logout, useAuth } from '@/core/auth/Auth';
 
 import { Button } from '../Button/Button';
 
 export const AccountDropdown = () => {
   const { t } = useTranslation();
+  const { user } = useAuth();
 
   return (
     <DropButton
@@ -20,6 +21,11 @@ export const AccountDropdown = () => {
       }
     >
       <ul>
+        <li className="suite__acount-dropdown__email">
+          <div className="suite__acount-dropdown__email__inner">
+            {user?.email}
+          </div>
+        </li>
         <li>
           <Button
             href="/"
