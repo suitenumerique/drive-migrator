@@ -27,6 +27,7 @@ class WorkspacesProcessAPIView(APIView):
         extra_task = ExtraTaskInfo()
         extra_task.workspace = workspace
         extra_task.task_result = db_result
+        extra_task.user = user
         extra_task.save()
 
         workspace.migration_user = user

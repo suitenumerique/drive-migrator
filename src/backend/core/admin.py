@@ -123,6 +123,7 @@ class ExtraTaskInfoAdmin(admin.ModelAdmin):
     list_display = [
         "id",
         "get_workspace",
+        "get_user",
         "get_task",
         "get_task_status",
         "get_task_date_created",
@@ -139,6 +140,19 @@ class ExtraTaskInfoAdmin(admin.ModelAdmin):
         )
 
     get_workspace.short_description = "Workspace"
+
+    def get_user(self, obj):
+        return mark_safe(  # noqa: S308
+            '<a href="%s">%s</a>'
+            % (
+                reverse("admin:core_user_change", args=(obj.user.id,)),
+                obj.user.email,
+            )
+            if obj.user
+            else "None"
+        )
+
+    get_user.short_description = "User"
 
     def get_task(self, obj):
         return mark_safe(  # noqa: S308

@@ -147,6 +147,9 @@ class ExtraTaskInfo(models.Model):
 
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
 
+    # Should not be null, but we need to allow it for the initial migration.
+    user = models.ForeignKey("User", on_delete=models.CASCADE, null=True, blank=True)
+
     def __str__(self):
         return f"TaskResult {self.task_result.task_id} for {self.workspace.osmose_id} "
 
