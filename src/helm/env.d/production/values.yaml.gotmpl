@@ -1,5 +1,5 @@
 commonEnvVars: &commonEnvVars
-  DJANGO_CSRF_TRUSTED_ORIGINS: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
+  DJANGO_CSRF_TRUSTED_ORIGINS: https://osmose-migration.beta.numerique.gouv.fr
   DJANGO_CONFIGURATION: Production
   DJANGO_ALLOWED_HOSTS: "*"
   DJANGO_SECRET_KEY:
@@ -27,11 +27,11 @@ commonEnvVars: &commonEnvVars
     secretKeyRef:
       name: backend
       key: DJANGO_EMAIL_HOST_PASSWORD
-  OIDC_OP_JWKS_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/jwks
-  OIDC_OP_AUTHORIZATION_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/authorize
-  OIDC_OP_TOKEN_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/token
-  OIDC_OP_USER_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/userinfo
-  OIDC_OP_LOGOUT_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/session/end
+  OIDC_OP_JWKS_ENDPOINT: https://auth.agentconnect.gouv.fr/api/v2/jwks
+  OIDC_OP_AUTHORIZATION_ENDPOINT: https://auth.agentconnect.gouv.fr/api/v2/authorize
+  OIDC_OP_TOKEN_ENDPOINT: https://auth.agentconnect.gouv.fr/api/v2/token
+  OIDC_OP_USER_ENDPOINT: https://auth.agentconnect.gouv.fr/api/v2/userinfo
+  OIDC_OP_LOGOUT_ENDPOINT: https://auth.agentconnect.gouv.fr/api/v2/session/end
   OIDC_RP_CLIENT_ID:
     secretKeyRef:
       name: backend
@@ -42,7 +42,7 @@ commonEnvVars: &commonEnvVars
       key: OIDC_RP_CLIENT_SECRET
   OIDC_RP_SIGN_ALGO: RS256
   OIDC_RP_SCOPES: "openid email"
-  OIDC_REDIRECT_ALLOWED_HOSTS: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
+  OIDC_REDIRECT_ALLOWED_HOSTS: https://osmose-migration.beta.numerique.gouv.fr
   OIDC_AUTH_REQUEST_EXTRA_PARAMS: "{'acr_values': 'eidas1'}"
   OSMOSE_PKI_RSA_PRIVATE_KEY:
     secretKeyRef:
@@ -69,10 +69,10 @@ commonEnvVars: &commonEnvVars
       name: backend
       key: OSMOSE_BASE_ENDPOINT
   OSMOSE_BACKEND: core.osmose.osmose_real_backend.OsmoseRealBackend
-  OSMOSE_BACKEND_DEBUG: 1
-  LOGIN_REDIRECT_URL: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
-  LOGIN_REDIRECT_URL_FAILURE: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
-  LOGOUT_REDIRECT_URL: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
+  OSMOSE_BACKEND_DEBUG: 0
+  LOGIN_REDIRECT_URL: https://osmose-migration.beta.numerique.gouv.fr
+  LOGIN_REDIRECT_URL_FAILURE: https://osmose-migration.beta.numerique.gouv.fr
+  LOGOUT_REDIRECT_URL: https://osmose-migration.beta.numerique.gouv.fr
   STORAGES_STATICFILES_BACKEND: django.contrib.staticfiles.storage.StaticFilesStorage
   DB_HOST:
     secretKeyRef:
@@ -127,10 +127,6 @@ commonEnvVars: &commonEnvVars
       name: media-storage.bucket.libre.sh
       key: bucket
   APP_WORK_DIR: /data
-  APP_EMAIL_FORCE_TO:
-    secretKeyRef:
-      name: backend
-      key: APP_EMAIL_FORCE_TO
 
 image:
   repository: lasuite/osmose-migration-back
@@ -160,7 +156,7 @@ backend:
 frontend:
   envVars:
     PORT: 8080
-    NEXT_PUBLIC_API_ORIGIN: https://osmose-migration-tool-staging.beta.numerique.gouv.fr
+    NEXT_PUBLIC_API_ORIGIN: https://osmose-migration.beta.numerique.gouv.fr
 
   replicas: 1
 
@@ -171,25 +167,26 @@ frontend:
 
 ingress:
   enabled: true
-  host: osmose-migration-tool-staging.beta.numerique.gouv.fr
+  host: osmose-migration.beta.numerique.gouv.fr
   className: nginx
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    cert-manager.io/cluster-issuer: letsencrypt
 
 ingressAdmin:
   enabled: true
-  host: osmose-migration-tool-staging.beta.numerique.gouv.fr
+  host: osmose-migration.beta.numerique.gouv.fr
   annotations:
     nginx.ingress.kubernetes.io/auth-signin: https://oauth2-proxy-preprod.beta.numerique.gouv.fr/oauth2/start
     nginx.ingress.kubernetes.io/auth-url: https://oauth2-proxy-preprod.beta.numerique.gouv.fr/oauth2/auth
 
 celery:
-  replicas: 1
-  volumeSize: 200Gi
+  replicas: 4
+  volumeSize: 500Gi
   envVars:
     <<: *commonEnvVars
   image:
     repository: lasuite/osmose-migration-back
     pullPolicy: Always
     tag: "v0.0.0.18-ci"
+
 
