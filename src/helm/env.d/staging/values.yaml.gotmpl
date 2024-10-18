@@ -131,6 +131,10 @@ commonEnvVars: &commonEnvVars
     secretKeyRef:
       name: backend
       key: APP_EMAIL_FORCE_TO
+  SENTRY_DSN:
+    secretKeyRef:
+      name: backend
+      key: SENTRY_DSN
 
 image:
   repository: lasuite/osmose-migration-back
