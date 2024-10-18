@@ -34,54 +34,6 @@ def dev_view(request):
     if not settings.DEBUG:
         raise Http404()
 
-    workspace = Workspace.objects.get(id="891a8143-614c-4506-8f23-48155f7d639b")
-
-    backend = OsmoseManager().get_backend()
-    folder = backend.get_workspace_documents_structure(workspace)
-
-    return HttpResponse("dev")
-
-    # title = _("Invitation to join Impress!")
-    # template_vars = {"title": title, "site": Site.objects.get_current(), "email": request.user.email,
-    # "workspace_name": workspace.title, "download_url": "https://www.google.com"}
-    # msg_html = render_to_string("mail/html/archive_download.html", template_vars)
-    # msg_plain = render_to_string("mail/text/archive_download.txt", template_vars)
-    # print(request.user.email)
-    # mail.send_mail(
-    #     title,
-    #     msg_plain,
-    #     settings.EMAIL_FROM,
-    #     [request.user.email],
-    #     html_message=msg_html,
-    #     fail_silently=False,
-    # )
-    #
-    # return HttpResponse("Dev")
-
-    folder = backend.get_workspace_documents_structure(workspace)
-    print("#####\nFOLDER\n#####")  # noqa: T201
-    print_folder(folder, 0)
-
-    print("#####\nCreating folder\n#####")  # noqa: T201
-    creator = FolderCreator()
-    creator.create_folder(workspace, folder)
-
-    print("#####\nZipping folder\n#####")  # noqa: T201
-    helper = ArchiveManager()
-    helper.zip_workspace_folder(workspace)
-
-    print("#####\nUploading zip to S3\n#####")  # noqa: T201
-    archive_url = helper.upload_archive(workspace)
-    print("archive_url", archive_url)  # noqa: T201
-
-    mails_manager = MailsManager()
-    mails_manager.send_archive_download_mail(user, workspace, archive_url)
-
-    print("#####\nUploading files to S3\n#####")  # noqa: T201
-    s3_manager = S3ResanaManager()
-    s3_manager.upload_folder(workspace)
-    mails_manager.send_resana_ready_mail(user, workspace)
-
     return HttpResponse("Dev")
 
 
