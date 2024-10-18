@@ -29,7 +29,7 @@ urlpatterns = [
         ),
     ),
     path(
-        "dev/",
+        "api/dev/",
         dev_view,
     ),
 ]

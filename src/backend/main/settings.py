@@ -499,6 +499,7 @@ class Base(Configuration):
                 environment=cls.__name__.lower(),
                 release=get_release(),
                 integrations=[DjangoIntegration()],
+                default_integrations=False,
             )
             with sentry_sdk.configure_scope() as scope:
                 scope.set_extra("application", "backend")
@@ -608,7 +609,6 @@ class Production(Base):
     CSRF_TRUSTED_ORIGINS = values.ListValue([])
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    DEBUG = True
 
     # SECURE_PROXY_SSL_HEADER allows to fix the scheme in Django's HttpRequest
     # object when your application is behind a reverse proxy.
@@ -666,6 +666,8 @@ class Staging(Production):
 
     nota bene: it should inherit from the Production environment.
     """
+
+    DEBUG = True
 
 
 class PreProduction(Production):
