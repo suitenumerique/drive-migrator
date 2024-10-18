@@ -22,7 +22,7 @@
 
           <!-- Signature -->
           <mj-text>
-            <p>{% trans "La Suite Numérique Team" %}</p>
+            <p>{% trans "La Suite Numérique" %}</p>
           </mj-text>
         </mj-column>
       </mj-section>

@@ -148,3 +148,6 @@ def task_failure(sender=None, **kwargs):
     workspace.save()
 
     cleanup_workspace_dir(workspace)
+
+    mail_manager = MailsManager()
+    mail_manager.send_fail_mail(extra_task.user, workspace)

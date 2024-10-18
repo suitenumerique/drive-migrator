@@ -4,7 +4,11 @@ from django.core import mail
 from django.template.loader import render_to_string
 from django.utils.translation import gettext_lazy as _
 
+from celery.utils.log import get_task_logger
+
 from core.models import Workspace
+
+logger = get_task_logger(__name__)
 
 
 class MailsManager:
@@ -12,6 +16,28 @@ class MailsManager:
         if settings.APP_EMAIL_FORCE_TO:
             return [settings.APP_EMAIL_FORCE_TO]
         return [user.email]
+
+    def send_fail_mail(self, user, workspace: Workspace):
+        logger.info(f"Sending fail mail to {user.email}")
+        title = _(
+            "Migration ou export l'espace %(title)s échoué" % {"title": workspace.title}
+        )
+        template_vars = {
+            "title": title,
+            "site": Site.objects.get_current(),
+            "email": user.email,
+            "workspace_name": workspace.title,
+        }
+        msg_html = render_to_string("mail/html/fail.html", template_vars)
+        msg_plain = render_to_string("mail/text/fail.txt", template_vars)
+        mail.send_mail(
+            title,
+            msg_plain,
+            settings.EMAIL_FROM,
+            self.get_recipients(user),
+            html_message=msg_html,
+            fail_silently=False,
+        )
 
     def send_archive_download_mail(self, user, workspace: Workspace, archive_url):
         title = _(

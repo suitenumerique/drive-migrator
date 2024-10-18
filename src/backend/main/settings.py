@@ -357,9 +357,7 @@ class Base(Configuration):
     CORS_ALLOWED_ORIGIN_REGEXES = values.ListValue([])
 
     # Sentry
-    SENTRY_DSN = values.Value(
-        environ_name="SENTRY_DSN", environ_prefix=None
-    )
+    SENTRY_DSN = values.Value(environ_name="SENTRY_DSN", environ_prefix=None)
 
     # Easy thumbnails
     THUMBNAIL_EXTENSION = "webp"
