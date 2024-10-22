@@ -70,11 +70,9 @@ class OsmoseManager:
 
     def synchronize(self, user: User):
         backend = self.get_backend()
-        osmoseWorkspaces = backend.get_workspaces(user)
-        print("workspaces", osmoseWorkspaces)  # noqa: T201
-        for osmoseWorkspace in osmoseWorkspaces:
+        osmose_workspaces = backend.get_workspaces(user)
+        for osmoseWorkspace in osmose_workspaces:
             workspace = Workspace.objects.filter(osmose_id=osmoseWorkspace.id).first()
-            print("Workspace", osmoseWorkspace, workspace)  # noqa: T201
             if not workspace:
                 workspace = Workspace()
                 workspace.osmose_id = osmoseWorkspace.id
