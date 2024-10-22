@@ -76,6 +76,7 @@ def export(self, data):  # pylint: disable=unused-argument
     logger.info(f"Starting workspace {workspace_id} ...")
 
     workspace = Workspace.objects.get(id=workspace_id)
+    logger.info(f"Workspace title: {workspace.title}")
     user = User.objects.get(id=data["user"]["id"])
 
     backend = OsmoseManager().get_backend()
