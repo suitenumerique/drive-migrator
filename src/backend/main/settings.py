@@ -266,6 +266,8 @@ class Base(Configuration):
 
     # Django applications from the highest priority to the lowest
     INSTALLED_APPS = [
+        # Makes the superuser command not overridden by auth.
+        "demo",
         # Django
         "django.contrib.admin",
         "django.contrib.auth",
@@ -277,7 +279,6 @@ class Base(Configuration):
         "django.contrib.staticfiles",
         # app
         "core",
-        "demo",
         # Third party apps
         "drf_spectacular",
         "corsheaders",
