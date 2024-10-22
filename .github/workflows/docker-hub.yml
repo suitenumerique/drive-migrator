@@ -20,24 +20,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       -
-        uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: "osmose-migration-tool,secrets"
-      -
         name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
       -
         name: Load sops secrets
         uses: rouja/actions-sops@main
         with:
-          secret-file: secrets/numerique-gouv/osmose-migration-tool/secrets.enc.env
+          secret-file: .github/workflows/secrets.enc.env
           age-key: ${{ secrets.SOPS_PRIVATE }}
       -
         name: Docker meta
@@ -64,24 +53,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       -
-        uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: "osmose-migration-tool,secrets"
-      -
         name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
       -
         name: Load sops secrets
         uses: rouja/actions-sops@main
         with:
-          secret-file: secrets/numerique-gouv/osmose-migration-tool/secrets.enc.env
+          secret-file: .github/workflows/secrets.enc.env
           age-key: ${{ secrets.SOPS_PRIVATE }}
       -
         name: Docker meta
@@ -114,24 +92,13 @@ jobs:
       github.event_name != 'pull_request'
     steps:
       -
-        uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: "osmose-migration-tool,secrets"
-      -
         name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-          token: ${{ steps.app-token.outputs.token }}
       -
         name: Load sops secrets
         uses: rouja/actions-sops@main
         with:
-          secret-file: secrets/numerique-gouv/osmose-migration-tool/secrets.enc.env
+          secret-file: .github/workflows/secrets.enc.env
           age-key: ${{ secrets.SOPS_PRIVATE }}
       -
         name: Call argocd github webhook
