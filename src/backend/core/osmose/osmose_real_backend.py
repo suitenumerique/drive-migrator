@@ -196,7 +196,7 @@ class OsmoseRealBackend(OsmoseBackend):
         osmose_user = self.__get_user(user.email)
         print("osmose_user", osmose_user)  # noqa: T201
         if not osmose_user:
-            raise Exception(f"User {user.email} not found in Osmose")
+            return []
 
         # "start" parameter could be used for pagination.
         # belongsToWorkspace=true&member=${user.id}
