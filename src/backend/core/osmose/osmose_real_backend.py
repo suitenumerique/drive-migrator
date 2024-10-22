@@ -71,6 +71,8 @@ class OsmoseRealBackend(OsmoseBackend):
         opener = self.__build_opener()
         urllib.request.install_opener(opener)
 
+        error_ignored = False
+
         try:
             local_filename, headers = urllib.request.urlretrieve(  # noqa: S310
                 download_url, destination
@@ -92,7 +94,10 @@ class OsmoseRealBackend(OsmoseBackend):
             )
             logger.error(f"HTTP Error: Additional request response: {response.text}")
 
-            raise e
+            if e.code == 404 and settings.OSMOSE_BACKEND_ACCEPT_404:
+                error_ignored = True
+            else:
+                raise e
         except URLError as e:
             logger.error(
                 f"URL Error: Failed to reach {download_url}. Reason: {e.reason}"
@@ -106,9 +111,12 @@ class OsmoseRealBackend(OsmoseBackend):
             raise e
 
         logger.info(f"Success {download_url} to {destination} ...")
-        size = os.stat(destination).st_size
-        size_formatted = sizeof_fmt(size)
-        logger.info(f"File: {destination} {size_formatted} ({size}) ...")
+        if error_ignored:
+            logger.info("Error ignored.")
+        else:
+            size = os.stat(destination).st_size
+            size_formatted = sizeof_fmt(size)
+            logger.info(f"File: {destination} {size_formatted} ({size}) ...")
 
     def __handle_validation(self, headers, destination):
         if headers.get("Content-Type") != "text/html":
@@ -170,6 +178,7 @@ class OsmoseRealBackend(OsmoseBackend):
 
     def get_workspace(self, workspace_id):
         workspace = self.fetch("/data/" + workspace_id)
+        self.debug_into_file("data_workspace_" + workspace_id, workspace)
         return OsmoseWorkspace(
             id=workspace["id"], title=workspace["title"], raw_data=workspace
         )
@@ -236,7 +245,8 @@ class OsmoseRealBackend(OsmoseBackend):
 
             # Fetch children of root category
             data = self.fetch(
-                "/search/category", params={"rootCid": root_category["id"]}
+                "/search/category",
+                params={"rootCid": root_category["id"], "pageSize": 100000},
             )
             self.debug_into_file("cat", data)
 

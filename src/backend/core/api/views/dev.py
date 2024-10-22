@@ -34,8 +34,6 @@ def dev_view(request):
     if not settings.DEBUG:
         raise Http404()
 
-    1 / 0
-
     return HttpResponse("Dev")
 
 

@@ -188,6 +188,10 @@ class Base(Configuration):
     OSMOSE_BACKEND_DEBUG = values.BooleanValue(
         environ_name="OSMOSE_BACKEND_DEBUG", environ_prefix=None, default=False
     )
+    # Prevent from failing the entire task if file downloads gives a 404.
+    OSMOSE_BACKEND_ACCEPT_404 = values.BooleanValue(
+        environ_name="OSMOSE_BACKEND_ACCEPT_404", environ_prefix=None, default=False
+    )
 
     # Internationalization
     # https://docs.djangoproject.com/en/3.1/topics/i18n/

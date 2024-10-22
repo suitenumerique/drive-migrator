@@ -9,7 +9,7 @@ from django_celery_results.models import TaskResult
 
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
-from core.osmose.osmose_backend import OsmoseManager
+from core.osmose.osmose_backend import OsmoseFolder, OsmoseManager
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.resana.resana_backend import ResanaBackend
@@ -59,6 +59,17 @@ def cleanup_workspace_dir(workspace: Workspace):
     list_work_dir()
 
 
+def debug_folder(folder: OsmoseFolder):
+    logger.info("Debugging folder")
+
+    def aux(folder: OsmoseFolder, depth=0):
+        logger.info(" " * depth + folder.name)
+        for child in folder.children:
+            aux(child, depth + 1)
+
+    aux(folder)
+
+
 @app.task(bind=True)
 def export(self, data):  # pylint: disable=unused-argument
     workspace_id = data["workspace"]["id"]
@@ -72,6 +83,7 @@ def export(self, data):  # pylint: disable=unused-argument
 
     logger.info("Calling get_workspace_documents_structure ...")
     folder = backend.get_workspace_documents_structure(workspace)
+    debug_folder(folder)
 
     logger.info("Calling create_folder ...")
     creator = FolderCreator()

@@ -1,3 +1,5 @@
+import os
+import re
 import urllib.request
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -26,6 +28,7 @@ class OsmoseFolder:
     def __init__(self, raw_data=None):
         self.raw_data = raw_data
         self.name = raw_data["name"] if raw_data and "name" in raw_data else "None"
+        self.name = self.name.replace("/", "-")
         self.children = []
         self.files: [OsmoseFile] = []
 
@@ -34,6 +37,20 @@ class OsmoseFile:
     def __init__(self, raw_data=None):
         self.raw_data = raw_data
         self.name = raw_data["title"] if raw_data and "title" in raw_data else "None"
+
+    @property
+    def name_with_extension(self):
+        return self.name + self.extension
+
+    @property
+    def extension(self):
+        if "originalFilename" in self.raw_data:
+            return os.path.splitext(self.raw_data["originalFilename"])[1]
+        if "downloadUrl" in self.raw_data:
+            match = re.findall(r"\.(\w+)$", self.raw_data["downloadUrl"])
+            if match:
+                return "." + match[0]
+        return ""
 
 
 class OsmoseBackend(ABC):

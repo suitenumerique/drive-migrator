@@ -72,15 +72,14 @@ class FolderCreator:
         backend = backend_class()
 
         for file in folder.files:
+            self.files_current += 1
+            logger.info(f"Downloading file {self.files_current}/{self.files_count} ...")
+
             download_url = os.path.join(
                 settings.OSMOSE_BASE_ENDPOINT, file.raw_data["downloadUrl"]
             )
-            destination = os.path.join(
-                path, file.name + os.path.splitext(file.raw_data["originalFilename"])[1]
-            )
+            destination = os.path.join(path, file.name_with_extension)
 
-            self.files_current += 1
-            logger.info(f"Downloading file {self.files_current}/{self.files_count} ...")
             backend.download_file(download_url, destination)
             size = get_dir_size(self.get_workspace_path(self.workspace))
             size_formatted = sizeof_fmt(size)
