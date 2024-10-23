@@ -3,18 +3,11 @@
 from django.conf import settings
 from django.http import Http404, HttpResponse
 
-from django_celery_results.models import TaskResult
-
-from core.mails_manager import MailsManager
-from core.models import ExtraTaskInfo, Workspace
+from core.models import Workspace
 from core.osmose.osmose_backend import OsmoseFolder, OsmoseManager
-from core.processing.folder_creator import FolderCreator
-from core.processing.folder_helper import ArchiveManager
-from core.resana.s3_resana_manager import S3ResanaManager
 
 from ...osmose.serializers import WorkspaceSerializer
 from ...processing.tasks import export
-from ...resana.resana_backend import ResanaBackend
 from ..serializers import UserSerializer
 
 
@@ -30,9 +23,27 @@ def create_export(user, workspace, types):
     workspace.save()
 
 
+# def debug_folder(folder: OsmoseFolder):
+#     print("Debugging folder")
+#
+#     def aux(folder: OsmoseFolder, depth=0):
+#         print(" " * depth + folder.name)
+#         for child in folder.children:
+#             aux(child, depth + 1)
+#
+#     aux(folder)
+
+
 def dev_view(request):
     if not settings.DEBUG:
         raise Http404()
+
+    workspace = Workspace.objects.get(id="101696cb-808f-4c0c-b310-5786f6b33ac3")
+    backend = OsmoseManager().get_backend()
+    # backend.fetch_categories_by_root({"id": "c_2196029"})
+
+    folder = backend.get_workspace_documents_structure(workspace)
+    # debug_folder(folder)
 
     return HttpResponse("Dev")
 
