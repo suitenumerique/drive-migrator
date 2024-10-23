@@ -71,11 +71,11 @@ class OsmoseManager:
     def synchronize(self, user: User):
         backend = self.get_backend()
         osmose_workspaces = backend.get_workspaces(user)
-        for osmoseWorkspace in osmose_workspaces:
-            workspace = Workspace.objects.filter(osmose_id=osmoseWorkspace.id).first()
+        for osmose_workspace in osmose_workspaces:
+            workspace = Workspace.objects.filter(osmose_id=osmose_workspace.id).first()
             if not workspace:
                 workspace = Workspace()
-                workspace.osmose_id = osmoseWorkspace.id
-                workspace.title = osmoseWorkspace.title
+                workspace.osmose_id = osmose_workspace.id
+            workspace.title = osmose_workspace.title
             workspace.save()
             user.workspaces.add(workspace)
