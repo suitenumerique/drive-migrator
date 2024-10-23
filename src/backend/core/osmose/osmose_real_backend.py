@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import time
@@ -23,7 +24,57 @@ from core.osmose.osmose_backend import (
 )
 from core.utils import sizeof_fmt
 
-logger = get_task_logger(__name__)
+
+def get_logger():
+    logging.basicConfig()
+    logger = get_task_logger(__name__)
+    logger.setLevel(logging.DEBUG)
+    return logger
+
+
+PAGE_SIZE = 100
+MAX = 500
+
+
+class PageWalker:
+    def __init__(self, callback):
+        self.callback = callback
+        self.page_size = PAGE_SIZE
+        self.max = MAX
+        self.total = None
+        self.start = 0
+        self.count = 0
+
+    def walk(self):
+        output = []
+
+        total = None
+        start = 0
+        count = 0
+
+        request = True
+        while request:
+            count += 1
+            get_logger().info(f"Fetching index {start}...")
+            response = self.callback(pageSize=PAGE_SIZE, start=start)
+            if total is None:
+                total = response["total"]
+                get_logger().info(f"Total: {total}")
+
+            get_logger().info(
+                f"Got response: total: {response['total']}, start: {response['start']}, sort: {response['sort']}"
+            )
+
+            data = response["dataSet"]
+            output.extend(data)
+
+            request = len(output) < total
+            start += len(data)
+            if count >= MAX:
+                get_logger().info("Max count reached")
+                break
+
+        return output
 
 
 class OsmoseFailedDownloadException(Exception):
@@ -66,7 +117,7 @@ class OsmoseRealBackend(OsmoseBackend):
 
     @retry(tries=5, delay=2, backoff=2)
     def download_file(self, download_url, destination):
-        logger.info(f"Downloading {download_url} to {destination} ...")
+        get_logger().info(f"Downloading {download_url} to {destination} ...")
         self.init_jwt()
         opener = self.__build_opener()
         urllib.request.install_opener(opener)
@@ -82,7 +133,7 @@ class OsmoseRealBackend(OsmoseBackend):
             # self.__handle_validation(headers, destination)
 
         except HTTPError as e:
-            logger.error(
+            get_logger().error(
                 f"HTTP Error: {e.code} while downloading {download_url}: {e.reason}. Response body: {e.read().decode()}"
             )
 
@@ -92,31 +143,33 @@ class OsmoseRealBackend(OsmoseBackend):
                     "Authorization": "Bearer " + self.jwt,
                 },
             )
-            logger.error(f"HTTP Error: Additional request response: {response.text}")
+            get_logger().error(
+                f"HTTP Error: Additional request response: {response.text}"
+            )
 
             if e.code == 404 and settings.OSMOSE_BACKEND_ACCEPT_404:
                 error_ignored = True
             else:
                 raise e
         except URLError as e:
-            logger.error(
+            get_logger().error(
                 f"URL Error: Failed to reach {download_url}. Reason: {e.reason}"
             )
             raise e
         except OSError as e:
-            logger.error(f"OS Error: {e} while writing to {destination}")
+            get_logger().error(f"OS Error: {e} while writing to {destination}")
             raise e
         except Exception as e:
-            logger.error(f"Unexpected error occurred: {e}")
+            get_logger().error(f"Unexpected error occurred: {e}")
             raise e
 
-        logger.info(f"Success {download_url} to {destination} ...")
+        get_logger().info(f"Success {download_url} to {destination} ...")
         if error_ignored:
-            logger.info("Error ignored.")
+            get_logger().info("Error ignored.")
         else:
             size = os.stat(destination).st_size
             size_formatted = sizeof_fmt(size)
-            logger.info(f"File: {destination} {size_formatted} ({size}) ...")
+            get_logger().info(f"File: {destination} {size_formatted} ({size}) ...")
 
     def __handle_validation(self, headers, destination):
         if headers.get("Content-Type") != "text/html":
@@ -125,7 +178,7 @@ class OsmoseRealBackend(OsmoseBackend):
         with open(destination) as f:
             content = f.read(10000)
             if "__blnChallengeStore" in content:
-                logger.info("Challenge detected, solving...")
+                get_logger().info("Challenge detected, solving...")
 
                 # Retrieve the cookie in the page.
                 raw_data = re.findall(r"(?<=__blnChallengeStore=)\{[^\;]+", content)
@@ -146,7 +199,7 @@ class OsmoseRealBackend(OsmoseBackend):
                     + "/.well-known/baleen/challengejs/check?%s=%s"
                     % (challenge_cookie["name"], challenge_cookie["value"])
                 )
-                logger.info(f"Sending check request to {url} with data {data}")
+                get_logger().info(f"Sending check request to {url} with data {data}")
                 response = requests.post(  # noqa: S113
                     url,
                     data,
@@ -156,7 +209,7 @@ class OsmoseRealBackend(OsmoseBackend):
                 )
                 response.raise_for_status()
 
-                logger.info("Success challenge, replaying download...")
+                get_logger().info("Success challenge, replaying download...")
                 raise OsmoseFailedDownloadException(
                     "Challenge solved, retrying download..."
                 )
@@ -227,6 +280,20 @@ class OsmoseRealBackend(OsmoseBackend):
             )
         return workspaces
 
+    def __fetch_categories_by_root(self, root_category):
+        def fetch(**params):
+            response = self.fetch(
+                "/search/category",
+                params={"rootCid": root_category["id"], **params},
+            )
+            self.debug_into_file(
+                f"cat_{root_category['id']}_{params['start']}", response
+            )
+            return response
+
+        walker = PageWalker(callback=fetch)
+        return walker.walk()
+
     def get_workspace_documents_structure(self, workspace: Workspace):
         """
         Fetch the workspace documents structure with descendants.
@@ -244,14 +311,11 @@ class OsmoseRealBackend(OsmoseBackend):
             root_categories.append(root_data)
 
             # Fetch children of root category
-            data = self.fetch(
-                "/search/category",
-                params={"rootCid": root_category["id"], "pageSize": 100000},
-            )
-            self.debug_into_file("cat", data)
+            cats = self.__fetch_categories_by_root(root_category)
+            categories.extend(cats)
 
-            for cat in data["dataSet"]:
-                categories.append(cat)
+        get_logger().info(f"Root categories: {len(root_categories)}")
+        get_logger().info(f"Categories: {len(categories)}")
 
         builder = FolderBuilder()
         folder = builder.build(root_categories, categories)
@@ -264,19 +328,23 @@ class OsmoseRealBackend(OsmoseBackend):
         for child in folder.children:
             self.__fetch_files_in_folders(child)
 
-    # TODO: Handle pagination ? # pylint: disable=fixme
     def get_folder_files(self, folder: OsmoseFolder):
-        data = self.fetch(
-            "/search",
-            params={
-                "documentKinds": "filedocument",
-                "cids": folder.raw_data["id"],
-                "exactCat": True,
-                "pageSize": "1000",
-            },
-        )
-        self.debug_into_file(f"files-{folder.raw_data['id']}", data)
-        for file_raw in data["dataSet"]:
+        def fetch(**params):
+            response = self.fetch(
+                "/search",
+                params={
+                    "documentKinds": "filedocument",
+                    "cids": folder.raw_data["id"],
+                    "exactCat": True,
+                    **params,
+                },
+            )
+            self.debug_into_file(f"files-{folder.raw_data['id']}", response)
+            return response
+
+        walker = PageWalker(callback=fetch)
+        raw_files = walker.walk()
+        for file_raw in raw_files:
             file = OsmoseFile(raw_data=file_raw)
             folder.files.append(file)
 
