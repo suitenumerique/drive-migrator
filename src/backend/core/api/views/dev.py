@@ -6,6 +6,7 @@ from django.http import Http404, HttpResponse
 from core.models import Workspace
 from core.osmose.osmose_backend import OsmoseFolder, OsmoseManager
 
+from ...osmose.osmose_real_backend import PageWalker
 from ...osmose.serializers import WorkspaceSerializer
 from ...processing.tasks import export
 from ..serializers import UserSerializer
@@ -38,12 +39,15 @@ def dev_view(request):
     if not settings.DEBUG:
         raise Http404()
 
-    workspace = Workspace.objects.get(id="101696cb-808f-4c0c-b310-5786f6b33ac3")
-    backend = OsmoseManager().get_backend()
-    # backend.fetch_categories_by_root({"id": "c_2196029"})
-
-    folder = backend.get_workspace_documents_structure(workspace)
-    # debug_folder(folder)
+    walker = PageWalker(
+        lambda **kwargs: {
+            "total": 1000000,
+            "start": 0,
+            "sort": "asc",
+            "dataSet": list(range(100)),  # Simulating 100 items in each call
+        }
+    )
+    result = walker.walk()
 
     return HttpResponse("Dev")
 
