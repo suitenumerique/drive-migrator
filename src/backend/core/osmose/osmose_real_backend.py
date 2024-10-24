@@ -55,15 +55,15 @@ class PageWalker:
         request = True
         while request:
             count += 1
-            get_logger().info(f"Fetching index {start}...")
+            # get_logger().info(f"Fetching index {start}...")
             response = self.callback(pageSize=PAGE_SIZE, start=start)
             if total is None:
                 total = response["total"]
-                get_logger().info(f"Total: {total}")
+                # get_logger().info(f"Total: {total}")
 
-            get_logger().info(
-                f"Got response: total: {response['total']}, start: {response['start']}, sort: {response['sort']}"
-            )
+            # get_logger().info(
+            #     f"Got response: total: {response['total']}, start: {response['start']}, sort: {response['sort']}"
+            # )
 
             data = response["dataSet"]
             output.extend(data)
@@ -71,7 +71,7 @@ class PageWalker:
             request = len(output) < total
             start += len(data)
             if count >= MAX:
-                get_logger().info("Max count reached")
+                get_logger().warning("Max count reached")
                 break
 
         return output
@@ -134,18 +134,18 @@ class OsmoseRealBackend(OsmoseBackend):
 
         except HTTPError as e:
             get_logger().error(
-                f"HTTP Error: {e.code} while downloading {download_url}: {e.reason}. Response body: {e.read().decode()}"
+                f"HTTP Error: {e.code} while downloading {download_url}: {e.reason}"  # . Response body: {e.read().decode()
             )
 
-            response = requests.get(  # noqa: S113
-                download_url,
-                headers={
-                    "Authorization": "Bearer " + self.jwt,
-                },
-            )
-            get_logger().error(
-                f"HTTP Error: Additional request response: {response.text}"
-            )
+            # response = requests.get(
+            #     download_url,
+            #     headers={
+            #         "Authorization": "Bearer " + self.jwt,
+            #     },
+            # )
+            # get_logger().error(
+            #     f"HTTP Error: Additional request response: {response.text}"
+            # )
 
             if e.code == 404 and settings.OSMOSE_BACKEND_ACCEPT_404:
                 error_ignored = True
