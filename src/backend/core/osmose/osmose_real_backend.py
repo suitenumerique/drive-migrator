@@ -256,7 +256,7 @@ class OsmoseRealBackend(OsmoseBackend):
         data = self.fetch(
             "/search/workspace",
             params={
-                "pageSize": "1000",
+                "pageSize": "1000",  # Based on stats, there is no users with more than 1000 workspaces
                 "belongsToWorkspace": True,
                 "member": osmose_user["id"],
             },

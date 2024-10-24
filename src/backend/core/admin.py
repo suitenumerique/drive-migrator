@@ -63,8 +63,13 @@ class UserAdmin(auth_admin.UserAdmin):
     )
     list_filter = ("is_staff", "is_superuser", "is_device", "is_active")
     ordering = ("is_active", "-is_superuser", "-is_staff", "-is_device", "-updated_at")
-    readonly_fields = ("id", "sub", "email", "created_at", "updated_at")
     search_fields = ("id", "sub", "admin_email", "email")
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = ("id", "sub", "created_at", "updated_at")
+        if obj:
+            fields = fields + ("email",)
+        return fields
 
 
 class ExtraTaskInfoAdminInline(admin.TabularInline):
