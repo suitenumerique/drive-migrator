@@ -101,7 +101,7 @@ class ResanaBackend:
         workspace.save()
 
         # TODO: set to success equivalent
-        if workspace.job_status == "created":
+        if workspace.job_status == "completed":
             get_logger().info(f"Setting status to success ...")
             workspace.set_status_resana(Workspace.Status.SUCCESS)
             workspace.save()
