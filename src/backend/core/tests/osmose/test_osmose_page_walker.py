@@ -13,6 +13,26 @@ def mock_callback():
     return Mock()
 
 
+def test_empty(mock_callback):
+    # Mock callback for a single page
+    mock_callback.return_value = {
+        "total": 0,
+        "start": 0,
+        "sort": "asc",
+        "dataSet": [],
+    }
+
+    walker = PageWalker(mock_callback)
+    result = walker.walk()
+
+    # Check if the result has all the items
+    assert len(result) == 0
+    assert result == []
+
+    # Check if the callback was called only once
+    mock_callback.assert_called_once_with(pageSize=PAGE_SIZE, start=0)
+
+
 def test_single_page(mock_callback):
     # Mock callback for a single page
     mock_callback.return_value = {
