@@ -76,7 +76,9 @@ def export(self, data):  # pylint: disable=unused-argument
     logger.info(f"Starting workspace {workspace_id} ...")
 
     workspace = Workspace.objects.get(id=workspace_id)
-    logger.info(f"Workspace title: {workspace.title}")
+    logger.info(
+        f"Workspace title: {workspace.title}, status_archive: {workspace.status_archive}, status_resana: {workspace.status_resana}"
+    )
     user = User.objects.get(id=data["user"]["id"])
 
     backend = OsmoseManager().get_backend()
@@ -94,6 +96,7 @@ def export(self, data):  # pylint: disable=unused-argument
 
     mails_manager = MailsManager()
 
+    logger.info(f"status_archive = {workspace.status_archive}")
     if workspace.status_archive == Workspace.Status.PENDING:
         logger.info("Calling zip_workspace_folder ...")
         helper = ArchiveManager()
@@ -107,6 +110,7 @@ def export(self, data):  # pylint: disable=unused-argument
         workspace.set_status_archive(Workspace.Status.SUCCESS)
         workspace.save()
 
+    logger.info(f"status_resana = {workspace.status_resana}")
     if workspace.status_resana == Workspace.Status.PENDING:
         resana_backend = ResanaBackend()
         logger.info("Calling resana create_workspace ...")

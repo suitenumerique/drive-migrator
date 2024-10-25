@@ -34,7 +34,7 @@ class ResanaBackend:
         # Upload folder to S3.
         get_logger().info("Calling upload_folder ...")
         s3_manager = S3ResanaManager()
-        bucket_name = s3_manager.upload_folder(workspace)
+        upload_path = s3_manager.upload_folder(workspace)
 
         # Get organization data.
         organization_uuid = self.get_destination_organization_uuid(workspace)
@@ -44,8 +44,8 @@ class ResanaBackend:
         response = self.request("get", f"/organizations/{organization_uuid}")
         organization_data = response.json()
 
-        get_logger().info("Organization data")
-        get_logger().info(json.dumps(organization_data, indent=2))
+        # get_logger().info("Organization data")
+        # get_logger().info(json.dumps(organization_data, indent=2))
 
         # Create workspace.
         response = self.request(
@@ -72,7 +72,7 @@ class ResanaBackend:
             json={
                 "type": "import",
                 "destinationWorkspaceUuid": workspace.resana_id,
-                "importPath": bucket_name,
+                "importPath": upload_path,
             },
         )
         get_logger().info("Job creation data")
