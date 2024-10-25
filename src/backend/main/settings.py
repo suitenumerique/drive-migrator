@@ -166,6 +166,12 @@ class Base(Configuration):
     RESANA_API_ENDPOINT = values.Value(
         environ_name="RESANA_API_ENDPOINT", environ_prefix=None
     )
+    RESANA_S3_BUCKET = values.Value(
+        environ_name="RESANA_S3_BUCKET", environ_prefix=None
+    )
+    RESANA_S3_REGION = values.Value(
+        environ_name="RESANA_S3_REGION", environ_prefix=None
+    )
 
     S3_VERSIONS_PAGE_SIZE = 50
 

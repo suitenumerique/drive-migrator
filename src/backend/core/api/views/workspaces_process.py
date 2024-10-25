@@ -14,6 +14,17 @@ class WorkspacesProcessAPIView(APIView):
     def create_export(self, user, workspace, types):
         if workspace.status != Workspace.Status.NONE:
             raise APIException("WorkspaceAlreadyExporting")
+
+        # Set workspace status to pending.
+        # IMPORTANT: Must be before the celery task creation because the
+        # task use this data.
+        workspace.migration_user = user
+        if "resana" in types:
+            workspace.set_status_resana(Workspace.Status.PENDING)
+        if "archive" in types:
+            workspace.set_status_archive(Workspace.Status.PENDING)
+        workspace.save()
+
         # Create Celery task.
         result = export.delay(
             data={
@@ -29,13 +40,6 @@ class WorkspacesProcessAPIView(APIView):
         extra_task.task_result = db_result
         extra_task.user = user
         extra_task.save()
-
-        workspace.migration_user = user
-        if "resana" in types:
-            workspace.set_status_resana(Workspace.Status.PENDING)
-        if "archive" in types:
-            workspace.set_status_archive(Workspace.Status.PENDING)
-        workspace.save()
 
     def post(self, request):
         data = request.data.get("workspaces")
