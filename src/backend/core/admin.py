@@ -123,6 +123,11 @@ class WorkspaceAdmin(admin.ModelAdmin):
     inlines = [ExtraTaskInfoAdminInline]
 
 
+@admin.register(models.FeatureFlag)
+class FeatureFlagAdmin(admin.ModelAdmin):
+    pass
+
+
 @admin.register(models.ExtraTaskInfo)
 class ExtraTaskInfoAdmin(admin.ModelAdmin):
     list_display = [

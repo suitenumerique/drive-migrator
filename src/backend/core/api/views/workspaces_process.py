@@ -4,8 +4,9 @@ from rest_framework.views import APIView
 
 from core.osmose.serializers import WorkspaceSerializer
 
-from ...models import ExtraTaskInfo, Workspace
+from ...models import ExtraTaskInfo, FeatureFlag, Workspace
 from ...processing.tasks import export
+from ...utils import is_feature
 from .. import APIException
 from ..serializers import UserSerializer
 
@@ -42,6 +43,9 @@ class WorkspacesProcessAPIView(APIView):
         extra_task.save()
 
     def post(self, request):
+        if not is_feature(FeatureFlag.Name.ALLOW_NEW_TASKS):
+            raise APIException("FeatureNotEnabled")
+
         data = request.data.get("workspaces")
         # This way we can check if the user has access to the workspaces
         workspaces = request.user.workspaces.filter(id__in=[*data])
