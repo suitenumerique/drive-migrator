@@ -4,6 +4,9 @@ import { useController, useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/Badge/Badge';
+import { Button } from '@/components/Button/Button';
+import { DropButton } from '@/components/DropButton/DropButton';
+import { useApi } from '@/hooks/useApi';
 
 import './Workspace.scss';
 
@@ -48,6 +51,44 @@ const WorkspaceStatusBadge = ({
 
 export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
   const { t } = useTranslation();
+  const { fetchApi } = useApi();
+
+  const showDetails = () => {
+    return workspace.status_archive === WorkspaceStatus.SUCCESS;
+  };
+
+  const downloadArchive = async () => {
+    const response = await fetchApi(
+      'workspaces/' + workspace.id + '/download_archive',
+    );
+    const data = (await response.json()) as { url: string };
+    window.open(data.url);
+  };
+
+  const options = (
+    <DropButton
+      aria-label={t('My account')}
+      button={
+        <Button
+          color="tertiary-text"
+          icon={<span className="material-icons">more_horiz</span>}
+        />
+      }
+    >
+      <ul>
+        <li>
+          <Button
+            color="primary-text"
+            icon={<span className="material-icons">sync</span>}
+            onClick={() => void downloadArchive()}
+          >
+            {t('Télécharger archive')}
+          </Button>
+        </li>
+      </ul>
+    </DropButton>
+  );
+
   return (
     <GenericWorkspace workspace={workspace}>
       <div className="suite__workspace__status">
@@ -58,6 +99,7 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
           {t('Resana')}
         </WorkspaceStatusBadge>
       </div>
+      {showDetails() && options}
     </GenericWorkspace>
   );
 };
