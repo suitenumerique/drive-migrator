@@ -6,6 +6,7 @@ from rest_framework.routers import DefaultRouter
 
 from core.api import viewsets
 from core.api.views.dev import dev_view
+from core.api.views.feature_flags import FeatureFlagsApiView
 from core.api.views.synchronize import SynchronizeAPIView
 from core.api.views.workspaces import WorkspacesViewset
 from core.api.views.workspaces_process import WorkspacesProcessAPIView
@@ -25,6 +26,7 @@ urlpatterns = [
                 *oidc_urls,
                 path("synchronize/", SynchronizeAPIView.as_view()),
                 path("workspaces/process", WorkspacesProcessAPIView.as_view()),
+                path("feature-flags", FeatureFlagsApiView.as_view()),
             ]
         ),
     ),

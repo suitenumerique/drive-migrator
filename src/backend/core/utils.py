@@ -1,5 +1,7 @@
 import os
 
+from core.models import FeatureFlag
+
 
 def get_dir_size(path="."):
     total = 0
@@ -18,3 +20,10 @@ def sizeof_fmt(num, suffix="B"):
             return f"{num:3.1f}{unit}{suffix}"
         num /= 1024.0
     return f"{num:.1f}Yi{suffix}"
+
+
+def is_feature(name: str) -> bool:
+    flag = FeatureFlag.objects.filter(name=name).first()
+    if flag is None:
+        return True
+    return flag.is_active

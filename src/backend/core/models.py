@@ -240,3 +240,18 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
         if not self.email:
             raise ValueError("User has no email address.")
         mail.send_mail(subject, message, from_email, [self.email], **kwargs)
+
+
+class FeatureFlag(models.Model):
+    class Name(models.TextChoices):
+        ALLOW_NEW_TASKS = "allow-new-tasks"
+
+    name = models.CharField(
+        max_length=32,
+        choices=Name.choices,
+    )
+
+    is_active = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.name
