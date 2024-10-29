@@ -54,10 +54,7 @@ class ArchiveManager:
         if os.path.exists(path):
             os.remove(path)
 
-    def upload_archive(self, workspace: Workspace):
-        folder_creator = FolderCreator()
-        path = folder_creator.get_workspace_path(workspace) + "." + self.archive_format
-
+    def get_s3_resource(self):
         s3 = boto3.resource(
             "s3",
             endpoint_url=settings.AWS_S3_ENDPOINT_URL,
@@ -65,14 +62,20 @@ class ArchiveManager:
             aws_secret_access_key=settings.AWS_S3_SECRET_ACCESS_KEY,
         )
 
-        bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
-        destination = os.path.basename(path)
-        bucket.upload_file(path, destination, Callback=ProgressPercentage(path))
+        return s3
 
+    def get_download_url(self, workspace: Workspace):
+        if not workspace.archive_path:
+            raise ValueError("Workspace does not have an archive path")
+
+        s3 = self.get_s3_resource()
         url = s3.meta.client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": settings.AWS_STORAGE_BUCKET_NAME, "Key": destination},
-            ExpiresIn=3600 * 24,
+            Params={
+                "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
+                "Key": workspace.archive_path,
+            },
+            ExpiresIn=3600 * 24 * 7,  # 7 days
         )
 
         logger.info("ArchiveManager.upload_archive")
@@ -92,3 +95,17 @@ class ArchiveManager:
         logger.info("ArchiveManager.upload_archive returning url with replaced netloc")
 
         return replaced.geturl()
+
+    def upload_archive(self, workspace: Workspace):
+        folder_creator = FolderCreator()
+        path = folder_creator.get_workspace_path(workspace) + "." + self.archive_format
+
+        s3 = self.get_s3_resource()
+        bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
+        destination = os.path.basename(path)
+        bucket.upload_file(path, destination, Callback=ProgressPercentage(path))
+
+        workspace.archive_path = destination
+        workspace.save()
+
+        return self.get_download_url(workspace)

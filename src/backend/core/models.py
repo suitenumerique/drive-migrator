@@ -77,6 +77,10 @@ class Workspace(BaseModel):
 
     title = models.CharField()
 
+    archive_path = models.CharField(
+        help_text=_("path of the archive on s3"), null=True, blank=True
+    )
+
     """
     Do not edit this field directly. Use status_archive and status_resana instead.
     """
