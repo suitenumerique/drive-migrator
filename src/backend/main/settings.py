@@ -662,6 +662,8 @@ class Production(Base):
         },
     }
 
+    DEBUG = False
+
 
 class Feature(Production):
     """
