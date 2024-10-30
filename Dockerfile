@@ -134,8 +134,6 @@ FROM backend-development as celery-flower
 # Switch back to the root user to install development dependencies
 USER root:root
 
-RUN pip install flower
-
 # Run django development server
 CMD ["celery", "-A", "main.celery_app", "flower"]
 
