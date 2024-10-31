@@ -92,6 +92,9 @@ def export(self, data):  # pylint: disable=unused-argument
     creator = FolderCreator()
     creator.create_folder(workspace, folder)
 
+    logger.info("Calling create_users_csv ...")
+    backend.create_users_csv(workspace)
+
     list_workspace_dir(workspace)
 
     mails_manager = MailsManager()

@@ -72,7 +72,7 @@ services:
   celery-dev:
     user: ${DOCKER_USER:-1000}
     image: impress:backend-development
-    command: ["celery", "-A", "main.celery_app", "worker", "-l", "INFO"]
+    command: ["celery", "-A", "main.celery_app", "worker", "-l", "INFO", "--concurrency=1"]
     environment:
       - DJANGO_CONFIGURATION=Development
     env_file:
