@@ -1,3 +1,4 @@
+import csv
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ from core.osmose.osmose_backend import (
     OsmoseFolder,
     OsmoseWorkspace,
 )
+from core.processing.folder_creator import FolderCreator
 from core.utils import sizeof_fmt
 
 
@@ -37,9 +39,12 @@ MAX = 500
 
 
 class PageWalker:
-    def __init__(self, callback):
+    def __init__(self, callback, **opts):
         self.callback = callback
         self.page_size = PAGE_SIZE
+        if "pageSize" in opts:
+            self.page_size = opts["pageSize"]
+
         self.max = MAX
         self.total = None
         self.start = 0
@@ -56,7 +61,7 @@ class PageWalker:
         while request:
             count += 1
             # get_logger().info(f"Fetching index {start}...")
-            response = self.callback(pageSize=PAGE_SIZE, start=start)
+            response = self.callback(pageSize=self.page_size, start=start)
             if total is None:
                 total = response["total"]
                 # get_logger().info(f"Total: {total}")
@@ -66,6 +71,7 @@ class PageWalker:
             # )
 
             data = response["dataSet"]
+            # get_logger().info(f"Data len: {len(data)}")
             output.extend(data)
 
             request = len(output) < total
@@ -170,6 +176,20 @@ class OsmoseRealBackend(OsmoseBackend):
             size = os.stat(destination).st_size
             size_formatted = sizeof_fmt(size)
             get_logger().info(f"File: {destination} {size_formatted} ({size}) ...")
+
+    def create_users_csv(self, workspace):
+        users = self.__fetch_users(workspace)
+        get_logger().info(f"Users to write: {len(users)}")
+        folder_creator = FolderCreator()
+        path = os.path.join(
+            folder_creator.get_workspace_path(workspace), "osmose_users.csv"
+        )
+        with open(path, "w") as file:
+            writer = csv.writer(file)
+            row_list = []
+            for user in users:
+                row_list.append([user["name"], user["firstName"], user["email"]])
+            writer.writerows(row_list)
 
     def __handle_validation(self, headers, destination):
         if headers.get("Content-Type") != "text/html":
@@ -279,6 +299,18 @@ class OsmoseRealBackend(OsmoseBackend):
                 )
             )
         return workspaces
+
+    def __fetch_users(self, workspace):
+        def fetch(**params):
+            response = self.fetch(
+                "/search/member",
+                params={"wrkspc": workspace.osmose_id, **params},
+            )
+            self.debug_into_file(f"users_{workspace.id}", response)
+            return response
+
+        walker = PageWalker(callback=fetch, pageSize=150)
+        return walker.walk()
 
     def __fetch_categories_by_root(self, root_category):
         def fetch(**params):

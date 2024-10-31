@@ -39,15 +39,10 @@ def dev_view(request):
     if not settings.DEBUG:
         raise Http404()
 
-    walker = PageWalker(
-        lambda **kwargs: {
-            "total": 1000000,
-            "start": 0,
-            "sort": "asc",
-            "dataSet": list(range(100)),  # Simulating 100 items in each call
-        }
-    )
-    result = walker.walk()
+    workspace = Workspace.objects.get(id="647368dd-96ad-4240-b690-4ebd271d69bc")
+
+    backend = OsmoseManager().get_backend()
+    users = backend.fetch_users(workspace)
 
     return HttpResponse("Dev")
 
