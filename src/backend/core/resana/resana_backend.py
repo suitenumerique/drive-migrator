@@ -25,7 +25,7 @@ class ResanaBackend:
 
     def get_destination_organization_uuid(self, workspace: Workspace):
         # TODO: Map here.
-        return "03-01-94aba7b4-79af-11ef-8733-1e4e476d37ba"
+        return settings.RESANA_DEFAULT_ORGANIZATION
 
     def create_workspace(self, workspace: Workspace):
         if workspace.resana_id:
@@ -92,6 +92,7 @@ class ResanaBackend:
         get_logger().info(f"Fetching job of {workspace.id} {workspace.title} ...")
         response = self.request("get", f"/jobs/{workspace.resana_job_id}")
         job_data = response.json()
+        get_logger().info(json.dumps(job_data, indent=2))
 
         get_logger().info(
             f"Job status of {workspace.id} {workspace.title}: {job_data['status']} ..."
@@ -100,7 +101,6 @@ class ResanaBackend:
         workspace.job_status = job_data["status"]
         workspace.save()
 
-        # TODO: set to success equivalent
         if workspace.job_status == "completed":
             get_logger().info(f"Setting status to success ...")
             workspace.set_status_resana(Workspace.Status.SUCCESS)
@@ -108,6 +108,13 @@ class ResanaBackend:
             get_logger().info("Sending send_resana_ready_mail ...")
             mails_manager = MailsManager()
             mails_manager.send_resana_ready_mail(workspace.migration_user, workspace)
+        elif workspace.job_status == "failed":
+            get_logger().info(f"Setting status to failed ...")
+            workspace.set_status_resana(Workspace.Status.FAILURE)
+            workspace.save()
+            get_logger().info("Sending send_resana_failed_mail ...")
+            mails_manager = MailsManager()
+            mails_manager.send_fail_mail(workspace.migration_user, workspace)
 
     def request(self, method, url, **kwargs) -> requests.Response:
         self.init_jwt()

@@ -172,6 +172,9 @@ class Base(Configuration):
     RESANA_S3_REGION = values.Value(
         environ_name="RESANA_S3_REGION", environ_prefix=None
     )
+    RESANA_DEFAULT_ORGANIZATION = values.Value(
+        environ_name="RESANA_DEFAULT_ORGANIZATION", environ_prefix=None
+    )
 
     S3_VERSIONS_PAGE_SIZE = 50
 
