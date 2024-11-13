@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "prettier --check . && yarn stylelint && next build",
     "build:ci": "cp .env.development .env.local && cross-env NEXT_PUBLIC_CI=true yarn build",
-    "build-theme": "cunningham -g css,ts -o src/cunningham --utility-classes",
+    "build-theme": "cunningham -g css,ts,scss -o src/cunningham --utility-classes && mv src/cunningham/cunningham-tokens.scss src/cunningham/cunningham-tokens-sass.scss",
     "start": "npx -y serve@latest out",
     "lint": "tsc --noEmit && next lint",
     "prettier": "prettier --write .",

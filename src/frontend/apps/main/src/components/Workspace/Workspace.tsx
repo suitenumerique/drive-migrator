@@ -90,7 +90,10 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
   );
 
   return (
-    <GenericWorkspace workspace={workspace}>
+    <GenericWorkspace
+      workspace={workspace}
+      className="suite__workspace--exporting"
+    >
       <div className="suite__workspace__status">
         <WorkspaceStatusBadge status={workspace.status_archive}>
           {t('Archive')}

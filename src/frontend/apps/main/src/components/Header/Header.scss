@@ -1,3 +1,8 @@
+@import '../../cunningham/cunningham-tokens-sass';
+
+$lg: map-get($themes, 'default', 'theme', 'breakpoints', 'lg');
+$sm: map-get($themes, 'default', 'theme', 'breakpoints', 'sm');
+
 .suite__header {
   width: 100%;
   background-color: var(--c--theme--colors--greyscale-000);
@@ -7,6 +12,7 @@
   flex-direction: column;
   height: 100px;
   justify-content: center;
+  overflow: hidden;
 
   &__inner {
     display: flex;
@@ -23,6 +29,12 @@
     a {
       text-decoration: none;
     }
+
+    @media (max-width: $lg) {
+      a {
+        display: none;
+      }
+    }
   }
 
   &__title {
@@ -32,6 +44,10 @@
 
     h2 {
       margin: 0;
+    }
+
+    @media (max-width: $lg) {
+      display: none;
     }
   }
 
