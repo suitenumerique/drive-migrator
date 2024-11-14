@@ -21,6 +21,12 @@ app = Celery("main")
 # - namespace='CELERY' means all celery-related configuration keys
 #   should have a `CELERY_` prefix.
 app.config_from_object("django.conf:settings", namespace="CELERY")
+# worker_prefetch_multiplier=1 because we want to handle well the re-deploy of Celery workers.
+#   When the pod needs to be restarted, the old worker receives a SIGTERM signals, which means the workers is going to
+#   stop accepting new tasks, but it will finish the one that is already running.
+#   So by setting this parameter to 1, we ensure that the new worker will start processing the tasks as soon as possible.
+# task_track_started=True because why not :)
+app.conf.update(task_track_started=True, worker_prefetch_multiplier=1)
 
 # Load task modules from all registered Django apps.
 app.autodiscover_tasks()
