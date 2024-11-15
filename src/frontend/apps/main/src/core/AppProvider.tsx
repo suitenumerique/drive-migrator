@@ -2,6 +2,7 @@ import { CunninghamProvider } from '@openfun/cunningham-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 
+import { Support } from '@/components/Support/Support';
 import { useCunninghamTheme } from '@/cunningham';
 import '@/i18n/initI18n';
 
@@ -29,7 +30,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <ReactQueryDevtools />
       <CunninghamProvider theme={theme}>
-        <Auth>{children}</Auth>
+        <Auth>
+          <Support>{children}</Support>
+        </Auth>
       </CunninghamProvider>
     </QueryClientProvider>
   );

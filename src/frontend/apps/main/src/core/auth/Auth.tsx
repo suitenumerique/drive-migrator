@@ -4,8 +4,10 @@ import React, { PropsWithChildren, useEffect, useState } from 'react';
 import { fetchAPI } from '@/api/fetchApi';
 import { User } from '@/core/auth/types';
 import { baseApiUrl } from '@/core/conf';
+import { terminateSupportSession } from '@/hooks/useSupport';
 
 export const logout = () => {
+  terminateSupportSession();
   window.location.replace(new URL('logout/', baseApiUrl()).href);
 };
 
