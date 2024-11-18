@@ -3,8 +3,8 @@ import SubLayout from '@/app/sub-layout';
 import './global.scss';
 
 export const metadata = {
-  title: 'Osmose Migration Tool',
-  description: 'Migrate your Osmose data to a new platform.',
+  title: 'Migration Osmose',
+  description: 'Migrez vos données Osmose.',
 };
 
 export default function RootLayout({

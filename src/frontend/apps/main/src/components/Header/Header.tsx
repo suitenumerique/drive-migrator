@@ -25,7 +25,7 @@ export const Header = () => {
           <LogoGouv />
           <a href="/">
             <div className="suite__header__title">
-              <h2 className="clr-primary-text">Osmose Migration Tool</h2>
+              <h2 className="clr-primary-text">Migration Osmose</h2>
             </div>
           </a>
         </div>
