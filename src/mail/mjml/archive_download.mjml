@@ -14,11 +14,13 @@
 
           <!-- Main Message -->
           <mj-text>{% blocktrans %}Suite à votre demande, vous pouvez télécharger une archive contenant l'ensemble des fichiers de votre espace Osmose {{workspace_name}}{% endblocktrans %}</mj-text>
+          <mj-text>{% blocktrans %}Attention, le lien de téléchargement de ce mail est valide 7 jours. Passé ce délai vous pourrez toujours télécharger l'archive depuis l'outil de migration en vous connectant.{% endblocktrans %}</mj-text>
 
-          <mj-button href="{{download_url}}" background-color="#000091" color="white" padding-bottom="30px">
+          <mj-button href="{{download_url}}" background-color="#000091" color="white">
             {% trans "Télécharger l'archive"%}
           </mj-button>
-          <mj-text>{% trans "En cas de problème, vous pouvez contacter le support." %}</mj-text>
+
+          <mj-include path="./partial/support.mjml" />
 
           <!-- Signature -->
           <mj-text>
