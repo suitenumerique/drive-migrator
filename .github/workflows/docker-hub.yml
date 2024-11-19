@@ -39,6 +39,12 @@ jobs:
         if: github.event_name != 'pull_request'
         run: echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USER" --password-stdin
       -
+        name: Run trivy scan
+        uses: numerique-gouv/action-trivy-cache@main
+        with:
+          docker-build-args: '--target backend-production -f Dockerfile'
+          docker-image-name: 'docker.io/lasuite/osmose-migration-back:${{ github.sha }}'
+      -
         name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -71,6 +77,12 @@ jobs:
         name: Login to DockerHub
         if: github.event_name != 'pull_request'
         run: echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USER" --password-stdin
+      -
+        name: Run trivy scan
+        uses: numerique-gouv/action-trivy-cache@main
+        with:
+          docker-build-args: '-f src/frontend/Dockerfile --target frontend-production'
+          docker-image-name: 'docker.io/lasuite/osmose-migration-back:${{ github.sha }}'
       -
         name: Build and push
         uses: docker/build-push-action@v5
