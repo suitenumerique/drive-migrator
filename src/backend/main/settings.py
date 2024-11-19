@@ -296,7 +296,6 @@ class Base(Configuration):
         "rest_framework",
         "django_filters",
         "parler",
-        "easy_thumbnails",
         # Third Party apps
         "hijack",
         "hijack.contrib.admin",
