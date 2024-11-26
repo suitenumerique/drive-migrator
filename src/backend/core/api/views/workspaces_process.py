@@ -6,6 +6,7 @@ from core.osmose.serializers import WorkspaceSerializer
 
 from ...models import ExtraTaskInfo, FeatureFlag, Workspace
 from ...processing.tasks import export
+from ...resana.resana_backend import ResanaBackend
 from ...utils import is_feature
 from .. import APIException
 from ..serializers import UserSerializer
@@ -42,18 +43,39 @@ class WorkspacesProcessAPIView(APIView):
         extra_task.user = user
         extra_task.save()
 
+    def validation(self, user, data, workspaces):
+        """
+        Here we want to make sure the user exist on Resana if we are going to export to Resana at least one workspace.
+        """
+        check_resana_user = False
+        for workspace in workspaces:
+            types = data.get(str(workspace.id))
+            if "resana" in types:
+                check_resana_user = True
+                break
+
+        if check_resana_user:
+            resana_backend = ResanaBackend()
+            resana_user = resana_backend.fetch_user(user)
+            if not resana_user:
+                raise APIException("ResanaUserNotFound")
+
     def post(self, request):
         if not is_feature(FeatureFlag.Name.ALLOW_NEW_TASKS):
             raise APIException("FeatureNotEnabled")
 
+        user = request.user
+
         data = request.data.get("workspaces")
         # This way we can check if the user has access to the workspaces
-        workspaces = request.user.workspaces.filter(id__in=[*data])
+        workspaces = user.workspaces.filter(id__in=[*data])
         if len(workspaces) != len(data):
             raise APIException("WorkspaceNotFound")
+
+        self.validation(user, data, workspaces)
 
         # user.workspaces
         for workspace in workspaces:
             types = data.get(str(workspace.id))
-            self.create_export(request.user, workspace, types)
+            self.create_export(user, workspace, types)
         return Response()

@@ -1,7 +1,7 @@
 'use client';
 import { Alert, Button, Loader } from '@openfun/cunningham-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
@@ -15,6 +15,7 @@ export interface IForm {
 
 export default function Prepare() {
   const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
   const { workspaces, fetch, hasError } = useWorkspaces();
   const { fetchApi } = useApi();
   const searchParams = useSearchParams();
@@ -57,17 +58,22 @@ export default function Prepare() {
   };
 
   const submit = async (data: IForm) => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const response = await fetchApi('workspaces/process', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        workspaces: data.workspaces,
-      }),
-    });
-    router.replace('/finish');
+    setIsLoading(true);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const response = await fetchApi('workspaces/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspaces: data.workspaces,
+        }),
+      });
+      router.replace('/finish');
+    } catch (e) {
+      setIsLoading(false);
+    }
   };
 
   const methods = useForm<IForm>({
@@ -81,9 +87,15 @@ export default function Prepare() {
     return null;
   }
 
+  const displayLoader = isLoading || !workspaces;
+
   return (
     <div className="container">
-      {workspaces ? (
+      {displayLoader ? (
+        <div className="container__loader">
+          <Loader size="medium" />
+        </div>
+      ) : (
         <FormProvider {...methods}>
           {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
           <form onSubmit={methods.handleSubmit(submit)}>
@@ -116,10 +128,6 @@ export default function Prepare() {
             </div>
           </form>
         </FormProvider>
-      ) : (
-        <div className="container__loader">
-          <Loader size="medium" />
-        </div>
       )}
     </div>
   );
