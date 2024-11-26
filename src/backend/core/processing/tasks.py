@@ -117,7 +117,7 @@ def export(self, data):  # pylint: disable=unused-argument
     if workspace.status_resana == Workspace.Status.PENDING:
         resana_backend = ResanaBackend()
         logger.info("Calling resana create_workspace ...")
-        resana_backend.create_workspace(workspace)
+        resana_backend.create_workspace(workspace, user)
         # At this point, this is the resana refresh job command that will put the workspace in success state
         workspace.set_status_resana(Workspace.Status.PENDING)
         workspace.save()
