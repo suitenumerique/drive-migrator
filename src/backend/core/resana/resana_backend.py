@@ -7,7 +7,7 @@ import requests
 from celery.utils.log import get_task_logger
 
 from core.mails_manager import MailsManager
-from core.models import Workspace
+from core.models import User, Workspace
 from core.resana.s3_resana_manager import S3ResanaManager
 
 
@@ -27,14 +27,61 @@ class ResanaBackend:
         # TODO: Map here.
         return settings.RESANA_DEFAULT_ORGANIZATION
 
-    def create_workspace(self, workspace: Workspace):
+    def fetch_user(self, user: User):
+        get_logger().info(f"Search Resana user {user.email} ...")
+        response = self.request(
+            "get",
+            "/contacts/users",
+            params={"search": user.email},
+            base_url=settings.RESANA_ALT_API_ENDPOINT,
+        )
+        data = response.json()
+        users = data["users"]
+        if len(users) == 0:
+            return None
+
+        user = users[0]
+        get_logger().info(f"User found: {user}")
+        return user
+
+    def add_admin(self, workspace: Workspace, user):
+        if not workspace.resana_id:
+            raise Exception("Workspace not created in Resana")
+
+        get_logger().info(
+            f"Adding admin to {workspace.resana_id} {workspace.title} ..."
+        )
+        response = self.request(
+            "post",
+            "/api-workspaces/members",
+            json={
+                "userUuid": user["uuid"],
+                "workspaceUuid": workspace.resana_id,
+                "profileCode": "GESTIONNAIRE",
+            },
+            base_url=settings.RESANA_ALT_API_ENDPOINT,
+        )
+        get_logger().info(json.dumps(response.json(), indent=2))
+
+    def create_workspace(self, workspace: Workspace, user: User):
         if workspace.resana_id:
             raise Exception("Workspace already created in Resana")
+
+        # Fetch resana user to make sure it exists before proceeding to upload.
+        resana_user = self.fetch_user(user)
+        if not resana_user:
+            # TODO: Add specific logic here.
+            raise Exception(f"User {user.email} not found in Resana")
 
         # Upload folder to S3.
         get_logger().info("Calling upload_folder ...")
         s3_manager = S3ResanaManager()
         upload_path = s3_manager.upload_folder(workspace)
+
+        # Get organizations.
+        # response = self.request("get", f"/organizations")
+        # data = response.json()
+        # get_logger().info(json.dumps(data, indent=2))
 
         # Get organization data.
         organization_uuid = self.get_destination_organization_uuid(workspace)
@@ -64,6 +111,9 @@ class ResanaBackend:
 
         workspace.resana_id = workspace_data["uuid"]
         workspace.save()
+
+        # Add user as admin.
+        self.add_admin(workspace, resana_user)
 
         # Create job.
         response = self.request(
@@ -124,7 +174,11 @@ class ResanaBackend:
         else:
             func = self.session.post
 
-        response = func(settings.RESANA_API_ENDPOINT + url, **kwargs)
+        full_url = settings.RESANA_API_ENDPOINT + url
+        if base_url := kwargs.pop("base_url", None):
+            full_url = base_url + url
+
+        response = func(full_url, **kwargs)
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
