@@ -41,8 +41,9 @@ class S3ResanaManager:
 
         bucket_name = self.get_bucket(workspace)
         bucket = s3.Bucket(bucket_name)
-        if bucket.creation_date is None:
-            raise Exception(f"Bucket {bucket_name} does not exist")  # pylint: disable=broad-exception-raised
+        # We can't rely on bucket creation date because it's not available in OutScale;
+        # if bucket.creation_date is None:
+        #     raise Exception(f"Bucket {bucket_name} does not exist")  # pylint: disable=broad-exception-raised
 
         folder_creator = FolderCreator()
         path = folder_creator.get_workspace_path(workspace)

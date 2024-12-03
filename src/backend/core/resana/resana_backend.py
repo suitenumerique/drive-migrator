@@ -35,6 +35,7 @@ class ResanaBackend:
             params={"search": user.email},
             base_url=settings.RESANA_ALT_API_ENDPOINT,
         )
+
         data = response.json()
         users = data["users"]
         if len(users) == 0:
@@ -73,15 +74,16 @@ class ResanaBackend:
             # TODO: Add specific logic here.
             raise Exception(f"User {user.email} not found in Resana")
 
+        # Get organizations.
+        # get_logger().info("Fetching organizations ...")
+        # response = self.request("get", f"/organizations")
+        # data = response.json()
+        # get_logger().info(json.dumps(data, indent=2))
+
         # Upload folder to S3.
         get_logger().info("Calling upload_folder ...")
         s3_manager = S3ResanaManager()
         upload_path = s3_manager.upload_folder(workspace)
-
-        # Get organizations.
-        # response = self.request("get", f"/organizations")
-        # data = response.json()
-        # get_logger().info(json.dumps(data, indent=2))
 
         # Get organization data.
         organization_uuid = self.get_destination_organization_uuid(workspace)
@@ -182,8 +184,10 @@ class ResanaBackend:
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
-            get_logger().error(f"Error while calling {method} {url} {response.status_code}")
-            print(response.text)
+            get_logger().error(
+                f"Error while calling {method} {url} {response.status_code}"
+            )
+            print(response.text)  # noqa: T201
             get_logger().error(json.dumps(e.response.json(), indent=2))
             raise e
 
