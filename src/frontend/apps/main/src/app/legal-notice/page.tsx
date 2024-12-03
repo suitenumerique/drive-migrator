@@ -2,15 +2,17 @@
 export default function LegalNotice() {
   return (
     <div className="container">
-      <h1>Mention légale</h1>
+      <h1>Mentions légales</h1>
       <div>
         <h2>Éditeur</h2>
         <p>
-          Direction interministérielle des affaires numériques (DINUM), 20
-          avenue de Segur 75007 Paris.
+          Direction interministérielle du numérique (DINUM), 20 avenue de Segur
+          75007 Paris.
         </p>
         <h2>Directeur de la publication</h2>
-        <p>Stéphanie Schaer: Directrice numérique interministériel (DINUM).</p>
+        <p>
+          Stéphanie Schaer : Directrice interministérielle du numérique (DINUM).
+        </p>
         <h2>Copyright</h2>
         <p>
           Illustration: <span>DINUM</span>

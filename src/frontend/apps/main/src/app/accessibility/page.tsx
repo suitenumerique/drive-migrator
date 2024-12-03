@@ -23,7 +23,7 @@ export default function Accessibility() {
         <p>
           Si vous ne pouvez pas accéder à un contenu ou à un service, vous
           pouvez contacter la personne responsable de https://lasuite.
-          umerique.gouv.fr pour être dirigé vers une alternative accessible ou
+          numerique.gouv.fr pour être dirigé vers une alternative accessible ou
           pour obtenir le contenu sous une autre forme.
         </p>
         <p>

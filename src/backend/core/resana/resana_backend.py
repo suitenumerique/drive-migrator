@@ -182,7 +182,8 @@ class ResanaBackend:
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
-            get_logger().error(f"Error while calling {method} {url}")
+            get_logger().error(f"Error while calling {method} {url} {response.status_code}")
+            print(response.text)
             get_logger().error(json.dumps(e.response.json(), indent=2))
             raise e
 
