@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from rest_framework import exceptions as drf_exceptions
 from rest_framework import views as drf_views
 from rest_framework.exceptions import APIException as ExistingAPIException
+from rest_framework.status import HTTP_403_FORBIDDEN
 
 
 def exception_handler(exc, context):
@@ -27,6 +28,8 @@ def exception_handler(exc, context):
 
 
 class APIException(ExistingAPIException):
+    status_code = HTTP_403_FORBIDDEN
+
     def __init__(self, name="Generic"):
         self.default_detail = {"error_name": name}
         super().__init__()

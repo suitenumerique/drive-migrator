@@ -39,6 +39,7 @@ class ResanaBackend:
         data = response.json()
         users = data["users"]
         if len(users) == 0:
+            get_logger().info(f"User not found: {user.email}")
             return None
 
         user = users[0]
