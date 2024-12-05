@@ -523,7 +523,7 @@ class Base(Configuration):
             scope.set_tag("application", "backend")
 
             # Ignore the logs added by the DockerflowMiddleware
-            ignore_logger("request.summary")
+            # ignore_logger("request.summary")
 
 
 class Build(Base):
