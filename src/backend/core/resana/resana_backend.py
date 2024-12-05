@@ -177,6 +177,7 @@ class ResanaBackend:
             mails_manager.send_fail_mail(workspace.migration_user, workspace)
 
     def request(self, method, url, **kwargs) -> requests.Response:
+        get_logger().info(f"Request {url}")
         self.init_jwt()
 
         if method == "get":
@@ -187,6 +188,8 @@ class ResanaBackend:
         full_url = settings.RESANA_API_ENDPOINT + url
         if base_url := kwargs.pop("base_url", None):
             full_url = base_url + url
+
+        get_logger().info(f"Request full url {full_url}")
 
         response = func(full_url, **kwargs)
         try:
@@ -202,6 +205,7 @@ class ResanaBackend:
         return response
 
     def create_jwt(self):
+        get_logger().info(f"Create jwt")
         self.session = requests.Session()
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         response = self.session.post(
@@ -219,12 +223,16 @@ class ResanaBackend:
             },
             headers=headers,
         )
+        get_logger().info(f"Response")
+        print(response.text)  # noqa: T201
         response.raise_for_status()
+        get_logger().info(f"Response ok")
 
         self.session.headers[
             "Authorization"
         ] = f'Bearer {self.session.cookies.get("interstis_access")}'
         self.jwt = self.session.cookies.get("interstis_access")
+        get_logger().info(f"JWT: {self.jwt}")
 
         return ""
 
