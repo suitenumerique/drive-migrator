@@ -35,9 +35,17 @@ class ResanaBackend:
             params={"search": user.email},
             base_url=settings.RESANA_ALT_API_ENDPOINT,
         )
+        get_logger().info(f"Response")
+        print(response.text)  # noqa: T201
 
         data = response.json()
+        get_logger().info(f"JSON")
+        print(data)  # noqa: T201
+
         users = data["users"]
+        get_logger().info(f"Users")
+        print(users)  # noqa: T201
+
         if len(users) == 0:
             return None
 
