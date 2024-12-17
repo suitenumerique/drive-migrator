@@ -7,7 +7,7 @@ import requests
 from celery.utils.log import get_task_logger
 
 from core.mails_manager import MailsManager
-from core.models import User, Workspace
+from core.models import User, Workspace, ResanaEmailMapping
 from core.resana.s3_resana_manager import S3ResanaManager
 
 
@@ -23,9 +23,25 @@ class ResanaBackend:
         self.session = None
         self.jwt = None
 
-    def get_destination_organization_uuid(self, workspace: Workspace):
-        # TODO: Map here.
-        return settings.RESANA_DEFAULT_ORGANIZATION
+    def get_mapping_from_email(self, email):
+        # extract domain from email
+        parts = email.split("@")
+        if len(parts) != 2:
+            raise Exception("Invalid email")
+        domain = parts[1]
+        mapping = ResanaEmailMapping.objects.filter(domain=domain).first()
+        if mapping:
+            return mapping
+        mapping = ResanaEmailMapping.objects.filter(domain="*").first()
+        if not mapping:
+            raise Exception("No default mapping found")
+        return mapping
+
+    def get_destination_organization_uuid(self, user: User, workspace: Workspace):
+        if settings.RESANA_DEFAULT_ORGANIZATION:
+            return settings.RESANA_DEFAULT_ORGANIZATION
+        mapping = self.get_mapping_from_email(user.email)
+        return mapping.resana_organization_uuid
 
     def fetch_user(self, user: User):
         get_logger().info(f"Search Resana user {user.email} ...")
@@ -65,6 +81,17 @@ class ResanaBackend:
         )
         get_logger().info(json.dumps(response.json(), indent=2))
 
+
+    def get_organizations(self):
+        # Get organizations.
+        get_logger().info("Fetching organizations ...")
+        response = self.request("get", f"/organizations", params={
+            "itemsPerPage": 100
+        })
+        data = response.json()
+        organizations = data['hydra:member']
+        return organizations
+
     def create_workspace(self, workspace: Workspace, user: User):
         if workspace.resana_id:
             raise Exception("Workspace already created in Resana")
@@ -87,7 +114,7 @@ class ResanaBackend:
         upload_path = s3_manager.upload_folder(workspace)
 
         # Get organization data.
-        organization_uuid = self.get_destination_organization_uuid(workspace)
+        organization_uuid = self.get_destination_organization_uuid(user, workspace)
         get_logger().info(
             f"Creating workspace inside organization {organization_uuid} ..."
         )
