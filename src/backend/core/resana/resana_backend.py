@@ -7,7 +7,7 @@ import requests
 from celery.utils.log import get_task_logger
 
 from core.mails_manager import MailsManager
-from core.models import User, Workspace, ResanaEmailMapping
+from core.models import ResanaEmailMapping, User, Workspace
 from core.resana.s3_resana_manager import S3ResanaManager
 
 
@@ -81,15 +81,12 @@ class ResanaBackend:
         )
         get_logger().info(json.dumps(response.json(), indent=2))
 
-
     def get_organizations(self):
         # Get organizations.
         get_logger().info("Fetching organizations ...")
-        response = self.request("get", f"/organizations", params={
-            "itemsPerPage": 100
-        })
+        response = self.request("get", f"/organizations", params={"itemsPerPage": 100})
         data = response.json()
-        organizations = data['hydra:member']
+        organizations = data["hydra:member"]
         return organizations
 
     def create_workspace(self, workspace: Workspace, user: User):

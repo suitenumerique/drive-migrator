@@ -30,7 +30,10 @@ urlpatterns = [
                 path("workspaces/process", WorkspacesProcessAPIView.as_view()),
                 path("feature-flags", FeatureFlagsApiView.as_view()),
                 path("super-secret-error-test", ErrorApiView.as_view()),
-                path("super-secret-resana-email-mapping", ResanaEmailMappingApiView.as_view()),
+                path(
+                    "super-secret-resana-email-mapping",
+                    ResanaEmailMappingApiView.as_view(),
+                ),
             ]
         ),
     ),
