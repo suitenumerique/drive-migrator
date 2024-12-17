@@ -257,13 +257,8 @@ class FeatureFlag(models.Model):
         return self.name
 
 
-
 class ResanaEmailMapping(models.Model):
-
-    domain = models.CharField(
-        max_length=256,
-        unique=True
-    )
+    domain = models.CharField(max_length=256, unique=True)
 
     resana_organization_name = models.CharField(
         max_length=256,
@@ -274,4 +269,11 @@ class ResanaEmailMapping(models.Model):
     )
 
     def __str__(self):
-        return self.domain + " -> " + self.resana_organization_name + "(" + self.resana_organization_uuid + ")"
+        return (
+            self.domain
+            + " -> "
+            + self.resana_organization_name
+            + "("
+            + self.resana_organization_uuid
+            + ")"
+        )

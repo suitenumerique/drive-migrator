@@ -130,7 +130,12 @@ class FeatureFlagAdmin(admin.ModelAdmin):
 
 @admin.register(models.ResanaEmailMapping)
 class ResanaEmailMappingAdmin(admin.ModelAdmin):
-    search_fields = ("id", "domain", "resana_organization_name", "resana_organization_uuid")
+    search_fields = (
+        "id",
+        "domain",
+        "resana_organization_name",
+        "resana_organization_uuid",
+    )
 
 
 @admin.register(models.ExtraTaskInfo)
