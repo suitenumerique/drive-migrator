@@ -106,6 +106,8 @@ class OsmoseRealBackend(OsmoseBackend):
             private_key,
             algorithm="RS256",
         )
+        print('JWT')  # noqa: T201
+        print({"sub": user, "iss": settings.OSMOSE_JWT_ISS, "exp": expiration}) # noqa: T201
         return encoded
 
     def init_jwt(self):
