@@ -102,7 +102,7 @@ class OsmoseRealBackend(OsmoseBackend):
         expiration = int(time.time()) + 60 * 60 * 24
 
         encoded = jwt.encode(
-            {"sub": "admin", "iss": settings.OSMOSE_JWT_ISS, "exp": expiration},
+            {"sub": user, "iss": settings.OSMOSE_JWT_ISS, "exp": expiration},
             private_key,
             algorithm="RS256",
         )
