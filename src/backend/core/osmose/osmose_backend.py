@@ -24,19 +24,25 @@ class OsmoseWorkspace:
         self.raw_data = raw_data
 
 
+def cleanup_filename(name):
+    name = name.replace("/", "-")
+    name = re.sub(r'\s', ' ', name)
+    return name
+
+
 class OsmoseFolder:
     def __init__(self, raw_data=None):
         self.raw_data = raw_data
         self.name = raw_data["name"] if raw_data and "name" in raw_data else "None"
-        self.name = self.name.replace("/", "-")
+        self.name = cleanup_filename(self.name)
         self.children = []
         self.files: [OsmoseFile] = []
-
 
 class OsmoseFile:
     def __init__(self, raw_data=None):
         self.raw_data = raw_data
         self.name = raw_data["title"] if raw_data and "title" in raw_data else "None"
+        self.name = cleanup_filename(self.name)
 
     @property
     def name_with_extension(self):
