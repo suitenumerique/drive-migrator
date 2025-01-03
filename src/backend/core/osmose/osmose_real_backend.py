@@ -101,13 +101,17 @@ class OsmoseRealBackend(OsmoseBackend):
 
         expiration = int(time.time()) + 60 * 60 * 24
 
+        raw = {"sub": user, "iss": settings.OSMOSE_JWT_ISS, "exp": expiration}
+        if settings.OSMOSE_JWT_IP_MASK:
+            raw["ipMask"] = settings.OSMOSE_JWT_IP_MASK
+
         encoded = jwt.encode(
-            {"sub": user, "iss": settings.OSMOSE_JWT_ISS, "exp": expiration},
+            raw,
             private_key,
             algorithm="RS256",
         )
-        print('JWT')  # noqa: T201
-        print({"sub": user, "iss": settings.OSMOSE_JWT_ISS, "exp": expiration}) # noqa: T201
+        print("JWT")  # noqa: T201
+        print(raw)  # noqa: T201
         return encoded
 
     def init_jwt(self):

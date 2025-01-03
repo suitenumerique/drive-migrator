@@ -197,6 +197,9 @@ class Base(Configuration):
     )
     OSMOSE_JWT_SUB = values.Value(environ_name="OSMOSE_JWT_SUB", environ_prefix=None)
     OSMOSE_JWT_ISS = values.Value(environ_name="OSMOSE_JWT_ISS", environ_prefix=None)
+    OSMOSE_JWT_IP_MASK = values.Value(
+        environ_name="OSMOSE_JWT_IP_MASK", environ_prefix=None
+    )
     OSMOSE_BACKEND = values.Value(environ_name="OSMOSE_BACKEND", environ_prefix=None)
     OSMOSE_BACKEND_DEBUG = values.BooleanValue(
         environ_name="OSMOSE_BACKEND_DEBUG", environ_prefix=None, default=False
