@@ -43,6 +43,16 @@ class ResanaBackend:
         mapping = self.get_mapping_from_email(user.email)
         return mapping.resana_organization_uuid
 
+    def get_error_details(self, workspace: Workspace):
+        if not workspace.resana_job_id:
+            raise ValueError("Workspace must have a resana job id")
+        response = self.request(
+            "get",
+            f"/jobs/{workspace.resana_job_id}/tasks",
+            params={"itemsPerPage": 1000, "status": 4, "type": 2},
+        )
+        return response.json()
+
     def fetch_user(self, user: User):
         get_logger().info(f"Search Resana user {user.email} ...")
         response = self.request(
@@ -159,6 +169,17 @@ class ResanaBackend:
         workspace.resana_job_id = job_data["uuid"]
         workspace.save()
 
+    def fetch_job(self, workspace: Workspace):
+        if not workspace.resana_job_id:
+            raise Exception("Workspace has no job id")
+
+        get_logger().info(f"Fetching job of {workspace.id} {workspace.title} ...")
+        response = self.request("get", f"/jobs/{workspace.resana_job_id}")
+        job_data = response.json()
+        get_logger().info(json.dumps(job_data, indent=2))
+
+        return job_data
+
     def refresh_job(self, workspace: Workspace):
         if not workspace.resana_job_id:
             raise Exception("Workspace has no job id")
@@ -166,10 +187,7 @@ class ResanaBackend:
         if workspace.status_resana == Workspace.Status.SUCCESS:
             raise Exception("Workspace status_resana is already SUCCESS")
 
-        get_logger().info(f"Fetching job of {workspace.id} {workspace.title} ...")
-        response = self.request("get", f"/jobs/{workspace.resana_job_id}")
-        job_data = response.json()
-        get_logger().info(json.dumps(job_data, indent=2))
+        job_data = self.fetch_job(workspace)
 
         get_logger().info(
             f"Job status of {workspace.id} {workspace.title}: {job_data['status']} ..."

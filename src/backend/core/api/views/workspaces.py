@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from ...models import Workspace
 from ...osmose.serializers import WorkspaceSerializer
 from ...processing.folder_helper import ArchiveManager
+from ...resana.resana_backend import ResanaBackend
 from ..filters import MultipleValueFilter
 
 
@@ -38,3 +39,11 @@ class WorkspacesViewset(viewsets.ReadOnlyModelViewSet):  # pylint: disable=too-m
         helper = ArchiveManager()
         workspace = self.get_object()
         return Response({"url": helper.get_download_url(workspace)})
+
+    @action(detail=True)
+    def resana_error_details(self, request, *args, **kwargs):
+        workspace = self.get_object()
+        backend = ResanaBackend()
+        details = backend.get_error_details(workspace)
+        job_data = backend.fetch_job(workspace)
+        return Response({"details": details, "job": job_data})

@@ -1,5 +1,14 @@
-import { Checkbox, Switch, VariantType } from '@openfun/cunningham-react';
-import React, { PropsWithChildren, ReactNode } from 'react';
+import {
+  Alert,
+  Checkbox,
+  Loader,
+  Modal,
+  ModalSize,
+  Switch,
+  VariantType,
+  useModal,
+} from '@openfun/cunningham-react';
+import React, { PropsWithChildren, ReactNode, useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
@@ -52,9 +61,14 @@ const WorkspaceStatusBadge = ({
 export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
   const { t } = useTranslation();
   const { fetchApi } = useApi();
+  const modal = useModal();
+  const [resanaErrorDetails, setResanaErrorDetails] = useState<any>();
 
   const showDetails = () => {
-    return workspace.status_archive === WorkspaceStatus.SUCCESS;
+    return (
+      workspace.status_archive === WorkspaceStatus.SUCCESS ||
+      workspace.status_resana === WorkspaceStatus.FAILURE
+    );
   };
 
   const downloadArchive = async () => {
@@ -63,6 +77,15 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
     );
     const data = (await response.json()) as { url: string };
     window.open(data.url);
+  };
+
+  const showResanaErrorDetails = async () => {
+    modal.open();
+    const response = await fetchApi(
+      'workspaces/' + workspace.id + '/resana_error_details/',
+    );
+    const data = await response.json();
+    setResanaErrorDetails(data);
   };
 
   const options = (
@@ -76,15 +99,28 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
       }
     >
       <ul>
-        <li>
-          <Button
-            color="primary-text"
-            icon={<span className="material-icons">sync</span>}
-            onClick={() => void downloadArchive()}
-          >
-            {t('Télécharger archive')}
-          </Button>
-        </li>
+        {workspace.status_archive === WorkspaceStatus.SUCCESS && (
+          <li>
+            <Button
+              color="primary-text"
+              icon={<span className="material-icons">sync</span>}
+              onClick={() => void downloadArchive()}
+            >
+              {t('Télécharger archive')}
+            </Button>
+          </li>
+        )}
+        {workspace.status_resana === WorkspaceStatus.FAILURE && (
+          <li>
+            <Button
+              color="primary-text"
+              icon={<span className="material-icons">question_mark</span>}
+              onClick={() => void showResanaErrorDetails()}
+            >
+              {t('Détails erreur Resana')}
+            </Button>
+          </li>
+        )}
       </ul>
     </DropButton>
   );
@@ -103,6 +139,49 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
         </WorkspaceStatusBadge>
       </div>
       {showDetails() && options}
+      <Modal
+        title={t('Details erreurs Resana')}
+        size={ModalSize.EXTRA_LARGE}
+        {...modal}
+      >
+        <Alert>
+          {t(
+            "Ceci est la liste des fichiers dont l'importation a échoué sur Resana. Les fichiers non présents dans cette liste ont bien été importés sur Resana.",
+          )}
+        </Alert>
+        <div className="suite__workspace__resana-error__details">
+          {resanaErrorDetails ? (
+            <>
+              <div>
+                {t('Fichiers en erreur: ')}
+                {resanaErrorDetails['job']['numberOfFilesError']}
+              </div>
+              {/* eslint-disable-next-line @typescript-eslint/no-unsafe-call */}
+              {resanaErrorDetails['details']['hydra:member'].map(
+                (entry: any) => {
+                  return (
+                    <div
+                      key={entry.key}
+                      className="suite__workspace__resana-error__details__row"
+                    >
+                      <div className="suite__workspace__resana-error__details__row__name">
+                        {entry.key}
+                      </div>
+                      <div className="suite__workspace__resana-error__details__row__logs">
+                        {JSON.stringify(entry.logMessage)}
+                      </div>
+                    </div>
+                  );
+                },
+              )}
+            </>
+          ) : (
+            <div className="container__loader">
+              <Loader />
+            </div>
+          )}
+        </div>
+      </Modal>
     </GenericWorkspace>
   );
 };

@@ -26,7 +26,7 @@ class OsmoseWorkspace:
 
 def cleanup_filename(name):
     name = name.replace("/", "-")
-    name = re.sub(r'\s', ' ', name)
+    name = re.sub(r"\s", " ", name)
     return name
 
 
@@ -37,6 +37,7 @@ class OsmoseFolder:
         self.name = cleanup_filename(self.name)
         self.children = []
         self.files: [OsmoseFile] = []
+
 
 class OsmoseFile:
     def __init__(self, raw_data=None):
