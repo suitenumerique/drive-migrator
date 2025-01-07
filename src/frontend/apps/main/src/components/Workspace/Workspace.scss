@@ -68,4 +68,21 @@ $md: map-get($themes, 'default', 'theme', 'breakpoints', 'md');
       font-weight: 500;
     }
   }
+
+  &__resana-error__details {
+    padding: 1rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+
+    &__row {
+      &__name {
+        font-weight: bold;
+      }
+
+      &__logs {
+        font-style: italic;
+      }
+    }
+  }
 }
