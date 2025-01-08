@@ -53,6 +53,20 @@ class ResanaBackend:
         )
         return response.json()
 
+    def retry_job(self, workspace: Workspace):
+        if not workspace.resana_job_id:
+            raise ValueError("Workspace must have a resana job id")
+        response = self.request(
+            "post",
+            f"/jobs/{workspace.resana_job_id}/retry",
+            json={}
+        )
+
+        workspace.set_status_resana(Workspace.Status.PENDING)
+        workspace.save()
+
+        return response.json()
+
     def fetch_user(self, user: User):
         get_logger().info(f"Search Resana user {user.email} ...")
         response = self.request(

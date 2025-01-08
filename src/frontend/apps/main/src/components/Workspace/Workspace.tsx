@@ -88,6 +88,15 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
     setResanaErrorDetails(data);
   };
 
+  const retry = async () => {
+    modal.open();
+    const response = await fetchApi(
+      'workspaces/' + workspace.id + '/resana_retry/',
+    );
+    await response.json();
+    window.location.reload();
+  };
+
   const options = (
     <DropButton
       aria-label={t('My account')}
@@ -156,6 +165,13 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
                 {t('Fichiers en erreur: ')}
                 {resanaErrorDetails['job']['numberOfFilesError']}
               </div>
+
+              {new URLSearchParams(window.location.search).get('debug') ===
+                'true' && (
+                <div>
+                  <Button onClick={() => void retry()}>{t('Relancer')}</Button>
+                </div>
+              )}
               {/* eslint-disable-next-line @typescript-eslint/no-unsafe-call */}
               {resanaErrorDetails['details']['hydra:member'].map(
                 (entry: any) => {
