@@ -117,6 +117,8 @@ class WorkspaceAdmin(admin.ModelAdmin):
         "status",
         "status_archive",
         "status_resana",
+        "resana_files_success",
+        "resana_files_error",
     )
     list_filter = ("status", "status_archive", "status_resana")
     search_fields = ("id", "osmose_id", "title")

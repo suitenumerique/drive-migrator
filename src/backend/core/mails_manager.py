@@ -83,3 +83,25 @@ class MailsManager:
             html_message=msg_html,
             fail_silently=False,
         )
+
+    def send_resana_ready_errors_mail(self, user, workspace: Workspace):
+        title = _(
+            "Votre espace %(title)s est prêt sur Resana !" % {"title": workspace.title}
+        )
+        template_vars = {
+            "title": title,
+            "site": Site.objects.get_current(),
+            "email": user.email,
+            "workspace_name": workspace.title,
+            "url": "https://resana.numerique.gouv.fr/public/",
+        }
+        msg_html = render_to_string("mail/html/resana_ready_errors.html", template_vars)
+        msg_plain = render_to_string("mail/text/resana_ready_errors.txt", template_vars)
+        mail.send_mail(
+            title,
+            msg_plain,
+            settings.EMAIL_FROM,
+            self.get_recipients(user),
+            html_message=msg_html,
+            fail_silently=False,
+        )

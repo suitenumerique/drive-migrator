@@ -108,6 +108,16 @@ class Workspace(BaseModel):
         default=Status.NONE,
     )
 
+    """
+    Number of files that were successfully imported in Resana.
+    """
+    resana_files_success = models.IntegerField(blank=True, null=True)
+
+    """
+    Number of files that were unsuccessfully imported in Resana.
+    """
+    resana_files_error = models.IntegerField(blank=True, null=True)
+
     def set_status_archive(self, status):
         self.status_archive = status
         self.sync_status()

@@ -32,27 +32,39 @@ export interface Workspace {
   status: WorkspaceStatus;
   status_archive: WorkspaceStatus;
   status_resana: WorkspaceStatus;
+  resana_files_success?: number;
+  resana_files_error?: number;
 }
 
 const WorkspaceStatusBadge = ({
   children,
   status,
-}: PropsWithChildren & { status: WorkspaceStatus }) => {
+  variantOverride,
+}: PropsWithChildren & {
+  status: WorkspaceStatus;
+  variantOverride?: VariantType;
+}) => {
   const { t } = useTranslation();
   if (status === WorkspaceStatus.NONE) {
     return null;
   }
+  const map = {
+    [WorkspaceStatus.PENDING]: VariantType.INFO,
+    [WorkspaceStatus.SUCCESS]: VariantType.SUCCESS,
+    [WorkspaceStatus.FAILURE]: VariantType.ERROR,
+  };
+  const variant = variantOverride ? variantOverride : map[status];
   return (
     <div className="suite__workspace__status__unit">
       <p>{children}</p>
       {status === WorkspaceStatus.PENDING && (
-        <Badge variant={VariantType.INFO}>{t('En cours')}</Badge>
+        <Badge variant={variant}>{t('En cours')}</Badge>
       )}
       {status === WorkspaceStatus.SUCCESS && (
-        <Badge variant={VariantType.SUCCESS}>{t('Terminé')}</Badge>
+        <Badge variant={variant}>{t('Terminé')}</Badge>
       )}
       {status === WorkspaceStatus.FAILURE && (
-        <Badge variant={VariantType.ERROR}>{t('Échoué')}</Badge>
+        <Badge variant={variant}>{t('Échoué')}</Badge>
       )}
     </div>
   );
@@ -67,7 +79,7 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
   const showDetails = () => {
     return (
       workspace.status_archive === WorkspaceStatus.SUCCESS ||
-      workspace.status_resana === WorkspaceStatus.FAILURE
+      (workspace.resana_files_error && workspace.resana_files_error > 0)
     );
   };
 
@@ -119,7 +131,7 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
             </Button>
           </li>
         )}
-        {workspace.status_resana === WorkspaceStatus.FAILURE && (
+        {workspace.resana_files_error && workspace.resana_files_error > 0 && (
           <li>
             <Button
               color="primary-text"
@@ -143,7 +155,14 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
         <WorkspaceStatusBadge status={workspace.status_archive}>
           {t('Archive')}
         </WorkspaceStatusBadge>
-        <WorkspaceStatusBadge status={workspace.status_resana}>
+        <WorkspaceStatusBadge
+          status={workspace.status_resana}
+          variantOverride={
+            workspace.resana_files_error && workspace.resana_files_error > 0
+              ? VariantType.WARNING
+              : undefined
+          }
+        >
           {t('Resana')}
         </WorkspaceStatusBadge>
       </div>
@@ -154,9 +173,19 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
         {...modal}
       >
         <Alert>
-          {t(
-            "Ceci est la liste des fichiers dont l'importation a échoué sur Resana. Les fichiers non présents dans cette liste ont bien été importés sur Resana.",
-          )}
+          <div>
+            <div>
+              {t(
+                "Ceci est la liste des fichiers dont l'importation a échoué sur Resana, ceci peut être dû par exemple à un refus de la part dans l'anti-virus.",
+              )}
+            </div>
+            <br />
+            <div>
+              {t(
+                '⚠️ Important ⚠️ Les fichiers non présents dans cette liste ont bien été importés sur Resana.',
+              )}
+            </div>
+          </div>
         </Alert>
         <div className="suite__workspace__resana-error__details">
           {resanaErrorDetails ? (
