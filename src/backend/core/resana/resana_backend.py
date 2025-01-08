@@ -57,9 +57,7 @@ class ResanaBackend:
         if not workspace.resana_job_id:
             raise ValueError("Workspace must have a resana job id")
         response = self.request(
-            "post",
-            f"/jobs/{workspace.resana_job_id}/retry",
-            json={}
+            "post", f"/jobs/{workspace.resana_job_id}/retry", json={}
         )
 
         workspace.set_status_resana(Workspace.Status.PENDING)
@@ -208,22 +206,27 @@ class ResanaBackend:
         )
 
         workspace.job_status = job_data["status"]
-        workspace.save()
+        workspace.resana_files_success = job_data["numberOfFilesSuccess"]
+        workspace.resana_files_error = job_data["numberOfFilesError"]
 
-        if workspace.job_status == "completed":
+        if workspace.job_status in ("completed", "failed"):
             get_logger().info(f"Setting status to success ...")
             workspace.set_status_resana(Workspace.Status.SUCCESS)
             workspace.save()
-            get_logger().info("Sending send_resana_ready_mail ...")
-            mails_manager = MailsManager()
-            mails_manager.send_resana_ready_mail(workspace.migration_user, workspace)
-        elif workspace.job_status == "failed":
-            get_logger().info(f"Setting status to failed ...")
-            workspace.set_status_resana(Workspace.Status.FAILURE)
-            workspace.save()
-            get_logger().info("Sending send_resana_failed_mail ...")
-            mails_manager = MailsManager()
-            mails_manager.send_fail_mail(workspace.migration_user, workspace)
+
+            if workspace.job_status == "completed":
+                get_logger().info("Sending send_resana_ready_mail ...")
+                mails_manager = MailsManager()
+                mails_manager.send_resana_ready_mail(
+                    workspace.migration_user, workspace
+                )
+
+            elif workspace.job_status == "failed":
+                get_logger().info("Sending send_resana_ready_errors_mail ...")
+                mails_manager = MailsManager()
+                mails_manager.send_resana_ready_errors_mail(
+                    workspace.migration_user, workspace
+                )
 
     def request(self, method, url, **kwargs) -> requests.Response:
         self.init_jwt()

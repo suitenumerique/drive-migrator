@@ -25,4 +25,6 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "osmose_id",
             "status_resana",
             "status_archive",
+            "resana_files_success",
+            "resana_files_error",
         ]

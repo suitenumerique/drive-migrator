@@ -76,9 +76,19 @@ const SuccessWorkspaces = ({
     <div>
       <h2>{t('Communautés migrées')}</h2>
       <Alert type={VariantType.SUCCESS}>
-        {t(
-          'Les communautés suivantes ont été archivées et/ou migrées avec succès vers Resana. Si vous avez demandé une archive nous vous avons envoyé un lien de téléchargement, si vous pouvez dès à présent les retrouver sur la plateforme Resana.',
-        )}
+        <div>
+          <div>
+            {t(
+              'Les communautés suivantes ont été archivées et/ou migrées vers Resana. Si vous avez demandé une archive nous vous avons envoyé un lien de téléchargement, si vous pouvez dès à présent les retrouver sur la plateforme Resana.',
+            )}
+          </div>
+          <br />
+          <div>
+            {t(
+              'Si la pastille "Terminé" d\'une migration vers Resana est orange, alors certains fichiers n\'ont pas pu être importés, cliquez sur les trois petits points pour consulter la liste des fichiers.',
+            )}
+          </div>
+        </div>
       </Alert>
       <div className="suite__workspaces mt-s">
         {workspaces[WorkspaceStatus.SUCCESS].map((workspace) => (
@@ -102,9 +112,11 @@ const FailureWorkspaces = ({
     <div>
       <h2>{t('Communautés en erreur')}</h2>
       <Alert type={VariantType.ERROR}>
-        {t(
-          "Si une communauté est en erreur, c'est qu'il y a eu un problème inattendu lors des opérations d'archive et/ou de migration vers Resana. Contactez le support pour obtenir de l'aide.",
-        )}
+        <div>
+          {t(
+            "Si une communauté est en erreur, c'est qu'il y a eu un problème inattendu lors des opérations d'archive et/ou de migration vers Resana. Contactez le support pour obtenir de l'aide.",
+          )}
+        </div>
       </Alert>
       <div className="suite__workspaces mt-s">
         {workspaces[WorkspaceStatus.FAILURE].map((workspace) => (
