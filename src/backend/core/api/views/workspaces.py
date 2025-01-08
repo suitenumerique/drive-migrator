@@ -47,3 +47,10 @@ class WorkspacesViewset(viewsets.ReadOnlyModelViewSet):  # pylint: disable=too-m
         details = backend.get_error_details(workspace)
         job_data = backend.fetch_job(workspace)
         return Response({"details": details, "job": job_data})
+
+    @action(detail=True)
+    def resana_retry(self, request, *args, **kwargs):
+        workspace = self.get_object()
+        backend = ResanaBackend()
+        data = backend.retry_job(workspace)
+        return Response({"data": data})
