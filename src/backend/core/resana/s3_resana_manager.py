@@ -1,4 +1,4 @@
-import mimetypes
+import magic
 import os
 
 from django.conf import settings
@@ -220,7 +220,7 @@ class S3ResanaManager:
             "application/vnd.sun.xml.writer.global",
             "application/vnd.sun.xml.writer.template",
         ]
-        mime_type, _ = mimetypes.guess_type(absolute_file_path)
+        mime_type = magic.from_file(absolute_file_path, mime=True)
         if mime_type not in allowed:
             logger.info(
                 f"({count}) Skipping {absolute_file_path} due to mime type {mime_type}"
