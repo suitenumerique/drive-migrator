@@ -68,16 +68,20 @@ export const Footer = () => {
         <div className="suite__footer__content__middle">
           {[
             {
-              label: t('Legal Notice'),
-              href: '/legal-notice',
+              label: t('Mentions Légales'),
+              href: 'https://resana.numerique.gouv.fr/public/information/consulterAccessUrl?cle_url=1670797648AmgPbwQIBjpRPABmUT9QcAY4DjMLKgduDGdXagFgWGFQZ1RjVjJXOgA2UGUANg==',
             },
             {
-              label: t('Personal data and cookies'),
+              label: t('Données personnelles et cookies'),
               href: '/personal-data-cookies',
             },
             {
-              label: t('Accessibility'),
+              label: t('Accessibilité'),
               href: '/accessibility',
+            },
+            {
+              label: t('CGU'),
+              href: 'https://resana.numerique.gouv.fr/public/information/consulterAccessUrl?cle_url=149823049AmhQMFRYAz8BbAdhAmxVdQQ6XGFSc1M6DGdTbgdmW2JXYAQ0WzEIZVNmU2BRaQ==',
             },
           ].map(({ label, href }) => (
             <Link key={label} href={href}>
@@ -86,7 +90,7 @@ export const Footer = () => {
           ))}
         </div>
         <p className="suite__footer__content__mention">
-          {t('Unless otherwise stated, all content on this site is under')}{' '}
+          {t('Sauf mention contraire, tout le contenu de ce site est sous')}{' '}
           <StyledLink
             href="https://github.com/etalab/licence-ouverte/blob/master/LO.md"
             target="__blank"
