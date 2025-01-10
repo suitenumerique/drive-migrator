@@ -77,7 +77,7 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
   const [resanaErrorDetails, setResanaErrorDetails] = useState<any>();
 
   const showDetails = () => {
-    return (
+    return !!(
       workspace.status_archive === WorkspaceStatus.SUCCESS ||
       (workspace.resana_files_error && workspace.resana_files_error > 0)
     );
