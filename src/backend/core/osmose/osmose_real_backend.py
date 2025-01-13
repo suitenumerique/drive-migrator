@@ -390,7 +390,7 @@ class OsmoseRealBackend(OsmoseBackend):
         data = self.fetch(
             "/search/member",
             params={
-                "email": email,
+                "email": email.lower(),
             },
         )
         self.debug_into_file("user", data)

@@ -67,8 +67,6 @@ class UserAdmin(auth_admin.UserAdmin):
 
     def get_readonly_fields(self, request, obj=None):
         fields = ("id", "sub", "created_at", "updated_at")
-        if obj:
-            fields = fields + ("email",)
         return fields
 
 
