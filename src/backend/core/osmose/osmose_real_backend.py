@@ -130,6 +130,9 @@ class OsmoseRealBackend(OsmoseBackend):
     @retry(tries=5, delay=2, backoff=2)
     def download_file(self, download_url, destination):
         get_logger().info(f"Downloading {download_url} to {destination} ...")
+        if " " in download_url:
+            download_url = download_url.replace(" ", "%20")
+            get_logger().info(f"Special chars detected, new url: {download_url}")
         self.init_jwt()
         opener = self.__build_opener()
         urllib.request.install_opener(opener)
