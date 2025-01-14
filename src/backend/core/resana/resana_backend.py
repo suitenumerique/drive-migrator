@@ -148,7 +148,7 @@ class ResanaBackend:
             "post",
             f"/workspaces",
             json={
-                "name": workspace.title.replace('/', '').replace('\\', ''),
+                "name": workspace.title.replace("/", "").replace("\\", ""),
                 "organizationUuid": organization_uuid,
                 "color": "#ffffff",
             },
