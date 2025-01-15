@@ -265,8 +265,8 @@ class S3ResanaManager:
                 )
                 absolute_file_path = os.path.join(root, name)
 
-                if not self.upload_validation(count, absolute_file_path):
-                    continue
+                # if not self.upload_validation(count, absolute_file_path):
+                #     continue
 
                 logger.info(
                     f"({count}) Uploading {absolute_file_path} to {relative_file_path} ...."

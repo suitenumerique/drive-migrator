@@ -131,7 +131,7 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
             </Button>
           </li>
         )}
-        {workspace.resana_files_error && workspace.resana_files_error > 0 && (
+        {!!workspace.resana_files_error && workspace.resana_files_error > 0 && (
           <li>
             <Button
               color="primary-text"
