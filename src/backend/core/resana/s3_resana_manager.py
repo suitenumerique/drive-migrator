@@ -229,6 +229,14 @@ class S3ResanaManager:
 
         return True
 
+    def format_folders(self, workspace: Workspace):
+        """
+        Goes through all the folders recursively and make sure the maximum length of folders and files is 60. If longer
+        It truncate their size to 60.
+        """
+        folder_creator = FolderCreator()
+        path = folder_creator.get_workspace_path(workspace)
+
     def upload_folder(self, workspace: Workspace):
         s3 = boto3.resource(
             "s3",
