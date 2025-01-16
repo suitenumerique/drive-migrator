@@ -8,7 +8,9 @@ from celery.utils.log import get_task_logger
 
 from core.mails_manager import MailsManager
 from core.models import ResanaEmailMapping, User, Workspace
+from core.processing.folder_creator import FolderCreator
 from core.resana.s3_resana_manager import S3ResanaManager
+from core.utils import truncate_folder_and_file_names
 
 
 def get_logger():
@@ -126,6 +128,11 @@ class ResanaBackend:
         # response = self.request("get", f"/organizations")
         # data = response.json()
         # get_logger().info(json.dumps(data, indent=2))
+
+        # Make sure folder and file name are not too long.
+        folder_creator = FolderCreator()
+        path = folder_creator.get_workspace_path(workspace)
+        truncate_folder_and_file_names(path)
 
         # Upload folder to S3.
         get_logger().info("Calling upload_folder ...")

@@ -27,3 +27,26 @@ def is_feature(name: str) -> bool:
     if flag is None:
         return True
     return flag.is_active
+
+
+def truncate_folder_and_file_names(path, max_folder_length=57, max_files_length=300):
+    for root, dirs, files in os.walk(path):
+        for dir in dirs:
+            if len(dir) > max_folder_length:
+                old_name = os.path.join(root, dir)
+                new_name = os.path.join(root, dir[:max_folder_length])
+                print(f"Renaming folder {old_name} to {new_name}")  # noqa: T201
+                os.rename(old_name, new_name)
+        for file in files:
+            if len(file) > max_files_length:
+                base, extension = os.path.splitext(file)
+                new_length = (
+                    max_files_length - len(extension) - 1
+                    if extension
+                    else max_files_length
+                )
+                new_base = base[:new_length]
+                old_name = os.path.join(root, file)
+                new_name = os.path.join(root, new_base + extension)
+                print(f"Renaming file {old_name} to {new_name}")  # noqa: T201
+                os.rename(old_name, new_name)
