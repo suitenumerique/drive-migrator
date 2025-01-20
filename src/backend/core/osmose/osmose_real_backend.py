@@ -199,7 +199,15 @@ class OsmoseRealBackend(OsmoseBackend):
             writer = csv.writer(file)
             row_list = []
             for user in users:
-                row_list.append([user["name"], user["firstName"], user["email"]])
+                if not user:
+                    continue
+                row_list.append(
+                    [
+                        user.get("name", ""),
+                        user.get("firstName", ""),
+                        user.get("email", ""),
+                    ]
+                )
             writer.writerows(row_list)
 
     def __handle_validation(self, headers, destination):
