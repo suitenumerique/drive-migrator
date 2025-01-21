@@ -29,7 +29,7 @@ def is_feature(name: str) -> bool:
     return flag.is_active
 
 
-def truncate_folder_and_file_names(path, max_folder_length=57, max_files_length=300):
+def truncate_folder_and_file_names(path, max_folder_length=57, max_files_length=200):
     for root, dirs, files in os.walk(path):
         for dir in dirs:
             if len(dir) > max_folder_length:
@@ -39,14 +39,41 @@ def truncate_folder_and_file_names(path, max_folder_length=57, max_files_length=
                 os.rename(old_name, new_name)
         for file in files:
             if len(file) > max_files_length:
-                base, extension = os.path.splitext(file)
-                new_length = (
-                    max_files_length - len(extension) - 1
-                    if extension
-                    else max_files_length
-                )
-                new_base = base[:new_length]
                 old_name = os.path.join(root, file)
-                new_name = os.path.join(root, new_base + extension)
+                new_name = truncate_file_name(file, max_files_length)
                 print(f"Renaming file {old_name} to {new_name}")  # noqa: T201
                 os.rename(old_name, new_name)
+
+
+def truncate_file_name(filename, max_length=200):
+    if len(filename) <= max_length:
+        return filename
+    base, extension = os.path.splitext(filename)
+    new_length = max_length - len(extension) - 1 if extension else max_length
+    new_base = base[:new_length]
+    return new_base + extension
+
+
+def truncate_path_file_name(path, max_file_name_length=200):
+    """
+    Reduce the size of a filename in path keeping its extension.
+    """
+    head, filename = os.path.split(path)
+    filename = truncate_file_name(filename, max_file_name_length)
+    return os.path.join(head, filename)
+
+
+def truncate_path_parts(path, max_folder_length=200, max_files_length=200):
+    """
+    Reduce each parts of path if needed.
+    """
+    head, filename = os.path.split(path)
+    parts = head.split(os.sep)
+    output = []
+    for part in parts:
+        output.append(part[:max_folder_length])
+    output.append(truncate_file_name(filename, max_files_length))
+    output_path = os.path.join(*output)
+    if path.startswith(os.sep):
+        output_path = os.sep + output_path
+    return output_path
