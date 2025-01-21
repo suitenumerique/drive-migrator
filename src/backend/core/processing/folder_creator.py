@@ -8,7 +8,7 @@ from celery.utils.log import get_task_logger
 
 from core.models import Workspace
 from core.osmose.osmose_backend import OsmoseFolder
-from core.utils import get_dir_size, sizeof_fmt
+from core.utils import get_dir_size, sizeof_fmt, truncate_path_parts
 
 logger = get_task_logger(__name__)
 
@@ -79,6 +79,12 @@ class FolderCreator:
                 settings.OSMOSE_BASE_ENDPOINT, file.raw_data["downloadUrl"]
             )
             destination = os.path.join(path, file.name_with_extension)
+            destination_truncated = truncate_path_parts(destination)
+            if destination != destination_truncated:
+                logger.info(
+                    f"Truncated filename: {destination} into {destination_truncated}"
+                )
+                destination = destination_truncated
 
             backend.download_file(download_url, destination)
             size = get_dir_size(self.get_workspace_path(self.workspace))
