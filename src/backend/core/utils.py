@@ -29,6 +29,18 @@ def is_feature(name: str) -> bool:
     return flag.is_active
 
 
+def rename_with_counter(old_name, new_name):
+    """
+    Make sure that new_name does not exists before renaming.
+    If so, it appends a counter at the end until new_name + counter does not exists.
+    """
+    count = 0
+    new_name_to_use = new_name
+    while os.path.exists(new_name_to_use):
+        count += 1
+        new_name_to_use = new_name + str(count)
+    os.rename(old_name, new_name_to_use)
+
 def truncate_folder_and_file_names(path, max_folder_length=57, max_files_length=200):
     for root, dirs, files in os.walk(path):
         for dir in dirs:
@@ -36,13 +48,13 @@ def truncate_folder_and_file_names(path, max_folder_length=57, max_files_length=
                 old_name = os.path.join(root, dir)
                 new_name = os.path.join(root, dir[:max_folder_length])
                 print(f"Renaming folder {old_name} to {new_name}")  # noqa: T201
-                os.rename(old_name, new_name)
+                rename_with_counter(old_name, new_name)
         for file in files:
             if len(file) > max_files_length:
                 old_name = os.path.join(root, file)
                 new_name = truncate_file_name(file, max_files_length)
                 print(f"Renaming file {old_name} to {new_name}")  # noqa: T201
-                os.rename(old_name, new_name)
+                rename_with_counter(old_name, new_name)
 
 
 def truncate_file_name(filename, max_length=200):
