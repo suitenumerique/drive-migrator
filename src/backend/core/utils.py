@@ -46,21 +46,15 @@ def truncate_folder_and_file_names(path, max_folder_length=57, max_files_length=
 
 
 def truncate_file_name(filename, max_length=200):
+    """
+    Reduce the size of a filename in path keeping its extension.
+    """
     if len(filename) <= max_length:
         return filename
     base, extension = os.path.splitext(filename)
     new_length = max_length - len(extension) - 1 if extension else max_length
     new_base = base[:new_length]
     return new_base + extension
-
-
-def truncate_path_file_name(path, max_file_name_length=200):
-    """
-    Reduce the size of a filename in path keeping its extension.
-    """
-    head, filename = os.path.split(path)
-    filename = truncate_file_name(filename, max_file_name_length)
-    return os.path.join(head, filename)
 
 
 def truncate_path_parts(path, max_folder_length=200, max_files_length=200):

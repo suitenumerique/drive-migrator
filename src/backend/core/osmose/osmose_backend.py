@@ -27,6 +27,7 @@ class OsmoseWorkspace:
 def cleanup_filename(name):
     name = name.replace("/", "-")
     name = re.sub(r"\s", " ", name)
+    name = name.replace("«", "").replace("»", "").replace("'", "").replace('"', "")
     return name
 
 
