@@ -50,7 +50,7 @@ class FolderCreator:
     def __create_folder(
         self, current_dir: str, workspace: Workspace, folder: OsmoseFolder
     ):
-        path = os.path.join(current_dir, folder.name)
+        path = truncate_path_parts(os.path.join(current_dir, folder.name))
         if not os.path.exists(path):
             os.mkdir(path)
 
