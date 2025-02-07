@@ -12,6 +12,24 @@ from .. import APIException
 from ..serializers import UserSerializer
 
 
+def push_workspace_task(workspace, user):
+    # Create Celery task.
+    result = export.delay(
+        data={
+            "workspace": WorkspaceSerializer(workspace).data,
+            "user": UserSerializer(user).data,
+        }
+    )
+    # Fetch task from db created by django-celery-results.
+    db_result = TaskResult.objects.get(task_id=result.id)
+    # Create extra task with information required for querying.
+    extra_task = ExtraTaskInfo()
+    extra_task.workspace = workspace
+    extra_task.task_result = db_result
+    extra_task.user = user
+    extra_task.save()
+
+
 class WorkspacesProcessAPIView(APIView):
     def create_export(self, user, workspace, types):
         if workspace.status != Workspace.Status.NONE:
@@ -26,22 +44,7 @@ class WorkspacesProcessAPIView(APIView):
         if "archive" in types:
             workspace.set_status_archive(Workspace.Status.PENDING)
         workspace.save()
-
-        # Create Celery task.
-        result = export.delay(
-            data={
-                "workspace": WorkspaceSerializer(workspace).data,
-                "user": UserSerializer(user).data,
-            }
-        )
-        # Fetch task from db created by django-celery-results.
-        db_result = TaskResult.objects.get(task_id=result.id)
-        # Create extra task with information required for querying.
-        extra_task = ExtraTaskInfo()
-        extra_task.workspace = workspace
-        extra_task.task_result = db_result
-        extra_task.user = user
-        extra_task.save()
+        push_workspace_task(workspace, user)
 
     def validation(self, user, data, workspaces):
         """

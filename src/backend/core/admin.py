@@ -1,12 +1,15 @@
 """Admin classes and registrations for core app."""
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth import admin as auth_admin
+from django.http import HttpResponseRedirect
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
+from core.api.views.workspaces_process import push_workspace_task
+
 from . import models
-from .models import ExtraTaskInfo
+from .models import ExtraTaskInfo, Workspace
 
 
 @admin.register(models.User)
@@ -121,6 +124,35 @@ class WorkspaceAdmin(admin.ModelAdmin):
     list_filter = ("status", "status_archive", "status_resana")
     search_fields = ("id", "osmose_id", "title")
     inlines = [ExtraTaskInfoAdminInline]
+    change_form_template = "admin/workspace_retry_failed.html"
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        obj = Workspace.objects.get(id=object_id)
+
+        return super().change_view(
+            request,
+            object_id,
+            form_url,
+            extra_context={"obj": obj},
+        )
+
+    def response_change(self, request, obj):
+        if "_retry-failed" in request.POST:
+            if obj.status != Workspace.Status.FAILURE:
+                messages.error(request, "Can only retry failed workspaces.")
+                return HttpResponseRedirect(".")
+
+            if obj.status_archive == Workspace.Status.FAILURE:
+                obj.set_status_archive(Workspace.Status.PENDING)
+
+            if obj.status_resana == Workspace.Status.FAILURE:
+                obj.set_status_resana(Workspace.Status.PENDING)
+            obj.save()
+
+            push_workspace_task(obj, obj.migration_user)
+            return HttpResponseRedirect(".")
+
+        return super().response_change(request, obj)
 
 
 @admin.register(models.FeatureFlag)

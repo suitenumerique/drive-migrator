@@ -42,6 +42,7 @@ ARG IMPRESS_STATIC_ROOT=/data/static
 RUN apt-get update && \
     apt-get install -y \
       libpangocairo-1.0-0 \
+      libmagic1 \
       rdfind && \
     rm -rf /var/lib/apt/lists/*
 
