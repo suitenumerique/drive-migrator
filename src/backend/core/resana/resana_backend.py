@@ -285,7 +285,7 @@ class ResanaBackend:
         ] = f'Bearer {self.session.cookies.get("interstis_access")}'
         self.jwt = self.session.cookies.get("interstis_access")
 
-        return ""
+        return self.jwt
 
     def init_jwt(self):
         if not self.jwt:
