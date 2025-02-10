@@ -5,6 +5,7 @@ from django.http import Http404, HttpResponse
 
 from core.models import Workspace
 from core.osmose.osmose_backend import OsmoseFolder, OsmoseManager
+from core.resana.resana_backend import ResanaBackend
 
 from ...osmose.osmose_real_backend import PageWalker
 from ...osmose.serializers import WorkspaceSerializer
@@ -39,10 +40,8 @@ def dev_view(request):
     if not settings.DEBUG:
         raise Http404()
 
-    workspace = Workspace.objects.get(id="647368dd-96ad-4240-b690-4ebd271d69bc")
-
-    backend = OsmoseManager().get_backend()
-    users = backend.fetch_users(workspace)
+    resana_manager = ResanaBackend()
+    resana_manager.create_jwt()
 
     return HttpResponse("Dev")
 

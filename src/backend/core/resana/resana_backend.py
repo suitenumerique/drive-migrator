@@ -277,6 +277,7 @@ class ResanaBackend:
                 "langue": "",
             },
             headers=headers,
+            allow_redirects=False,
         )
         response.raise_for_status()
 
