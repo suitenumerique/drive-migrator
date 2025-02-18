@@ -1,5 +1,6 @@
 import os
 import re
+import unicodedata
 import urllib.request
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -8,6 +9,18 @@ from django.conf import settings
 from django.utils.module_loading import import_string
 
 from core.models import User, Workspace
+
+
+def unicode_name(s):
+    try:
+        return unicodedata.name(s)
+    except ValueError:
+        return ""
+
+
+def remove_nonlatin(s):
+    s = (ch for ch in s if unicode_name(ch).startswith(("LATIN", "DIGIT", "SPACE")))
+    return "".join(s)
 
 
 class WorkspaceStatusEnum(Enum):
@@ -28,7 +41,10 @@ def cleanup_filename(name):
     name = name.replace("/", "-")
     name = re.sub(r"\s", " ", name)
     name = name.replace("«", "").replace("»", "").replace("'", "").replace('"', "")
-    return name
+
+    base, extension = os.path.splitext(name)
+    base = remove_nonlatin(base)
+    return base + extension
 
 
 class OsmoseFolder:
