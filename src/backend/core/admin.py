@@ -1,13 +1,15 @@
 """Admin classes and registrations for core app."""
 from django.contrib import admin, messages
 from django.contrib.auth import admin as auth_admin
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, HttpResponse
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
+from core.resana.resana_backend import ResanaBackend
 from core.api.views.workspaces_process import push_workspace_task
 
+import csv
 from . import models
 from .models import ExtraTaskInfo, Workspace
 
@@ -125,6 +127,37 @@ class WorkspaceAdmin(admin.ModelAdmin):
     search_fields = ("id", "osmose_id", "title")
     inlines = [ExtraTaskInfoAdminInline]
     change_form_template = "admin/workspace_retry_failed.html"
+
+    actions = ["export_as_csv"]
+
+    def export_as_csv(self, request, queryset):
+
+        meta = self.model._meta
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename={}.csv'.format(meta)
+        writer = csv.writer(response)
+
+        backend = ResanaBackend()
+
+
+        writer.writerow(["user", "domain", "titre", "destination", "date", "archive", "resana"])
+        # domain email, titre du workspace, organisation destination, date, archive (o/n), resana (o/n)
+        for workspace in queryset:
+            user = workspace.migration_user
+            email = user.email if user else ""
+            domain = user.email.split("@")[1] if user else ""
+            title = workspace.title
+            destination = backend.get_mapping_from_email(user.email).resana_organization_name if user else ""
+            task_info = ExtraTaskInfo.objects.filter(workspace=workspace).order_by("-id").first()
+            date = task_info.task_result.date_done if task_info else ""
+            archive = workspace.status_archive
+            resana = workspace.status_resana
+
+            writer.writerow([email, domain, title, destination, date, archive, resana])
+
+        return response
+    export_as_csv.short_description = "Export Selected"
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
         obj = Workspace.objects.get(id=object_id)

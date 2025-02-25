@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   postgresql:
@@ -11,7 +11,7 @@ services:
   redis:
     image: redis:5
     ports:
-        - "16379:6379"
+      - "16379:6379"
 
   mailcatcher:
     image: sj26/mailcatcher:latest
@@ -25,8 +25,8 @@ services:
       - MINIO_ROOT_USER=dinum
       - MINIO_ROOT_PASSWORD=password
     ports:
-      - '9000:9000'
-      - '9001:9001'
+      - "9000:9000"
+      - "9001:9001"
     entrypoint: ""
     command: minio server --console-address :9001 /data
     volumes:
@@ -50,7 +50,7 @@ services:
       args:
         DOCKER_USER: ${DOCKER_USER:-1000}
     user: ${DOCKER_USER:-1000}
-    image: impress:backend-development
+    image: osmose-migration:backend-development
     environment:
       - PYLINTHOME=/app/.pylint.d
       - DJANGO_CONFIGURATION=Development
@@ -63,16 +63,25 @@ services:
       - ./src/backend:/app
       - ./data/static:/data/static
     depends_on:
-        - postgresql
-        - mailcatcher
-        - redis
-        - createbuckets
-        - nginx
-  
+      - postgresql
+      - mailcatcher
+      - redis
+      - createbuckets
+      - nginx
+
   celery-dev:
     user: ${DOCKER_USER:-1000}
-    image: impress:backend-development
-    command: ["celery", "-A", "main.celery_app", "worker", "-l", "INFO", "--concurrency=1"]
+    image: osmose-migration:backend-development
+    command:
+      [
+        "celery",
+        "-A",
+        "main.celery_app",
+        "worker",
+        "-l",
+        "INFO",
+        "--concurrency=1",
+      ]
     environment:
       - DJANGO_CONFIGURATION=Development
     env_file:
@@ -157,7 +166,7 @@ services:
 
   frontend-dev:
     user: "${DOCKER_USER:-1000}"
-    build: 
+    build:
       context: .
       dockerfile: ./src/frontend/Dockerfile
       target: main-dev
@@ -212,7 +221,7 @@ services:
       KC_DB_PASSWORD: pass
       KC_DB_USERNAME: impress
       KC_DB_SCHEMA: public
-      PROXY_ADDRESS_FORWARDING: 'true'
+      PROXY_ADDRESS_FORWARDING: "true"
     ports:
       - "8080:8080"
     depends_on:
