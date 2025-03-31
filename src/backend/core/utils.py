@@ -83,7 +83,7 @@ def truncate_file_name(filename, max_length=200):
     return new_base + extension
 
 
-def truncate_path_parts(path, max_folder_length=200, max_files_length=200):
+def truncate_path_parts(path, max_folder_length=200, max_files_length=190):
     """
     Reduce each parts of path if needed.
     """
