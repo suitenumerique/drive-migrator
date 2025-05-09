@@ -255,6 +255,7 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
 class FeatureFlag(models.Model):
     class Name(models.TextChoices):
         ALLOW_NEW_TASKS = "allow-new-tasks"
+        READ_ONLY_MODE = "read-only-mode"
 
     name = models.CharField(
         max_length=32,

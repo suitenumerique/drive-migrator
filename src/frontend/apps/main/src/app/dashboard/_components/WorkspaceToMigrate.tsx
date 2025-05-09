@@ -65,16 +65,24 @@ export const WorkspacesToMigrate = ({
 
   return (
     <div>
-      <h2>{t('Communautés pouvant être migrées')}</h2>
+      <h2>
+        {flags?.[FeatureFlags.READ_ONLY_MODE]
+          ? t('Communautés non migrées')
+          : t('Communautés pouvant être migrées')}
+      </h2>
       {workspaces[WorkspaceStatus.NONE].length === 0 ? (
         <Alert type={VariantType.INFO}>{t('Aucune communauté à migrer')}</Alert>
       ) : (
         <FormProvider {...methods}>
           {!flags?.[FeatureFlags.ALLOW_NEW_TASKS] && (
             <Alert type={VariantType.WARNING} className="mb-s">
-              {t(
-                'Les migrations sont temporairement suspendues pour cause de maintenance, veuillez réessayer plus tard.',
-              )}
+              {flags?.[FeatureFlags.READ_ONLY_MODE]
+                ? t(
+                    'Les migrations ne sont désormais plus possibles, la plateforme Osmose est désormais décomissionnée.',
+                  )
+                : t(
+                    'Les migrations sont temporairement suspendues pour cause de maintenance, veuillez réessayer plus tard.',
+                  )}
             </Alert>
           )}
           {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
