@@ -4,6 +4,7 @@ import { useApi } from '@/hooks/useApi';
 
 export enum FeatureFlags {
   ALLOW_NEW_TASKS = 'allow-new-tasks',
+  READ_ONLY_MODE = 'read-only-mode',
 }
 
 export const useFeatureFlags = () => {
