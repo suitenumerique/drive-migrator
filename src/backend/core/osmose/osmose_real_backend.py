@@ -286,6 +286,7 @@ class OsmoseRealBackend(OsmoseBackend):
 
     def get_workspaces(self, user):
         osmose_user = self.__get_user(user.email)
+        print('get_workspaces')
         print("osmose_user", osmose_user)  # noqa: T201
         if not osmose_user:
             return []
@@ -300,7 +301,7 @@ class OsmoseRealBackend(OsmoseBackend):
                 "member": osmose_user["id"],
             },
         )
-
+        print('data', data)  # noqa: T201
         self.debug_into_file("workspaces", data)
 
         workspaces = []
