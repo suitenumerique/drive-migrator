@@ -10,7 +10,7 @@ on:
 
 jobs:
   lint-git:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: github.event_name == 'pull_request' # Makes sense only for pull requests
     steps:
       - name: Checkout repository
@@ -28,7 +28,7 @@ jobs:
         run: ~/.local/bin/gitlint --commits origin/${{ github.event.pull_request.base.ref }}..HEAD
 
   check-changelog:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: |
       contains(github.event.pull_request.labels.*.name, 'noChangeLog') == false &&
       github.event_name == 'pull_request'
@@ -41,7 +41,7 @@ jobs:
         run: git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.after }} | grep 'CHANGELOG.md'
 
   lint-changelog:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -54,7 +54,7 @@ jobs:
           fi
 
   build-mails:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: src/mail
@@ -94,7 +94,7 @@ jobs:
           key: mail-templates-${{ hashFiles('src/mail/mjml') }}
 
   lint-back:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: src/backend
@@ -113,7 +113,7 @@ jobs:
         run: ~/.local/bin/ruff check .
 
   test-back:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-mails
 
     defaults:

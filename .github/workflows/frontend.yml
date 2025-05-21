@@ -10,7 +10,7 @@ on:
 
 jobs:
   install-front:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Checkout repository
@@ -28,6 +28,9 @@ jobs:
           path: "src/frontend/**/node_modules"
           key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
 
+      - name: Install yarn
+        run: npm install -g yarn
+
       - name: Install dependencies
         if: steps.front-node_modules.outputs.cache-hit != 'true'
         run: cd src/frontend/ && yarn install --frozen-lockfile
@@ -40,7 +43,7 @@ jobs:
           key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
 
   build-front:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: install-front
     steps:
       - name: Checkout repository
@@ -52,6 +55,14 @@ jobs:
         with:
           path: "src/frontend/**/node_modules"
           key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+
+      - name: Install yarn
+        run: npm install -g yarn
 
       - name: Build CI App
         run: cd src/frontend/ && yarn ci:build
@@ -63,7 +74,7 @@ jobs:
           key: build-front-${{ github.run_id }}
 
   test-front:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: install-front
     steps:
       - name: Checkout repository
@@ -75,12 +86,20 @@ jobs:
         with:
           path: "src/frontend/**/node_modules"
           key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+
+      - name: Install yarn
+        run: npm install -g yarn
 
       - name: Test App
         run: cd src/frontend/ && yarn app:test
 
   lint-front:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: install-front
     steps:
       - name: Checkout repository
@@ -92,6 +111,14 @@ jobs:
         with:
           path: "src/frontend/**/node_modules"
           key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+
+      - name: Install yarn
+        run: npm install -g yarn
 
       - name: Check linting
         run: cd src/frontend/ && yarn lint
