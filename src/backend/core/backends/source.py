@@ -54,7 +54,9 @@ class AbstractSourceBackend(ABC):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         # Skip check for abstract intermediate classes
-        if not getattr(cls, "__abstractmethods__", None) and not hasattr(cls, "source_type"):
+        if not getattr(cls, "__abstractmethods__", None) and not hasattr(
+            cls, "source_type"
+        ):
             raise TypeError(f"{cls.__name__} must define class attribute 'source_type'")
 
     @abstractmethod

@@ -28,8 +28,8 @@ def test_source_folder_dataclass():
     """SourceFolder holds a name and empty children/files by default."""
     folder = SourceFolder(name="Docs")
     assert folder.name == "Docs"
-    assert folder.children == []
-    assert folder.files == []
+    assert not folder.children
+    assert not folder.files
 
 
 def test_source_file_name_with_extension():
@@ -68,7 +68,7 @@ def test_subclass_without_source_type_raises():
     """Concrete subclass missing source_type must raise TypeError at definition time."""
     with pytest.raises(TypeError):
 
-        class BadSource(AbstractSourceBackend):
+        class BadSource(AbstractSourceBackend):  # pylint: disable=unused-variable
             def get_workspaces(self, user):
                 return []
 

@@ -1,15 +1,13 @@
 """Tests for the generic Workspace model."""
 
-import pytest
-
 from core.models import Workspace
 
 
 def test_workspace_defaults():
     """A new Workspace has empty JSONFields and NONE status."""
     workspace = Workspace()
-    assert workspace.destination_statuses == {}
-    assert workspace.destination_metadata == {}
+    assert not workspace.destination_statuses
+    assert not workspace.destination_metadata
     assert workspace.status == Workspace.Status.NONE
 
 
@@ -39,7 +37,9 @@ def test_set_destination_status_syncs_global_status():
 def test_destination_metadata_read_write():
     """get/set_destination_metadata stores arbitrary dicts per destination."""
     workspace = Workspace()
-    workspace.set_destination_metadata("resana", {"id": "uuid-123", "job_id": "job-456"})
+    workspace.set_destination_metadata(
+        "resana", {"id": "uuid-123", "job_id": "job-456"}
+    )
     assert workspace.get_destination_metadata("resana") == {
         "id": "uuid-123",
         "job_id": "job-456",
@@ -126,6 +126,6 @@ def test_compute_status_single_destination_all_combinations():
     for dest_a, dest_b, expected in combinations:
         workspace.set_destination_status("dest_a", dest_a)
         workspace.set_destination_status("dest_b", dest_b)
-        assert workspace.status == expected, (
-            f"dest_a={dest_a}, dest_b={dest_b} → expected {expected}, got {workspace.status}"
-        )
+        assert (
+            workspace.status == expected
+        ), f"dest_a={dest_a}, dest_b={dest_b} → expected {expected}, got {workspace.status}"

@@ -130,25 +130,33 @@ class WorkspaceAdmin(admin.ModelAdmin):
     actions = ["export_as_csv"]
 
     def export_as_csv(self, request, queryset):
+        meta = self.model._meta  # noqa: SLF001
 
-        meta = self.model._meta
-
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename={}.csv'.format(meta)
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = "attachment; filename={}.csv".format(meta)
         writer = csv.writer(response)
 
         backend = ResanaBackend()
 
-
-        writer.writerow(["user", "domain", "titre", "destination", "date", "archive", "resana"])
+        writer.writerow(
+            ["user", "domain", "titre", "destination", "date", "archive", "resana"]
+        )
         # domain email, titre du workspace, organisation destination, date, archive (o/n), resana (o/n)
         for workspace in queryset:
             user = workspace.migration_user
             email = user.email if user else ""
             domain = user.email.split("@")[1] if user else ""
             title = workspace.title
-            destination = backend.get_mapping_from_email(user.email).resana_organization_name if user else ""
-            task_info = ExtraTaskInfo.objects.filter(workspace=workspace).order_by("-id").first()
+            destination = (
+                backend.get_mapping_from_email(user.email).resana_organization_name
+                if user
+                else ""
+            )
+            task_info = (
+                ExtraTaskInfo.objects.filter(workspace=workspace)
+                .order_by("-id")
+                .first()
+            )
             date = task_info.task_result.date_done if task_info else ""
             archive = workspace.get_destination_status("archive")
             resana = workspace.get_destination_status("resana")
@@ -156,6 +164,7 @@ class WorkspaceAdmin(admin.ModelAdmin):
             writer.writerow([email, domain, title, destination, date, archive, resana])
 
         return response
+
     export_as_csv.short_description = "Export Selected"
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
