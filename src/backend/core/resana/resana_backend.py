@@ -46,23 +46,23 @@ class ResanaBackend:
         return mapping.resana_organization_uuid
 
     def get_error_details(self, workspace: Workspace):
-        if not workspace.resana_job_id:
+        job_id = workspace.get_destination_metadata("resana").get("job_id")
+        if not job_id:
             raise ValueError("Workspace must have a resana job id")
         response = self.request(
             "get",
-            f"/jobs/{workspace.resana_job_id}/tasks",
+            f"/jobs/{job_id}/tasks",
             params={"itemsPerPage": 1000, "status": 4, "type": 2},
         )
         return response.json()
 
     def retry_job(self, workspace: Workspace):
-        if not workspace.resana_job_id:
+        job_id = workspace.get_destination_metadata("resana").get("job_id")
+        if not job_id:
             raise ValueError("Workspace must have a resana job id")
-        response = self.request(
-            "post", f"/jobs/{workspace.resana_job_id}/retry", json={}
-        )
+        response = self.request("post", f"/jobs/{job_id}/retry", json={})
 
-        workspace.set_status_resana(Workspace.Status.PENDING)
+        workspace.set_destination_status("resana", Workspace.Status.PENDING)
         workspace.save()
 
         return response.json()
@@ -87,18 +87,17 @@ class ResanaBackend:
         return user
 
     def add_admin(self, workspace: Workspace, user):
-        if not workspace.resana_id:
+        resana_id = workspace.get_destination_metadata("resana").get("id")
+        if not resana_id:
             raise Exception("Workspace not created in Resana")
 
-        get_logger().info(
-            f"Adding admin to {workspace.resana_id} {workspace.title} ..."
-        )
+        get_logger().info(f"Adding admin to {resana_id} {workspace.title} ...")
         response = self.request(
             "post",
             "/api-workspaces/members",
             json={
                 "userUuid": user["uuid"],
-                "workspaceUuid": workspace.resana_id,
+                "workspaceUuid": resana_id,
                 "profileCode": "GESTIONNAIRE",
             },
             base_url=settings.RESANA_ALT_API_ENDPOINT,
@@ -114,7 +113,7 @@ class ResanaBackend:
         return organizations
 
     def create_workspace(self, workspace: Workspace, user: User):
-        if workspace.resana_id:
+        if workspace.get_destination_metadata("resana").get("id"):
             raise Exception("Workspace already created in Resana")
 
         # Fetch resana user to make sure it exists before proceeding to upload.
@@ -165,7 +164,8 @@ class ResanaBackend:
         get_logger().info("Workspace creation data")
         get_logger().info(json.dumps(workspace_data, indent=2))
 
-        workspace.resana_id = workspace_data["uuid"]
+        resana_id = workspace_data["uuid"]
+        workspace.set_destination_metadata("resana", {"id": resana_id})
         workspace.save()
 
         # Add user as admin.
@@ -177,7 +177,7 @@ class ResanaBackend:
             "/jobs",
             json={
                 "type": "import",
-                "destinationWorkspaceUuid": workspace.resana_id,
+                "destinationWorkspaceUuid": resana_id,
                 "importPath": upload_path,
             },
         )
@@ -185,26 +185,30 @@ class ResanaBackend:
         get_logger().info(json.dumps(response.json(), indent=2))
         job_data = response.json()
 
-        workspace.resana_job_id = job_data["uuid"]
+        resana_meta = workspace.get_destination_metadata("resana")
+        resana_meta["job_id"] = job_data["uuid"]
+        workspace.set_destination_metadata("resana", resana_meta)
         workspace.save()
 
     def fetch_job(self, workspace: Workspace):
-        if not workspace.resana_job_id:
+        job_id = workspace.get_destination_metadata("resana").get("job_id")
+        if not job_id:
             raise Exception("Workspace has no job id")
 
         get_logger().info(f"Fetching job of {workspace.id} {workspace.title} ...")
-        response = self.request("get", f"/jobs/{workspace.resana_job_id}")
+        response = self.request("get", f"/jobs/{job_id}")
         job_data = response.json()
         get_logger().info(json.dumps(job_data, indent=2))
 
         return job_data
 
     def refresh_job(self, workspace: Workspace):
-        if not workspace.resana_job_id:
+        job_id = workspace.get_destination_metadata("resana").get("job_id")
+        if not job_id:
             raise Exception("Workspace has no job id")
 
-        if workspace.status_resana == Workspace.Status.SUCCESS:
-            raise Exception("Workspace status_resana is already SUCCESS")
+        if workspace.get_destination_status("resana") == Workspace.Status.SUCCESS:
+            raise Exception("Workspace resana destination is already SUCCESS")
 
         job_data = self.fetch_job(workspace)
 
@@ -212,13 +216,15 @@ class ResanaBackend:
             f"Job status of {workspace.id} {workspace.title}: {job_data['status']} ..."
         )
 
-        workspace.job_status = job_data["status"]
-        workspace.resana_files_success = job_data["numberOfFilesSuccess"]
-        workspace.resana_files_error = job_data["numberOfFilesError"]
+        job_status = job_data["status"]
+        resana_meta = workspace.get_destination_metadata("resana")
+        resana_meta["files_success"] = job_data["numberOfFilesSuccess"]
+        resana_meta["files_error"] = job_data["numberOfFilesError"]
+        workspace.set_destination_metadata("resana", resana_meta)
 
-        if workspace.job_status in ("completed", "failed"):
+        if job_status in ("completed", "failed"):
             get_logger().info(f"Setting status to success ...")
-            workspace.set_status_resana(Workspace.Status.SUCCESS)
+            workspace.set_destination_status("resana", Workspace.Status.SUCCESS)
             workspace.save()
 
             if workspace.job_status == "completed":

@@ -28,4 +28,5 @@ class WorkspaceFactory(factory.django.DjangoModelFactory):
         model = models.Workspace
 
     title = factory.Faker("bs")
-    osmose_id = factory.Faker("uuid4")
+    source_id = factory.Faker("uuid4")
+    source_type = "osmose"

@@ -103,10 +103,11 @@ class OsmoseManager:
         backend = self.get_backend()
         osmose_workspaces = backend.get_workspaces(user)
         for osmose_workspace in osmose_workspaces:
-            workspace = Workspace.objects.filter(osmose_id=osmose_workspace.id).first()
+            workspace = Workspace.objects.filter(source_id=osmose_workspace.id).first()
             if not workspace:
                 workspace = Workspace()
-                workspace.osmose_id = osmose_workspace.id
+                workspace.source_id = osmose_workspace.id
+                workspace.source_type = "osmose"
             workspace.title = osmose_workspace.title
             workspace.save()
             user.workspaces.add(workspace)

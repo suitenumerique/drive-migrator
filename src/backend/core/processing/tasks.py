@@ -77,7 +77,7 @@ def export(self, data):  # pylint: disable=unused-argument
 
     workspace = Workspace.objects.get(id=workspace_id)
     logger.info(
-        f"Workspace title: {workspace.title}, status_archive: {workspace.status_archive}, status_resana: {workspace.status_resana}"
+        f"Workspace title: {workspace.title}, destination_statuses: {workspace.destination_statuses}"
     )
     user = User.objects.get(id=data["user"]["id"])
 
@@ -99,8 +99,8 @@ def export(self, data):  # pylint: disable=unused-argument
 
     mails_manager = MailsManager()
 
-    logger.info(f"status_archive = {workspace.status_archive}")
-    if workspace.status_archive == Workspace.Status.PENDING:
+    logger.info(f"archive status = {workspace.get_destination_status('archive')}")
+    if workspace.get_destination_status("archive") == Workspace.Status.PENDING:
         logger.info("Calling zip_workspace_folder ...")
         helper = ArchiveManager()
         helper.zip_workspace_folder(workspace)
@@ -110,16 +110,16 @@ def export(self, data):  # pylint: disable=unused-argument
 
         logger.info(f"Sending send_archive_download_mail ${archive_url} ...")
         mails_manager.send_archive_download_mail(user, workspace, archive_url)
-        workspace.set_status_archive(Workspace.Status.SUCCESS)
+        workspace.set_destination_status("archive", Workspace.Status.SUCCESS)
         workspace.save()
 
-    logger.info(f"status_resana = {workspace.status_resana}")
-    if workspace.status_resana == Workspace.Status.PENDING:
+    logger.info(f"resana status = {workspace.get_destination_status('resana')}")
+    if workspace.get_destination_status("resana") == Workspace.Status.PENDING:
         resana_backend = ResanaBackend()
         logger.info("Calling resana create_workspace ...")
         resana_backend.create_workspace(workspace, user)
-        # At this point, this is the resana refresh job command that will put the workspace in success state
-        workspace.set_status_resana(Workspace.Status.PENDING)
+        # At this point, the resana refresh job command will put the workspace in success state
+        workspace.set_destination_status("resana", Workspace.Status.PENDING)
         workspace.save()
 
     logger.info("Task done")
@@ -161,10 +161,9 @@ def task_failure(sender=None, **kwargs):
     extra_task = ExtraTaskInfo.objects.get(task_result=task_result)
     workspace = extra_task.workspace
 
-    if workspace.status_archive == Workspace.Status.PENDING:
-        workspace.set_status_archive(Workspace.Status.FAILURE)
-    if workspace.status_resana == Workspace.Status.PENDING:
-        workspace.set_status_resana(Workspace.Status.FAILURE)
+    for dest_name, status in workspace.destination_statuses.items():
+        if status == Workspace.Status.PENDING:
+            workspace.set_destination_status(dest_name, Workspace.Status.FAILURE)
     workspace.save()
 
     cleanup_workspace_dir(workspace)

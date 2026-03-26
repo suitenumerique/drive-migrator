@@ -1,15 +1,16 @@
 """Admin classes and registrations for core app."""
+import csv
+
 from django.contrib import admin, messages
 from django.contrib.auth import admin as auth_admin
-from django.http import HttpResponseRedirect, HttpResponse
+from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
-from core.resana.resana_backend import ResanaBackend
 from core.api.views.workspaces_process import push_workspace_task
+from core.resana.resana_backend import ResanaBackend
 
-import csv
 from . import models
 from .models import ExtraTaskInfo, Workspace
 
@@ -115,16 +116,14 @@ class ExtraTaskInfoAdminInline(admin.TabularInline):
 class WorkspaceAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "osmose_id",
+        "source_id",
+        "source_type",
         "title",
         "status",
-        "status_archive",
-        "status_resana",
-        "resana_files_success",
-        "resana_files_error",
+        "destination_statuses",
     )
-    list_filter = ("status", "status_archive", "status_resana")
-    search_fields = ("id", "osmose_id", "title")
+    list_filter = ("status", "source_type")
+    search_fields = ("id", "source_id", "title")
     inlines = [ExtraTaskInfoAdminInline]
     change_form_template = "admin/workspace_retry_failed.html"
 
@@ -151,8 +150,8 @@ class WorkspaceAdmin(admin.ModelAdmin):
             destination = backend.get_mapping_from_email(user.email).resana_organization_name if user else ""
             task_info = ExtraTaskInfo.objects.filter(workspace=workspace).order_by("-id").first()
             date = task_info.task_result.date_done if task_info else ""
-            archive = workspace.status_archive
-            resana = workspace.status_resana
+            archive = workspace.get_destination_status("archive")
+            resana = workspace.get_destination_status("resana")
 
             writer.writerow([email, domain, title, destination, date, archive, resana])
 
@@ -175,11 +174,9 @@ class WorkspaceAdmin(admin.ModelAdmin):
                 messages.error(request, "Can only retry failed workspaces.")
                 return HttpResponseRedirect(".")
 
-            if obj.status_archive == Workspace.Status.FAILURE:
-                obj.set_status_archive(Workspace.Status.PENDING)
-
-            if obj.status_resana == Workspace.Status.FAILURE:
-                obj.set_status_resana(Workspace.Status.PENDING)
+            for dest_name, status in obj.destination_statuses.items():
+                if status == Workspace.Status.FAILURE:
+                    obj.set_destination_status(dest_name, Workspace.Status.PENDING)
             obj.save()
 
             push_workspace_task(obj, obj.migration_user)

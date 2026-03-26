@@ -78,7 +78,7 @@ class AbstractSourceBackend(ABC):
         Must handle retries and transient errors internally.
         """
 
-    def prepare_export(self, workspace, local_folder_path: str) -> None:
+    def prepare_export(self, workspace, local_folder_path: str) -> None:  # noqa: B027
         """
         Optional hook called after the local folder is assembled and before
         destinations are invoked. Use this to write source-specific supplementary

@@ -39,10 +39,8 @@ class WorkspacesProcessAPIView(APIView):
         # IMPORTANT: Must be before the celery task creation because the
         # task use this data.
         workspace.migration_user = user
-        if "resana" in types:
-            workspace.set_status_resana(Workspace.Status.PENDING)
-        if "archive" in types:
-            workspace.set_status_archive(Workspace.Status.PENDING)
+        for dest_name in types:
+            workspace.set_destination_status(dest_name, Workspace.Status.PENDING)
         workspace.save()
         push_workspace_task(workspace, user)
 

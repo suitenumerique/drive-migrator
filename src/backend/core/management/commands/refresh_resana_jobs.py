@@ -12,7 +12,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         workspaces = Workspace.objects.filter(
-            status_resana=Workspace.Status.PENDING, resana_job_id__isnull=False
+            destination_statuses__resana=Workspace.Status.PENDING
         )
         self.stdout.write(f"Workspaces to process {len(workspaces)}")
         resana_backend = ResanaBackend()

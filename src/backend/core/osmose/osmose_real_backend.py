@@ -324,7 +324,7 @@ class OsmoseRealBackend(OsmoseBackend):
         def fetch(**params):
             response = self.fetch(
                 "/search/member",
-                params={"wrkspc": workspace.osmose_id, **params},
+                params={"wrkspc": workspace.source_id, **params},
             )
             self.debug_into_file(f"users_{workspace.id}", response)
             return response
@@ -353,7 +353,7 @@ class OsmoseRealBackend(OsmoseBackend):
         :param workspace: a OsmoseWorkspace
         :return: a OsmoseFolder representing the workspace documents structure with descendants.
         """
-        osmose_workspace = self.get_workspace(workspace.osmose_id)
+        osmose_workspace = self.get_workspace(workspace.source_id)
         root_categories = []
         categories = []
         for root_category in osmose_workspace.raw_data["catSet"]:

@@ -55,7 +55,6 @@ class BaseModel(models.Model):
         super().save(*args, **kwargs)
 
 
-# TODO: Add meta data field a jsonb
 class Workspace(BaseModel):
     class Status(models.TextChoices):
         NONE = "NONE"
@@ -63,94 +62,60 @@ class Workspace(BaseModel):
         FAILURE = "FAILURE"
         SUCCESS = "SUCCESS"
 
-    osmose_id = models.CharField(help_text=_("id of the Osmose workspace"), unique=True)
-
-    resana_id = models.CharField(
-        help_text=_("id of the Resana workspace"), null=True, blank=True
+    source_id = models.CharField(
+        help_text=_("id of the workspace on the source platform"),
+        unique=True,
+        default="",
     )
-
-    resana_job_id = models.CharField(
-        help_text=_("id of the Resana job"), null=True, blank=True
+    source_type = models.CharField(
+        help_text=_("source backend type, e.g. 'osmose', 'filesystem'"),
+        default="",
     )
 
     migration_user = models.ForeignKey("User", models.SET_NULL, blank=True, null=True)
 
     title = models.CharField()
 
-    archive_path = models.CharField(
-        help_text=_("path of the archive on s3"), null=True, blank=True
-    )
-
-    """
-    Do not edit this field directly. Use status_archive and status_resana instead.
-    """
+    # Do not edit this field directly. Use set_destination_status instead.
     status = models.CharField(
         max_length=10,
         choices=Status.choices,
         default=Status.NONE,
     )
 
-    """
-    Do not update this field directly. Use set_status_archive instead.
-    """
-    status_archive = models.CharField(
-        max_length=10,
-        choices=Status.choices,
-        default=Status.NONE,
-    )
+    # Keys are destination names (e.g. "archive", "resana", "drive").
+    # Do not edit this field directly. Use set_destination_status instead.
+    destination_statuses = models.JSONField(default=dict)
 
-    """
-    Do not update this field directly. Use set_status_resana instead.
-    """
-    status_resana = models.CharField(
-        max_length=10,
-        choices=Status.choices,
-        default=Status.NONE,
-    )
+    # Arbitrary per-destination metadata (IDs, job IDs, file counts, etc.).
+    destination_metadata = models.JSONField(default=dict)
 
-    """
-    Number of files that were successfully imported in Resana.
-    """
-    resana_files_success = models.IntegerField(blank=True, null=True)
+    def get_destination_status(self, destination_name: str) -> str:
+        return self.destination_statuses.get(destination_name, Workspace.Status.NONE)
 
-    """
-    Number of files that were unsuccessfully imported in Resana.
-    """
-    resana_files_error = models.IntegerField(blank=True, null=True)
-
-    def set_status_archive(self, status):
-        self.status_archive = status
+    def set_destination_status(self, destination_name: str, status: str) -> None:
+        self.destination_statuses[destination_name] = status
         self.sync_status()
 
-    def set_status_resana(self, status):
-        self.status_resana = status
-        self.sync_status()
+    def get_destination_metadata(self, destination_name: str) -> dict:
+        return self.destination_metadata.get(destination_name, {})
+
+    def set_destination_metadata(self, destination_name: str, data: dict) -> None:
+        self.destination_metadata[destination_name] = data
 
     def sync_status(self):
         self.status = self.compute_status()
 
-    def compute_status(self):
-        # +---------+---------+---------+---------+---------+
-        # | Status  |  NONE   | PENDING | FAILURE | SUCCESS |
-        # +---------+---------+---------+---------+---------+
-        # | NONE    | NONE    | PENDING | FAILURE | SUCCESS |
-        # | PENDING | PENDING | PENDING | PENDING | PENDING |
-        # | FAILURE | FAILURE | PENDING | FAILURE | FAILURE |
-        # | SUCCESS | SUCCESS | PENDING | FAILURE | SUCCESS |
-
-        if (
-            self.status_archive == Workspace.Status.NONE
-            and self.status_resana == Workspace.Status.NONE
-        ):
-            return Workspace.Status.NONE
-
-        if Workspace.Status.PENDING in (self.status_archive, self.status_resana):
-            return Workspace.Status.PENDING
-
-        if Workspace.Status.FAILURE in (self.status_archive, self.status_resana):
-            return Workspace.Status.FAILURE
-
-        return Workspace.Status.SUCCESS
+    def compute_status(self) -> str:
+        """Generic version — works with any number of destinations."""
+        statuses = list(self.destination_statuses.values())
+        if not statuses or all(s == self.Status.NONE for s in statuses):
+            return self.Status.NONE
+        if any(s == self.Status.PENDING for s in statuses):
+            return self.Status.PENDING
+        if any(s == self.Status.FAILURE for s in statuses):
+            return self.Status.FAILURE
+        return self.Status.SUCCESS
 
 
 class ExtraTaskInfo(models.Model):
@@ -165,7 +130,7 @@ class ExtraTaskInfo(models.Model):
     user = models.ForeignKey("User", on_delete=models.CASCADE, null=True, blank=True)
 
     def __str__(self):
-        return f"TaskResult {self.task_result.task_id} for {self.workspace.osmose_id} "
+        return f"TaskResult {self.task_result.task_id} for {self.workspace.source_id} "
 
 
 class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):

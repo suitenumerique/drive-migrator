@@ -65,7 +65,8 @@ class ArchiveManager:
         return s3
 
     def get_download_url(self, workspace: Workspace):
-        if not workspace.archive_path:
+        s3_key = workspace.get_destination_metadata("archive").get("s3_key")
+        if not s3_key:
             raise ValueError("Workspace does not have an archive path")
 
         s3 = self.get_s3_resource()
@@ -73,7 +74,7 @@ class ArchiveManager:
             "get_object",
             Params={
                 "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
-                "Key": workspace.archive_path,
+                "Key": s3_key,
             },
             ExpiresIn=3600 * 24 * 7,  # 7 days
         )
@@ -105,7 +106,7 @@ class ArchiveManager:
         destination = os.path.basename(path)
         bucket.upload_file(path, destination, Callback=ProgressPercentage(path))
 
-        workspace.archive_path = destination
+        workspace.set_destination_metadata("archive", {"s3_key": destination})
         workspace.save()
 
         return self.get_download_url(workspace)
