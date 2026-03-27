@@ -25,7 +25,9 @@ class AbstractDestinationBackend(ABC):
         if not getattr(cls, "__abstractmethods__", None):
             for attr in ("name", "label"):
                 if not hasattr(cls, attr):
-                    raise TypeError(f"{cls.__name__} must define class attribute '{attr}'")
+                    raise TypeError(
+                        f"{cls.__name__} must define class attribute '{attr}'"
+                    )
 
     @abstractmethod
     def export(self, workspace, user, local_folder_path: str) -> None:
