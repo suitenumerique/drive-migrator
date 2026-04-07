@@ -4,7 +4,12 @@ import os
 
 from django.conf import settings
 
-from core.backends.source import AbstractSourceBackend, SourceFile, SourceFolder, SourceWorkspace
+from core.backends.source import (
+    AbstractSourceBackend,
+    SourceFile,
+    SourceFolder,
+    SourceWorkspace,
+)
 from core.sources.osmose.osmose_real_backend import OsmoseRealBackend
 
 
@@ -51,11 +56,17 @@ class OsmoseSourceBackend(AbstractSourceBackend):
             source_folder.children.append(self._convert_folder(child))
 
         for osmose_file in osmose_folder.files:
-            raw_download_url = osmose_file.raw_data.get("downloadUrl", "") if osmose_file.raw_data else ""
+            raw_download_url = (
+                osmose_file.raw_data.get("downloadUrl", "")
+                if osmose_file.raw_data
+                else ""
+            )
             download_url = os.path.join(settings.OSMOSE_BASE_ENDPOINT, raw_download_url)
             source_folder.files.append(
                 SourceFile(
-                    id=osmose_file.raw_data.get("id", "") if osmose_file.raw_data else "",
+                    id=osmose_file.raw_data.get("id", "")
+                    if osmose_file.raw_data
+                    else "",
                     name=osmose_file.name,
                     extension=osmose_file.extension,
                     download_url=download_url,

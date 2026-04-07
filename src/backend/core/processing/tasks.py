@@ -7,12 +7,12 @@ from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
 
+from core.destinations.resana.resana_backend import ResanaBackend
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
-from core.sources.osmose.osmose_backend import OsmoseFolder, OsmoseManager
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
-from core.destinations.resana.resana_backend import ResanaBackend
+from core.sources.osmose.osmose_backend import OsmoseFolder, OsmoseManager
 from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app

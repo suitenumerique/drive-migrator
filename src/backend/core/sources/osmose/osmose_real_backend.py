@@ -17,13 +17,13 @@ from cryptography.hazmat.primitives import serialization
 from retry import retry
 
 from core.models import Workspace
+from core.processing.folder_creator import FolderCreator
 from core.sources.osmose.osmose_backend import (
     OsmoseBackend,
     OsmoseFile,
     OsmoseFolder,
     OsmoseWorkspace,
 )
-from core.processing.folder_creator import FolderCreator
 from core.utils import sizeof_fmt
 
 

@@ -1,8 +1,8 @@
 """Command to refresh workspaces resana status via pooling jobs status"""
 from django.core.management.base import BaseCommand
 
-from core.models import Workspace
 from core.destinations.resana.resana_backend import ResanaBackend
+from core.models import Workspace
 
 
 class Command(BaseCommand):

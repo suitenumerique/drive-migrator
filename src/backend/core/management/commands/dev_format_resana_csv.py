@@ -6,8 +6,8 @@ from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand
 from django.core.validators import validate_email
 
-from core.models import Workspace
 from core.destinations.resana.resana_backend import ResanaBackend
+from core.models import Workspace
 
 
 class Command(BaseCommand):

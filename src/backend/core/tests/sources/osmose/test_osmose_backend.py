@@ -2,9 +2,12 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from core.backends.source import AbstractSourceBackend, SourceFile, SourceFolder, SourceWorkspace
+from core.backends.source import (
+    AbstractSourceBackend,
+    SourceFile,
+    SourceFolder,
+    SourceWorkspace,
+)
 from core.sources.osmose.backend import OsmoseSourceBackend
 
 
@@ -25,9 +28,7 @@ def test_get_workspaces_calls_real_backend():
     mock_ws.title = "My Workspace"
     mock_ws.raw_data = {"id": "ws-1"}
 
-    with patch(
-        "core.sources.osmose.backend.OsmoseRealBackend"
-    ) as mock_real_cls:
+    with patch("core.sources.osmose.backend.OsmoseRealBackend") as mock_real_cls:
         mock_real = mock_real_cls.return_value
         mock_real.get_workspaces.return_value = [mock_ws]
 
@@ -62,9 +63,7 @@ def test_get_workspace_structure_returns_source_folder(settings):
     mock_root.children = [mock_child]
     mock_root.files = []
 
-    with patch(
-        "core.sources.osmose.backend.OsmoseRealBackend"
-    ) as mock_real_cls:
+    with patch("core.sources.osmose.backend.OsmoseRealBackend") as mock_real_cls:
         mock_real = mock_real_cls.return_value
         mock_real.get_workspace_documents_structure.return_value = mock_root
 
@@ -94,9 +93,7 @@ def test_download_file_calls_real_backend(settings):
         download_url="http://osmose.example.com/files/doc.pdf",
     )
 
-    with patch(
-        "core.sources.osmose.backend.OsmoseRealBackend"
-    ) as mock_real_cls:
+    with patch("core.sources.osmose.backend.OsmoseRealBackend") as mock_real_cls:
         mock_real = mock_real_cls.return_value
         backend = OsmoseSourceBackend()
         backend.download_file(source_file, "/tmp/doc.pdf")
@@ -110,9 +107,7 @@ def test_prepare_export_writes_members_csv():
     """prepare_export() calls OsmoseRealBackend.create_users_csv()."""
     workspace = MagicMock()
 
-    with patch(
-        "core.sources.osmose.backend.OsmoseRealBackend"
-    ) as mock_real_cls:
+    with patch("core.sources.osmose.backend.OsmoseRealBackend") as mock_real_cls:
         mock_real = mock_real_cls.return_value
         backend = OsmoseSourceBackend()
         backend.prepare_export(workspace, "/tmp/workspace")

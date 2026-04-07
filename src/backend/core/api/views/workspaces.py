@@ -6,10 +6,10 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from ...models import Workspace
-from ...sources.osmose.serializers import WorkspaceSerializer
-from ...processing.folder_helper import ArchiveManager
 from ...destinations.resana.resana_backend import ResanaBackend
+from ...models import Workspace
+from ...processing.folder_helper import ArchiveManager
+from ...sources.osmose.serializers import WorkspaceSerializer
 from ..filters import MultipleValueFilter
 
 

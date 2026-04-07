@@ -4,9 +4,9 @@ from rest_framework.views import APIView
 
 from core.sources.osmose.serializers import WorkspaceSerializer
 
+from ...destinations.resana.resana_backend import ResanaBackend
 from ...models import ExtraTaskInfo, FeatureFlag, Workspace
 from ...processing.tasks import export
-from ...destinations.resana.resana_backend import ResanaBackend
 from ...utils import is_feature
 from .. import APIException
 from ..serializers import UserSerializer

@@ -6,10 +6,10 @@ from django.conf import settings
 import requests
 from celery.utils.log import get_task_logger
 
+from core.destinations.resana.s3_resana_manager import S3ResanaManager
 from core.mails_manager import MailsManager
 from core.models import ResanaEmailMapping, User, Workspace
 from core.processing.folder_creator import FolderCreator
-from core.destinations.resana.s3_resana_manager import S3ResanaManager
 from core.utils import truncate_folder_and_file_names
 
 

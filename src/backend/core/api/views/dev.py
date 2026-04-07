@@ -3,13 +3,13 @@
 from django.conf import settings
 from django.http import Http404, HttpResponse
 
+from core.destinations.resana.resana_backend import ResanaBackend
 from core.models import Workspace
 from core.sources.osmose.osmose_backend import OsmoseFolder, OsmoseManager
-from core.destinations.resana.resana_backend import ResanaBackend
 
+from ...processing.tasks import export
 from ...sources.osmose.osmose_real_backend import PageWalker
 from ...sources.osmose.serializers import WorkspaceSerializer
-from ...processing.tasks import export
 from ..serializers import UserSerializer
 
 

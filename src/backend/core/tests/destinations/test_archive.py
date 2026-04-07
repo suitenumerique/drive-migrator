@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.archive.backend import ArchiveDestinationBackend
 from core.models import Workspace
@@ -25,15 +23,13 @@ def test_label_is_set():
     assert ArchiveDestinationBackend.label != ""
 
 
-def test_export_creates_zip(db):
+def test_export_creates_zip():
     """export() zips the local folder."""
     workspace = MagicMock(spec=Workspace)
     workspace.get_destination_status.return_value = Workspace.Status.PENDING
     user = MagicMock()
 
-    with patch(
-        "core.destinations.archive.backend.ArchiveManager"
-    ) as mock_manager_cls:
+    with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
         mock_manager.upload_archive.return_value = "http://s3.example.com/ws.zip"
 
@@ -43,15 +39,13 @@ def test_export_creates_zip(db):
     mock_manager.zip_workspace_folder.assert_called_once_with(workspace)
 
 
-def test_export_uploads_to_s3(db):
+def test_export_uploads_to_s3():
     """export() uploads the archive to S3."""
     workspace = MagicMock(spec=Workspace)
     workspace.get_destination_status.return_value = Workspace.Status.PENDING
     user = MagicMock()
 
-    with patch(
-        "core.destinations.archive.backend.ArchiveManager"
-    ) as mock_manager_cls:
+    with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
         mock_manager.upload_archive.return_value = "http://s3.example.com/ws.zip"
 
@@ -61,15 +55,13 @@ def test_export_uploads_to_s3(db):
     mock_manager.upload_archive.assert_called_once_with(workspace)
 
 
-def test_export_sets_status_success(db):
+def test_export_sets_status_success():
     """export() sets destination status to SUCCESS on success."""
     workspace = MagicMock(spec=Workspace)
     workspace.get_destination_status.return_value = Workspace.Status.PENDING
     user = MagicMock()
 
-    with patch(
-        "core.destinations.archive.backend.ArchiveManager"
-    ) as mock_manager_cls:
+    with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
         mock_manager.upload_archive.return_value = "http://s3.example.com/ws.zip"
 
@@ -82,15 +74,13 @@ def test_export_sets_status_success(db):
     workspace.save.assert_called()
 
 
-def test_export_includes_any_extra_files_in_local_folder(db):
+def test_export_includes_any_extra_files_in_local_folder():
     """export() zips the entire local folder, including any extra files (e.g. members CSV)."""
     workspace = MagicMock(spec=Workspace)
     workspace.get_destination_status.return_value = Workspace.Status.PENDING
     user = MagicMock()
 
-    with patch(
-        "core.destinations.archive.backend.ArchiveManager"
-    ) as mock_manager_cls:
+    with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
         mock_manager.upload_archive.return_value = "http://s3.example.com/ws.zip"
 
@@ -106,11 +96,11 @@ def test_get_download_url_returns_presigned_url():
     """get_download_url() delegates to ArchiveManager.get_download_url()."""
     workspace = MagicMock(spec=Workspace)
 
-    with patch(
-        "core.destinations.archive.backend.ArchiveManager"
-    ) as mock_manager_cls:
+    with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
-        mock_manager.get_download_url.return_value = "http://s3.example.com/ws.zip?token=abc"
+        mock_manager.get_download_url.return_value = (
+            "http://s3.example.com/ws.zip?token=abc"
+        )
 
         backend = ArchiveDestinationBackend()
         url = backend.get_download_url(workspace)

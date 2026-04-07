@@ -6,6 +6,7 @@ import pytest
 
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.resana.backend import ResanaDestinationBackend
+from core.destinations.resana.resana_backend import ResanaBackend
 from core.models import ResanaEmailMapping, Workspace
 
 
@@ -23,14 +24,12 @@ def test_label_is_set():
     assert ResanaDestinationBackend.label != ""
 
 
-def test_export_calls_create_workspace(db):
+def test_export_calls_create_workspace():
     """export() delegates workspace creation to ResanaBackend."""
     workspace = MagicMock(spec=Workspace)
     user = MagicMock()
 
-    with patch(
-        "core.destinations.resana.backend.ResanaBackend"
-    ) as mock_backend_cls:
+    with patch("core.destinations.resana.backend.ResanaBackend") as mock_backend_cls:
         mock_backend = mock_backend_cls.return_value
 
         backend = ResanaDestinationBackend()
@@ -39,7 +38,7 @@ def test_export_calls_create_workspace(db):
     mock_backend.create_workspace.assert_called_once_with(workspace, user)
 
 
-def test_export_sets_status_pending_for_async_job(db):
+def test_export_sets_status_pending_for_async_job():
     """export() sets destination status to PENDING — Resana is an async job."""
     workspace = MagicMock(spec=Workspace)
     user = MagicMock()
@@ -54,14 +53,12 @@ def test_export_sets_status_pending_for_async_job(db):
     workspace.save.assert_called()
 
 
-def test_get_error_details(db):
+def test_get_error_details():
     """get_error_details() delegates to ResanaBackend.get_error_details()."""
     workspace = MagicMock(spec=Workspace)
     expected = [{"task": "failed"}]
 
-    with patch(
-        "core.destinations.resana.backend.ResanaBackend"
-    ) as mock_backend_cls:
+    with patch("core.destinations.resana.backend.ResanaBackend") as mock_backend_cls:
         mock_backend = mock_backend_cls.return_value
         mock_backend.get_error_details.return_value = expected
 
@@ -72,13 +69,11 @@ def test_get_error_details(db):
     assert result == expected
 
 
-def test_retry_job(db):
+def test_retry_job():
     """retry() delegates to ResanaBackend.retry_job()."""
     workspace = MagicMock(spec=Workspace)
 
-    with patch(
-        "core.destinations.resana.backend.ResanaBackend"
-    ) as mock_backend_cls:
+    with patch("core.destinations.resana.backend.ResanaBackend") as mock_backend_cls:
         mock_backend = mock_backend_cls.return_value
 
         backend = ResanaDestinationBackend()
@@ -90,8 +85,6 @@ def test_retry_job(db):
 @pytest.mark.django_db
 def test_get_mapping_from_email_domain_match():
     """get_mapping_from_email() returns the mapping for an exact domain match."""
-    from core.destinations.resana.resana_backend import ResanaBackend
-
     mapping = ResanaEmailMapping.objects.create(
         domain="example.com", resana_organization_uuid="uuid-org-1"
     )
@@ -105,8 +98,6 @@ def test_get_mapping_from_email_domain_match():
 @pytest.mark.django_db
 def test_get_mapping_from_email_wildcard_fallback():
     """get_mapping_from_email() falls back to the wildcard '*' mapping."""
-    from core.destinations.resana.resana_backend import ResanaBackend
-
     wildcard = ResanaEmailMapping.objects.create(
         domain="*", resana_organization_uuid="uuid-default"
     )
@@ -120,8 +111,6 @@ def test_get_mapping_from_email_wildcard_fallback():
 @pytest.mark.django_db
 def test_get_mapping_from_email_no_mapping_raises():
     """get_mapping_from_email() raises when no domain and no wildcard match."""
-    from core.destinations.resana.resana_backend import ResanaBackend
-
     rb = ResanaBackend()
     with pytest.raises(Exception, match="No default mapping found"):
         rb.get_mapping_from_email("user@unknown.com")
