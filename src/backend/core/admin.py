@@ -9,7 +9,7 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from core.api.views.workspaces_process import push_workspace_task
-from core.resana.resana_backend import ResanaBackend
+from core.destinations.resana.resana_backend import ResanaBackend
 
 from . import models
 from .models import ExtraTaskInfo, Workspace

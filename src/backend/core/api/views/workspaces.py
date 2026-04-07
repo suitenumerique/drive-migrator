@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from ...models import Workspace
 from ...sources.osmose.serializers import WorkspaceSerializer
 from ...processing.folder_helper import ArchiveManager
-from ...resana.resana_backend import ResanaBackend
+from ...destinations.resana.resana_backend import ResanaBackend
 from ..filters import MultipleValueFilter
 
 

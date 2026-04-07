@@ -5,7 +5,7 @@ from django.http import Http404, HttpResponse
 
 from core.models import Workspace
 from core.sources.osmose.osmose_backend import OsmoseFolder, OsmoseManager
-from core.resana.resana_backend import ResanaBackend
+from core.destinations.resana.resana_backend import ResanaBackend
 
 from ...sources.osmose.osmose_real_backend import PageWalker
 from ...sources.osmose.serializers import WorkspaceSerializer

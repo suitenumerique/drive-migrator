@@ -12,7 +12,7 @@ from core.models import ExtraTaskInfo, User, Workspace
 from core.sources.osmose.osmose_backend import OsmoseFolder, OsmoseManager
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
-from core.resana.resana_backend import ResanaBackend
+from core.destinations.resana.resana_backend import ResanaBackend
 from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app

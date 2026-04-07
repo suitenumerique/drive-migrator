@@ -2,7 +2,7 @@
 from django.core.management.base import BaseCommand
 
 from core.models import Workspace
-from core.resana.resana_backend import ResanaBackend
+from core.destinations.resana.resana_backend import ResanaBackend
 
 
 class Command(BaseCommand):

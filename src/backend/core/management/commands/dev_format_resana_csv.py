@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand
 from django.core.validators import validate_email
 
 from core.models import Workspace
-from core.resana.resana_backend import ResanaBackend
+from core.destinations.resana.resana_backend import ResanaBackend
 
 
 class Command(BaseCommand):
