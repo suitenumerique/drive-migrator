@@ -7,7 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from ...models import Workspace
-from ...osmose.serializers import WorkspaceSerializer
+from ...sources.osmose.serializers import WorkspaceSerializer
 from ...processing.folder_helper import ArchiveManager
 from ...resana.resana_backend import ResanaBackend
 from ..filters import MultipleValueFilter

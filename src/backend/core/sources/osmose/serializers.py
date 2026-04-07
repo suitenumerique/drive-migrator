@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from core.models import Workspace
-from core.osmose.osmose_backend import WorkspaceStatusEnum
+from core.sources.osmose.osmose_backend import WorkspaceStatusEnum
 
 
 # Still used ?

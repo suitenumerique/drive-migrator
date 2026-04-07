@@ -1,4 +1,4 @@
-from core.osmose.osmose_backend import OsmoseBackend, OsmoseWorkspace
+from core.sources.osmose.osmose_backend import OsmoseBackend, OsmoseWorkspace
 
 
 class OsmoseDummyBackend(OsmoseBackend):

@@ -2,7 +2,7 @@ from django_celery_results.models import TaskResult
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.osmose.serializers import WorkspaceSerializer
+from core.sources.osmose.serializers import WorkspaceSerializer
 
 from ...models import ExtraTaskInfo, FeatureFlag, Workspace
 from ...processing.tasks import export

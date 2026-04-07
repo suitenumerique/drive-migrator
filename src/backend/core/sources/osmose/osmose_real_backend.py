@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from retry import retry
 
 from core.models import Workspace
-from core.osmose.osmose_backend import (
+from core.sources.osmose.osmose_backend import (
     OsmoseBackend,
     OsmoseFile,
     OsmoseFolder,

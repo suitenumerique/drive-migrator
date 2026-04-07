@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.models import FeatureFlag
-from core.osmose.osmose_backend import OsmoseManager
+from core.sources.osmose.osmose_backend import OsmoseManager
 from core.utils import is_feature
 
 

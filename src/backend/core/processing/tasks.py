@@ -9,7 +9,7 @@ from django_celery_results.models import TaskResult
 
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
-from core.osmose.osmose_backend import OsmoseFolder, OsmoseManager
+from core.sources.osmose.osmose_backend import OsmoseFolder, OsmoseManager
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.resana.resana_backend import ResanaBackend

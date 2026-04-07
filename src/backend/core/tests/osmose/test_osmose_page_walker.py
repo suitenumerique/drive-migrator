@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.osmose.osmose_real_backend import PageWalker
+from core.sources.osmose.osmose_real_backend import PageWalker
 
 PAGE_SIZE = 100
 MAX = 500

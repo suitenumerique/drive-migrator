@@ -7,7 +7,7 @@ from django.utils.module_loading import import_string
 from celery.utils.log import get_task_logger
 
 from core.models import Workspace
-from core.osmose.osmose_backend import OsmoseFolder
+from core.sources.osmose.osmose_backend import OsmoseFolder
 from core.utils import (
     ensure_file_uniqueness,
     get_dir_size,

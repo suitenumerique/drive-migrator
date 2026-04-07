@@ -1,4 +1,4 @@
-from core.osmose.osmose_backend import OsmoseFile
+from core.sources.osmose.osmose_backend import OsmoseFile
 
 
 def test_extension():

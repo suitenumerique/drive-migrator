@@ -3,7 +3,7 @@ import re
 from django.core.management.base import BaseCommand
 
 from core.models import Workspace
-from core.osmose.osmose_backend import OsmoseManager
+from core.sources.osmose.osmose_backend import OsmoseManager
 
 from demo.management.commands.create_demo import Timeit
 
