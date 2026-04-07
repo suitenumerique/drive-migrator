@@ -2,7 +2,6 @@ import csv
 import json
 import logging
 import os
-import re
 import time
 import urllib.request
 from urllib.error import HTTPError, URLError
@@ -129,11 +128,11 @@ class OsmoseRealBackend(OsmoseBackend):
 
     @retry(tries=5, delay=2, backoff=2)
     def download_file(self, download_url, destination):
-        get_logger().info(f"Downloading {download_url} to {destination} ...")
+        get_logger().info("Downloading %s to %s ...", download_url, destination)
         encoded_url = requests.utils.requote_uri(download_url)
         if download_url != encoded_url:
             download_url = encoded_url
-            get_logger().info(f"Special chars detected, new url: {download_url}")
+            get_logger().info("Special chars detected, new url: %s", download_url)
 
         self.init_jwt()
         opener = self.__build_opener()
@@ -142,16 +141,14 @@ class OsmoseRealBackend(OsmoseBackend):
         error_ignored = False
 
         try:
-            local_filename, headers = urllib.request.urlretrieve(  # noqa: S310
-                download_url, destination
-            )
-            # This is no longer needed as Baleen has been disabled
-            # plus, it was slowing down the download process.
-            # self.__handle_validation(headers, destination)
+            urllib.request.urlretrieve(download_url, destination)  # noqa: S310
 
         except HTTPError as e:
             get_logger().error(
-                f"HTTP Error: {e.code} while downloading {download_url}: {e.reason}"  # . Response body: {e.read().decode()
+                "HTTP Error: %s while downloading %s: %s",
+                e.code,
+                download_url,
+                e.reason,
             )
 
             # response = requests.get(
@@ -170,32 +167,32 @@ class OsmoseRealBackend(OsmoseBackend):
                 raise e
         except URLError as e:
             get_logger().error(
-                f"URL Error: Failed to reach {download_url}. Reason: {e.reason}"
+                "URL Error: Failed to reach %s. Reason: %s", download_url, e.reason
             )
             raise e
         except OSError as e:
-            get_logger().error(f"OS Error: {e} while writing to {destination}")
+            get_logger().error("OS Error: %s while writing to %s", e, destination)
             raise e
         except Exception as e:
-            get_logger().error(f"Unexpected error occurred: {e}")
+            get_logger().error("Unexpected error occurred: %s", e)
             raise e
 
-        get_logger().info(f"Success {download_url} to {destination} ...")
+        get_logger().info("Success %s to %s ...", download_url, destination)
         if error_ignored:
             get_logger().info("Error ignored.")
         else:
             size = os.stat(destination).st_size
             size_formatted = sizeof_fmt(size)
-            get_logger().info(f"File: {destination} {size_formatted} ({size}) ...")
+            get_logger().info("File: %s %s (%s) ...", destination, size_formatted, size)
 
     def create_users_csv(self, workspace):
         users = self.__fetch_users(workspace)
-        get_logger().info(f"Users to write: {len(users)}")
+        get_logger().info("Users to write: %s", len(users))
         folder_creator = FolderCreator()
         path = os.path.join(
             folder_creator.get_workspace_path(workspace), "osmose_users.csv"
         )
-        with open(path, "w") as file:
+        with open(path, "w", encoding="utf-8") as file:
             writer = csv.writer(file)
             row_list = []
             for user in users:
@@ -210,52 +207,9 @@ class OsmoseRealBackend(OsmoseBackend):
                 )
             writer.writerows(row_list)
 
-    def __handle_validation(self, headers, destination):
-        if headers.get("Content-Type") != "text/html":
-            return
-
-        with open(destination) as f:
-            content = f.read(10000)
-            if "__blnChallengeStore" in content:
-                get_logger().info("Challenge detected, solving...")
-
-                # Retrieve the cookie in the page.
-                raw_data = re.findall(r"(?<=__blnChallengeStore=)\{[^\;]+", content)
-                assert raw_data and len(raw_data) == 1  # noqa: S101
-                raw_data = "".join(raw_data)
-                raw_data = json.loads(raw_data)
-
-                challenge_cookie = raw_data["cookie"]
-                # Add it to the cookies for the next retry request.
-                self.cookies[challenge_cookie["name"]] = challenge_cookie["value"]
-
-                # Send the check request.
-                check_params = raw_data["checkChallengeParams"]
-                data = "&".join(["%s=%s" % (k, v) for k, v in check_params.items()])
-
-                url = (
-                    settings.OSMOSE_BASE_ENDPOINT
-                    + "/.well-known/baleen/challengejs/check?%s=%s"
-                    % (challenge_cookie["name"], challenge_cookie["value"])
-                )
-                get_logger().info(f"Sending check request to {url} with data {data}")
-                response = requests.post(  # noqa: S113
-                    url,
-                    data,
-                    headers={
-                        "Authorization": "Bearer " + self.jwt,
-                    },
-                )
-                response.raise_for_status()
-
-                get_logger().info("Success challenge, replaying download...")
-                raise OsmoseFailedDownloadException(
-                    "Challenge solved, retrying download..."
-                )
-
     def fetch(self, url, params=None):
         self.init_jwt()
-        response = requests.get(  # noqa: S113
+        response = requests.get(
             settings.OSMOSE_API_ENDPOINT + url,
             params=params,
             headers={
@@ -263,6 +217,7 @@ class OsmoseRealBackend(OsmoseBackend):
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
+            timeout=30,
         )
         response.raise_for_status()
         data = response.json()
@@ -281,7 +236,7 @@ class OsmoseRealBackend(OsmoseBackend):
         path = "/tmp"  # noqa: S108
         if not os.path.exists(path):
             os.mkdir(path)
-        with open(f"{path}/{filename}.json", "w") as f:
+        with open(f"{path}/{filename}.json", "w", encoding="utf-8") as f:
             f.write(json.dumps(data, indent=4))
 
     def get_workspaces(self, user):
@@ -366,8 +321,8 @@ class OsmoseRealBackend(OsmoseBackend):
             cats = self.__fetch_categories_by_root(root_category)
             categories.extend(cats)
 
-        get_logger().info(f"Root categories: {len(root_categories)}")
-        get_logger().info(f"Categories: {len(categories)}")
+        get_logger().info("Root categories: %s", len(root_categories))
+        get_logger().info("Categories: %s", len(categories))
 
         builder = FolderBuilder()
         folder = builder.build(root_categories, categories)

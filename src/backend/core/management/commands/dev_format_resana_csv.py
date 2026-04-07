@@ -1,13 +1,10 @@
 import csv
-import json
 import os
 
-from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand
 from django.core.validators import validate_email
 
 from core.destinations.resana.resana_backend import ResanaBackend
-from core.models import Workspace
 
 
 class Command(BaseCommand):
@@ -15,10 +12,10 @@ class Command(BaseCommand):
         "(Dev command) it loads the Resana CSV file to map email to target organization"
     )
 
-    def cleanup(self, str: str):
-        return str.lower().replace("’", "'").replace("&#039;", "'")
+    def cleanup(self, value: str):
+        return value.lower().replace("'", "'").replace("&#039;", "'")
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options):  # pylint: disable=too-many-locals
         self.stdout.write(f"{os.path.dirname(__file__)}")
 
         mappings = []
@@ -49,28 +46,27 @@ class Command(BaseCommand):
 
         # Get distinct values from the list
         distinct_values = sorted(list(set(third_column_values)), key=len)  # noqa: C414
-        distinct_values_to_uuids = {}
 
         # Print the distinct values
-        self.stdout.write(f"Distinct values from the third column")
+        self.stdout.write("Distinct values from the third column")
         for value in distinct_values:
             print(value)  # noqa: T201
 
         # Get Resana organizations
         resana_backend = ResanaBackend()
         organizations = resana_backend.get_organizations()
-        self.stdout.write(f"Resana Organizations:")
+        self.stdout.write("Resana Organizations:")
         organization_name_to_data = {}
         for organization in organizations:
             print(organization["uuid"] + " -> " + organization["name"])  # noqa: T201
             organization_name_to_data[self.cleanup(organization["name"])] = organization
 
-        self.stdout.write(f"organization_name_to_data:")
+        self.stdout.write("organization_name_to_data:")
         for key in organization_name_to_data:
             print(key)  # noqa: T201
 
         # Make sure every row has a valid mapping
-        self.stdout.write(f"Mapping ...")
+        self.stdout.write("Mapping ...")
         for value in distinct_values:
             resana_data = organization_name_to_data[self.cleanup(value)]
             print("Value:")  # noqa: T201, T201

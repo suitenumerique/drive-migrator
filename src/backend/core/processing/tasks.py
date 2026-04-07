@@ -30,11 +30,11 @@ def list_work_dir():
             elif entry.is_file():
                 size = entry.stat().st_size
             size_fmt = sizeof_fmt(size)
-            logger.info(f"{entry.name} {size_fmt} ({size})")
+            logger.info("%s %s (%s)", entry.name, size_fmt, size)
 
 
 def list_workspace_dir(workspace: Workspace):
-    logger.info(f"Listing workspace dir")
+    logger.info("Listing workspace dir")
     creator = FolderCreator()
     path = creator.get_workspace_path(workspace)
     files = []
@@ -42,20 +42,20 @@ def list_workspace_dir(workspace: Workspace):
         for filename in filenames:
             files.append(os.path.join(root, filename))
 
-    logger.info(f"Listing {len(files)} files")
+    logger.info("Listing %s files", len(files))
     for file in files:
         size = os.stat(file).st_size
         size_formatted = sizeof_fmt(size)
-        logger.info(f"File: {file} {size_formatted} ({size}) ...")
+        logger.info("File: %s %s (%s) ...", file, size_formatted, size)
 
 
 def cleanup_workspace_dir(workspace: Workspace):
-    logger.info(f"Cleaning up {workspace.id} directory ...")
+    logger.info("Cleaning up %s directory ...", workspace.id)
     creator = FolderCreator()
     creator.delete_folder(workspace)
     archive_manager = ArchiveManager()
     archive_manager.delete_archive(workspace)
-    logger.info(f"Cleaned up {workspace.id} directory !")
+    logger.info("Cleaned up %s directory !", workspace.id)
     list_work_dir()
 
 
@@ -73,11 +73,13 @@ def debug_folder(folder: OsmoseFolder):
 @app.task(bind=True)
 def export(self, data):  # pylint: disable=unused-argument
     workspace_id = data["workspace"]["id"]
-    logger.info(f"Starting workspace {workspace_id} ...")
+    logger.info("Starting workspace %s ...", workspace_id)
 
     workspace = Workspace.objects.get(id=workspace_id)
     logger.info(
-        f"Workspace title: {workspace.title}, destination_statuses: {workspace.destination_statuses}"
+        "Workspace title: %s, destination_statuses: %s",
+        workspace.title,
+        workspace.destination_statuses,
     )
     user = User.objects.get(id=data["user"]["id"])
 
@@ -99,7 +101,7 @@ def export(self, data):  # pylint: disable=unused-argument
 
     mails_manager = MailsManager()
 
-    logger.info(f"archive status = {workspace.get_destination_status('archive')}")
+    logger.info("archive status = %s", workspace.get_destination_status("archive"))
     if workspace.get_destination_status("archive") == Workspace.Status.PENDING:
         logger.info("Calling zip_workspace_folder ...")
         helper = ArchiveManager()
@@ -108,12 +110,12 @@ def export(self, data):  # pylint: disable=unused-argument
         logger.info("Calling upload_archive ...")
         archive_url = helper.upload_archive(workspace)
 
-        logger.info(f"Sending send_archive_download_mail ${archive_url} ...")
+        logger.info("Sending send_archive_download_mail %s ...", archive_url)
         mails_manager.send_archive_download_mail(user, workspace, archive_url)
         workspace.set_destination_status("archive", Workspace.Status.SUCCESS)
         workspace.save()
 
-    logger.info(f"resana status = {workspace.get_destination_status('resana')}")
+    logger.info("resana status = %s", workspace.get_destination_status("resana"))
     if workspace.get_destination_status("resana") == Workspace.Status.PENDING:
         resana_backend = ResanaBackend()
         logger.info("Calling resana create_workspace ...")

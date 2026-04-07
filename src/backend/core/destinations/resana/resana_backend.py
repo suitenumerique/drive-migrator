@@ -29,17 +29,17 @@ class ResanaBackend:
         # extract domain from email
         parts = email.split("@")
         if len(parts) != 2:
-            raise Exception("Invalid email")
+            raise ValueError("Invalid email")
         domain = parts[1]
         mapping = ResanaEmailMapping.objects.filter(domain=domain).first()
         if mapping:
             return mapping
         mapping = ResanaEmailMapping.objects.filter(domain="*").first()
         if not mapping:
-            raise Exception("No default mapping found")
+            raise ValueError("No default mapping found")
         return mapping
 
-    def get_destination_organization_uuid(self, user: User, workspace: Workspace):
+    def get_destination_organization_uuid(self, user: User, _workspace: Workspace):
         if settings.RESANA_DEFAULT_ORGANIZATION:
             return settings.RESANA_DEFAULT_ORGANIZATION
         mapping = self.get_mapping_from_email(user.email)
@@ -68,7 +68,7 @@ class ResanaBackend:
         return response.json()
 
     def fetch_user(self, user: User):
-        get_logger().info(f"Search Resana user {user.email} ...")
+        get_logger().info("Search Resana user %s ...", user.email)
         response = self.request(
             "get",
             "/contacts/users",
@@ -79,19 +79,19 @@ class ResanaBackend:
         data = response.json()
         users = data["users"]
         if len(users) == 0:
-            get_logger().info(f"User not found: {user.email}")
+            get_logger().info("User not found: %s", user.email)
             return None
 
         user = users[0]
-        get_logger().info(f"User found: {user}")
+        get_logger().info("User found: %s", user)
         return user
 
     def add_admin(self, workspace: Workspace, user):
         resana_id = workspace.get_destination_metadata("resana").get("id")
         if not resana_id:
-            raise Exception("Workspace not created in Resana")
+            raise ValueError("Workspace not created in Resana")
 
-        get_logger().info(f"Adding admin to {resana_id} {workspace.title} ...")
+        get_logger().info("Adding admin to %s %s ...", resana_id, workspace.title)
         response = self.request(
             "post",
             "/api-workspaces/members",
@@ -107,26 +107,20 @@ class ResanaBackend:
     def get_organizations(self):
         # Get organizations.
         get_logger().info("Fetching organizations ...")
-        response = self.request("get", f"/organizations", params={"itemsPerPage": 100})
+        response = self.request("get", "/organizations", params={"itemsPerPage": 100})
         data = response.json()
         organizations = data["hydra:member"]
         return organizations
 
     def create_workspace(self, workspace: Workspace, user: User):
         if workspace.get_destination_metadata("resana").get("id"):
-            raise Exception("Workspace already created in Resana")
+            raise ValueError("Workspace already created in Resana")
 
         # Fetch resana user to make sure it exists before proceeding to upload.
         resana_user = self.fetch_user(user)
         if not resana_user:
             # TODO: Add specific logic here.
-            raise Exception(f"User {user.email} not found in Resana")
-
-        # Get organizations.
-        # get_logger().info("Fetching organizations ...")
-        # response = self.request("get", f"/organizations")
-        # data = response.json()
-        # get_logger().info(json.dumps(data, indent=2))
+            raise ValueError(f"User {user.email} not found in Resana")
 
         # Make sure folder and file name are not too long.
         folder_creator = FolderCreator()
@@ -141,18 +135,14 @@ class ResanaBackend:
         # Get organization data.
         organization_uuid = self.get_destination_organization_uuid(user, workspace)
         get_logger().info(
-            f"Creating workspace inside organization {organization_uuid} ..."
+            "Creating workspace inside organization %s ...", organization_uuid
         )
-        response = self.request("get", f"/organizations/{organization_uuid}")
-        organization_data = response.json()
-
-        # get_logger().info("Organization data")
-        # get_logger().info(json.dumps(organization_data, indent=2))
+        self.request("get", f"/organizations/{organization_uuid}")
 
         # Create workspace.
         response = self.request(
             "post",
-            f"/workspaces",
+            "/workspaces",
             json={
                 "name": workspace.title.replace("/", "").replace("\\", ""),
                 "organizationUuid": organization_uuid,
@@ -193,9 +183,9 @@ class ResanaBackend:
     def fetch_job(self, workspace: Workspace):
         job_id = workspace.get_destination_metadata("resana").get("job_id")
         if not job_id:
-            raise Exception("Workspace has no job id")
+            raise ValueError("Workspace has no job id")
 
-        get_logger().info(f"Fetching job of {workspace.id} {workspace.title} ...")
+        get_logger().info("Fetching job of %s %s ...", workspace.id, workspace.title)
         response = self.request("get", f"/jobs/{job_id}")
         job_data = response.json()
         get_logger().info(json.dumps(job_data, indent=2))
@@ -205,15 +195,18 @@ class ResanaBackend:
     def refresh_job(self, workspace: Workspace):
         job_id = workspace.get_destination_metadata("resana").get("job_id")
         if not job_id:
-            raise Exception("Workspace has no job id")
+            raise ValueError("Workspace has no job id")
 
         if workspace.get_destination_status("resana") == Workspace.Status.SUCCESS:
-            raise Exception("Workspace resana destination is already SUCCESS")
+            raise ValueError("Workspace resana destination is already SUCCESS")
 
         job_data = self.fetch_job(workspace)
 
         get_logger().info(
-            f"Job status of {workspace.id} {workspace.title}: {job_data['status']} ..."
+            "Job status of %s %s: %s ...",
+            workspace.id,
+            workspace.title,
+            job_data["status"],
         )
 
         job_status = job_data["status"]
@@ -223,7 +216,7 @@ class ResanaBackend:
         workspace.set_destination_metadata("resana", resana_meta)
 
         if job_status in ("completed", "failed"):
-            get_logger().info(f"Setting status to success ...")
+            get_logger().info("Setting status to success ...")
             workspace.set_destination_status("resana", Workspace.Status.SUCCESS)
             workspace.save()
 
@@ -258,7 +251,7 @@ class ResanaBackend:
             response.raise_for_status()
         except requests.HTTPError as e:
             get_logger().error(
-                f"Error while calling {method} {url} {response.status_code}"
+                "Error while calling %s %s %s", method, url, response.status_code
             )
             print(response.text)  # noqa: T201
             get_logger().error(json.dumps(e.response.json(), indent=2))
