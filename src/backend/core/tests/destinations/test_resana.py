@@ -82,6 +82,19 @@ def test_retry_job():
     mock_backend.retry_job.assert_called_once_with(workspace)
 
 
+def test_poll_completion():
+    """poll_completion() delegates to ResanaBackend.refresh_job()."""
+    workspace = MagicMock(spec=Workspace)
+
+    with patch("core.destinations.resana.backend.ResanaBackend") as mock_backend_cls:
+        mock_backend = mock_backend_cls.return_value
+
+        backend = ResanaDestinationBackend()
+        backend.poll_completion(workspace)
+
+    mock_backend.refresh_job.assert_called_once_with(workspace)
+
+
 @pytest.mark.django_db
 def test_get_mapping_from_email_domain_match():
     """get_mapping_from_email() returns the mapping for an exact domain match."""
