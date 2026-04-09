@@ -1,6 +1,9 @@
-"""Abstract destination backend interface."""
+"""Abstract destination backend interface and destination registry."""
 
 from abc import ABC, abstractmethod
+
+from django.conf import settings
+from django.utils.module_loading import import_string
 
 
 class AbstractDestinationBackend(ABC):
@@ -58,3 +61,41 @@ class AbstractDestinationBackend(ABC):
         Called on demand (e.g. via API endpoint).
         """
         raise NotImplementedError
+
+
+class DestinationRegistry:
+    """
+    Registry that loads destination backends from settings.DESTINATION_BACKENDS.
+
+    Backends are instantiated once and cached. Call clear_cache() in tests when
+    overriding DESTINATION_BACKENDS to ensure isolation between test cases.
+    """
+
+    _cache: list[AbstractDestinationBackend] = []
+    _loaded: bool = False
+
+    @classmethod
+    def get_all(cls) -> list[AbstractDestinationBackend]:
+        if not cls._loaded:
+            cls._cache = [
+                import_string(path)() for path in settings.DESTINATION_BACKENDS
+            ]
+            cls._loaded = True
+        return cls._cache
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Reset the registry cache. Call in tests when overriding DESTINATION_BACKENDS."""
+        cls._loaded = False
+        cls._cache = []
+
+    @classmethod
+    def get(cls, name: str) -> AbstractDestinationBackend:
+        for dest in cls.get_all():
+            if dest.name == name:
+                return dest
+        raise ValueError(f"No destination backend registered with name '{name}'")
+
+    @classmethod
+    def get_names(cls) -> list[str]:
+        return [dest.name for dest in cls.get_all()]

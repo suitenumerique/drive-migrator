@@ -1,7 +1,12 @@
-"""Abstract source backend interface and source data types."""
+"""Abstract source backend interface, source data types, and source manager."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+
+from django.conf import settings
+from django.utils.module_loading import import_string
+
+from core.models import Workspace
 
 
 @dataclass
@@ -87,3 +92,30 @@ class AbstractSourceBackend(ABC):
         files into the export directory (e.g. a members CSV for Osmose).
         Default implementation is a no-op.
         """
+
+
+class SourceManager:
+    """
+    Loads the source backend configured in settings.SOURCE_BACKEND and provides
+    a synchronize() method to populate the DB with workspaces from that source.
+    """
+
+    def get_backend(self) -> AbstractSourceBackend:
+        backend_class = import_string(settings.SOURCE_BACKEND)
+        return backend_class()
+
+    def synchronize(self, user) -> None:
+        backend = self.get_backend()
+        source_workspaces = backend.get_workspaces(user)
+        source_type = backend.source_type
+
+        for source_ws in source_workspaces:
+            workspace = Workspace.objects.filter(source_id=source_ws.id).first()
+            if not workspace:
+                workspace = Workspace(source_id=source_ws.id, source_type=source_type)
+            workspace.title = source_ws.title
+            workspace.save()
+            user.workspaces.add(workspace)
+        # Note: workspaces that disappear from the source are NOT deleted from the DB.
+        # This is intentional — this tool is designed for one-shot migrations, not
+        # continuous sync. Orphaned workspace records are harmless and preserve history.

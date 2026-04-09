@@ -182,6 +182,21 @@ class Base(Configuration):
 
     S3_VERSIONS_PAGE_SIZE = 50
 
+    # Source and destination backends
+    SOURCE_BACKEND = values.Value(
+        "core.sources.osmose.backend.OsmoseSourceBackend",
+        environ_name="SOURCE_BACKEND",
+        environ_prefix=None,
+    )
+    DESTINATION_BACKENDS = values.ListValue(
+        [
+            "core.destinations.archive.backend.ArchiveDestinationBackend",
+            "core.destinations.resana.backend.ResanaDestinationBackend",
+        ],
+        environ_name="DESTINATION_BACKENDS",
+        environ_prefix=None,
+    )
+
     # Osmose
     OSMOSE_PKI_RSA_PRIVATE_KEY = values.Value(
         environ_name="OSMOSE_PKI_RSA_PRIVATE_KEY", environ_prefix=None
