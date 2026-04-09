@@ -85,10 +85,10 @@ class Workspace(BaseModel):
 
     # Keys are destination names (e.g. "archive", "resana", "drive").
     # Do not edit this field directly. Use set_destination_status instead.
-    destination_statuses = models.JSONField(default=dict)
+    destination_statuses = models.JSONField(default=dict, blank=True)
 
     # Arbitrary per-destination metadata (IDs, job IDs, file counts, etc.).
-    destination_metadata = models.JSONField(default=dict)
+    destination_metadata = models.JSONField(default=dict, blank=True)
 
     def get_destination_status(self, destination_name: str) -> str:
         return self.destination_statuses.get(destination_name, Workspace.Status.NONE)
