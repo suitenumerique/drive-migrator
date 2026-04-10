@@ -2,9 +2,36 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.archive.backend import ArchiveDestinationBackend
 from core.models import Workspace
+
+
+@pytest.fixture(autouse=True)
+def _patch_mails_manager():
+    """Prevent real MailsManager calls (DB access) across all tests in this module."""
+    with patch("core.destinations.archive.backend.MailsManager") as mock_cls:
+        mock_cls.return_value.send_archive_download_mail = MagicMock()
+        yield mock_cls
+
+
+def test_export_sends_download_mail(_patch_mails_manager):
+    """export() sends the archive download email to the user after uploading."""
+    workspace = MagicMock(spec=Workspace)
+    user = MagicMock()
+
+    with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
+        mock_manager = mock_manager_cls.return_value
+        mock_manager.upload_archive.return_value = "http://s3.example.com/ws.zip"
+
+        backend = ArchiveDestinationBackend()
+        backend.export(workspace, user, "/tmp/workspace")
+
+    _patch_mails_manager.return_value.send_archive_download_mail.assert_called_once_with(
+        user, workspace, "http://s3.example.com/ws.zip"
+    )
 
 
 def test_implements_abstract_destination():

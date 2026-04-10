@@ -1,6 +1,7 @@
 """ArchiveDestinationBackend — wraps ArchiveManager and implements AbstractDestinationBackend."""
 
 from core.backends.destination import AbstractDestinationBackend
+from core.mails_manager import MailsManager
 from core.models import Workspace
 from core.processing.folder_helper import ArchiveManager
 
@@ -20,7 +21,8 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
     def export(self, workspace, user, local_folder_path: str) -> None:
         manager = ArchiveManager()
         manager.zip_workspace_folder(workspace)
-        manager.upload_archive(workspace)
+        archive_url = manager.upload_archive(workspace)
+        MailsManager().send_archive_download_mail(user, workspace, archive_url)
         workspace.set_destination_status("archive", Workspace.Status.SUCCESS)
         workspace.save()
 

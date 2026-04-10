@@ -2,12 +2,11 @@ import os
 import shutil
 
 from django.conf import settings
-from django.utils.module_loading import import_string
 
 from celery.utils.log import get_task_logger
 
+from core.backends.source import AbstractSourceBackend, SourceFolder
 from core.models import Workspace
-from core.sources.osmose.osmose_backend import OsmoseFolder
 from core.utils import (
     ensure_file_uniqueness,
     get_dir_size,
@@ -25,13 +24,18 @@ class FolderCreator:
         self.files_current = 0
         self.workspace = None
 
-    def __get_files_count(self, folder: OsmoseFolder):
+    def __get_files_count(self, folder: SourceFolder):
         count = len(folder.files)
         for child in folder.children:
             count += self.__get_files_count(child)
         return count
 
-    def create_folder(self, workspace: Workspace, folder: OsmoseFolder):
+    def create_folder(
+        self,
+        workspace: Workspace,
+        folder: SourceFolder,
+        source_backend: AbstractSourceBackend,
+    ) -> str:
         self.workspace = workspace
         self.files_count = self.__get_files_count(folder)
         self.delete_folder(workspace)
@@ -42,7 +46,9 @@ class FolderCreator:
 
         # Do not create folder for the root folder, it is virtual.
         for child in folder.children:
-            self.__create_folder(path, workspace, child)
+            self.__create_folder(path, workspace, child, source_backend)
+
+        return path
 
     def get_workspace_path(self, workspace):
         return f"{settings.APP_WORK_DIR}/workspace_{workspace.id}"
@@ -53,53 +59,49 @@ class FolderCreator:
             shutil.rmtree(path)
 
     def __create_folder(
-        self, current_dir: str, workspace: Workspace, folder: OsmoseFolder
+        self,
+        current_dir: str,
+        workspace: Workspace,
+        folder: SourceFolder,
+        source_backend: AbstractSourceBackend,
     ):
         path = truncate_path_parts(os.path.join(current_dir, folder.name))
         if not os.path.exists(path):
             os.mkdir(path)
 
         for child in folder.children:
-            self.__create_folder(path, workspace, child)
+            self.__create_folder(path, workspace, child, source_backend)
 
-        self.__download_folder_files(folder, path)
+        self.__download_folder_files(folder, path, source_backend)
 
-    def __download_folder_files(self, folder: OsmoseFolder, path: str):
-        """
-        Download all files in the folder, this is a temporary implementation. It will be replaced via a mount point.
-
-        :param folder:
-        :param path:
-        :return:
-        """
-
-        backend_class = import_string(settings.OSMOSE_BACKEND)
-        backend = backend_class()
-
+    def __download_folder_files(
+        self, folder: SourceFolder, path: str, source_backend: AbstractSourceBackend
+    ):
         for file in folder.files:
             self.files_current += 1
-            logger.info(f"Downloading file {self.files_current}/{self.files_count} ...")
-
-            download_url = os.path.join(
-                settings.OSMOSE_BASE_ENDPOINT, file.raw_data["downloadUrl"]
+            logger.info(
+                "Downloading file %s/%s ...", self.files_current, self.files_count
             )
+
             destination = os.path.join(path, file.name_with_extension)
             destination_truncated = truncate_path_parts(destination)
             if destination != destination_truncated:
                 logger.info(
-                    f"Truncated filename: {destination} into {destination_truncated}"
+                    "Truncated filename: %s into %s", destination, destination_truncated
                 )
                 destination = destination_truncated
 
             destination_uniqueness = ensure_file_uniqueness(destination)
             if destination != destination_uniqueness:
                 logger.info(
-                    f"Uniquenessify filename: {destination} into {destination_uniqueness}"
+                    "Uniquenessify filename: %s into %s",
+                    destination,
+                    destination_uniqueness,
                 )
                 destination = destination_uniqueness
 
-            backend.download_file(download_url, destination)
+            source_backend.download_file(file, destination)
             size = get_dir_size(self.get_workspace_path(self.workspace))
             size_formatted = sizeof_fmt(size)
-            logger.info(f"Directory size: {size_formatted} ({size})")
+            logger.info("Directory size: %s (%s)", size_formatted, size)
             self.files_success += 1
