@@ -1,9 +1,7 @@
 """Tests for FolderCreator — generic SourceFolder/SourceFile-based implementation."""
 
 import os
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from core.backends.source import AbstractSourceBackend, SourceFile, SourceFolder
 from core.models import Workspace
@@ -166,3 +164,69 @@ def test_delete_folder_is_safe_when_missing(tmp_path, settings):
 
     creator = FolderCreator()
     creator.delete_folder(workspace)  # must not raise
+
+
+def test_create_folder_recurses_into_nested_subfolders(tmp_path, settings):
+    """create_folder() recurses into grandchild folders (covers recursive __create_folder call)."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws9")
+    folder = SourceFolder(
+        name="root",
+        children=[
+            SourceFolder(
+                name="level1",
+                children=[SourceFolder(name="level2")],
+            )
+        ],
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert os.path.isdir(tmp_path / "workspace_ws9" / "level1" / "level2")
+
+
+def test_create_folder_logs_truncated_filename(tmp_path, settings):
+    """When a filename is truncated, create_folder() uses the truncated path."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws10")
+    long_name = "a" * 200
+    file = SourceFile(
+        id="f1", name=long_name, extension=".pdf", download_url="http://x"
+    )
+    folder = SourceFolder(
+        name="root", children=[SourceFolder(name="sub", files=[file])]
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    # download_file must have been called with a path shorter than the original
+    called_dest = backend.download_file.call_args[0][1]
+    original_dest = str(tmp_path / "workspace_ws10" / "sub" / (long_name + ".pdf"))
+    assert called_dest != original_dest
+    assert len(os.path.basename(called_dest)) < len(long_name + ".pdf")
+
+
+def test_create_folder_ensures_filename_uniqueness(tmp_path, settings):
+    """When ensure_file_uniqueness returns a different path, create_folder() uses it."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws11")
+    file = SourceFile(id="f1", name="doc", extension=".pdf", download_url="http://x")
+    folder = SourceFolder(
+        name="root", children=[SourceFolder(name="sub", files=[file])]
+    )
+    backend = _make_backend()
+
+    # Simulate a name collision: ensure_file_uniqueness returns a different path
+    with patch(
+        "core.processing.folder_creator.ensure_file_uniqueness",
+        side_effect=lambda p: p.replace("doc.pdf", "doc (1).pdf"),
+    ):
+        creator = FolderCreator()
+        creator.create_folder(workspace, folder, backend)
+
+    called_dest = backend.download_file.call_args[0][1]
+    assert "doc (1).pdf" in called_dest
