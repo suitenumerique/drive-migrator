@@ -7,12 +7,12 @@ from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
 
-from core.destinations.resana.resana_backend import ResanaBackend
+from core.backends.destination import DestinationRegistry
+from core.backends.source import SourceFolder, SourceManager
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
-from core.sources.osmose.osmose_backend import OsmoseFolder, OsmoseManager
 from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app
@@ -59,12 +59,12 @@ def cleanup_workspace_dir(workspace: Workspace):
     list_work_dir()
 
 
-def debug_folder(folder: OsmoseFolder):
+def debug_folder(folder: SourceFolder):
     logger.info("Debugging folder")
 
-    def aux(folder: OsmoseFolder, depth=0):
-        logger.info(" " * depth + folder.name)
-        for child in folder.children:
+    def aux(f: SourceFolder, depth=0):
+        logger.info(" " * depth + f.name)
+        for child in f.children:
             aux(child, depth + 1)
 
     aux(folder)
@@ -83,46 +83,30 @@ def export(self, data):  # pylint: disable=unused-argument
     )
     user = User.objects.get(id=data["user"]["id"])
 
-    backend = OsmoseManager().get_backend()
+    source_backend = SourceManager().get_backend()
     list_work_dir()
 
-    logger.info("Calling get_workspace_documents_structure ...")
-    folder = backend.get_workspace_documents_structure(workspace)
+    logger.info("Calling get_workspace_structure ...")
+    folder = source_backend.get_workspace_structure(workspace)
     debug_folder(folder)
 
     logger.info("Calling create_folder ...")
     creator = FolderCreator()
-    creator.create_folder(workspace, folder)
-
-    logger.info("Calling create_users_csv ...")
-    backend.create_users_csv(workspace)
+    local_path = creator.create_folder(workspace, folder, source_backend)
 
     list_workspace_dir(workspace)
 
-    mails_manager = MailsManager()
+    logger.info("Calling prepare_export ...")
+    source_backend.prepare_export(workspace, local_path)
 
-    logger.info("archive status = %s", workspace.get_destination_status("archive"))
-    if workspace.get_destination_status("archive") == Workspace.Status.PENDING:
-        logger.info("Calling zip_workspace_folder ...")
-        helper = ArchiveManager()
-        helper.zip_workspace_folder(workspace)
-
-        logger.info("Calling upload_archive ...")
-        archive_url = helper.upload_archive(workspace)
-
-        logger.info("Sending send_archive_download_mail %s ...", archive_url)
-        mails_manager.send_archive_download_mail(user, workspace, archive_url)
-        workspace.set_destination_status("archive", Workspace.Status.SUCCESS)
-        workspace.save()
-
-    logger.info("resana status = %s", workspace.get_destination_status("resana"))
-    if workspace.get_destination_status("resana") == Workspace.Status.PENDING:
-        resana_backend = ResanaBackend()
-        logger.info("Calling resana create_workspace ...")
-        resana_backend.create_workspace(workspace, user)
-        # At this point, the resana refresh job command will put the workspace in success state
-        workspace.set_destination_status("resana", Workspace.Status.PENDING)
-        workspace.save()
+    for dest_backend in DestinationRegistry.get_all():
+        dest_name = dest_backend.name
+        logger.info(
+            "%s status = %s", dest_name, workspace.get_destination_status(dest_name)
+        )
+        if workspace.get_destination_status(dest_name) == Workspace.Status.PENDING:
+            logger.info("Calling %s export ...", dest_name)
+            dest_backend.export(workspace, user, local_path)
 
     logger.info("Task done")
 
