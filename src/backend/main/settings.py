@@ -192,9 +192,24 @@ class Base(Configuration):
         [
             "core.destinations.archive.backend.ArchiveDestinationBackend",
             "core.destinations.resana.backend.ResanaDestinationBackend",
+            "core.destinations.drive.backend.DriveDestinationBackend",
         ],
         environ_name="DESTINATION_BACKENDS",
         environ_prefix=None,
+    )
+
+    # La Suite Drive
+    DRIVE_API_BASE_URL = values.Value(
+        environ_name="DRIVE_API_BASE_URL", environ_prefix=None, default=""
+    )
+    DRIVE_OIDC_TOKEN_ENDPOINT = values.Value(
+        environ_name="DRIVE_OIDC_TOKEN_ENDPOINT", environ_prefix=None, default=""
+    )
+    DRIVE_OIDC_CLIENT_ID = values.Value(
+        environ_name="DRIVE_OIDC_CLIENT_ID", environ_prefix=None, default=""
+    )
+    DRIVE_OIDC_CLIENT_SECRET = values.Value(
+        environ_name="DRIVE_OIDC_CLIENT_SECRET", environ_prefix=None, default=""
     )
 
     # Osmose
