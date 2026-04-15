@@ -46,7 +46,8 @@ class OsmoseSourceBackend(AbstractSourceBackend):
 
     def prepare_export(self, workspace, local_folder_path: str) -> None:
         backend = OsmoseRealBackend()
-        backend.create_users_csv(workspace)
+        workspace.members = backend.get_members(workspace)
+        workspace.save()
 
     def _convert_folder(self, osmose_folder) -> SourceFolder:
         """Recursively convert an OsmoseFolder tree to a SourceFolder tree."""

@@ -1,5 +1,6 @@
 """Filesystem source backend — reads workspaces from a local directory tree."""
 
+import csv
 import os
 import shutil
 
@@ -12,22 +13,38 @@ from core.backends.source import (
     SourceWorkspace,
 )
 
+_USERS_CSV = "_users.csv"
+
 
 class FileSystemSourceBackend(AbstractSourceBackend):
     """
     Source backend that reads workspaces from the local filesystem.
     Useful for development, testing, and migration of already-downloaded archives.
 
-    Expects settings.FILESYSTEM_SOURCE_ROOT to point to a directory where
-    each immediate subdirectory is treated as a separate workspace.
+    Directory layout under settings.FILESYSTEM_SOURCE_ROOT:
+
+        <root>/
+          <user-email>/          ← optional per-admin subfolder
+            <workspace>/
+              _users.csv         ← optional members (name,firstName,email — no header)
+              <files…>
+          <workspace>/           ← fallback: all root-level dirs if no user subfolder
+
+    When {root}/{user.email}/ exists, only workspaces inside it are returned.
+    Otherwise all root-level subdirectories are returned (single-user demo mode).
+
+    _users.csv is excluded from the file tree and parsed by prepare_export() to
+    populate workspace.members.
     """
 
     source_type = "filesystem"
 
     def get_workspaces(self, user) -> list[SourceWorkspace]:
         root = settings.FILESYSTEM_SOURCE_ROOT
+        user_dir = os.path.join(root, user.email) if user else None
+        scan_root = user_dir if user_dir and os.path.isdir(user_dir) else root
         workspaces = []
-        for entry in os.scandir(root):
+        for entry in os.scandir(scan_root):
             if entry.is_dir():
                 workspaces.append(SourceWorkspace(id=entry.path, title=entry.name))
         return workspaces
@@ -38,12 +55,25 @@ class FileSystemSourceBackend(AbstractSourceBackend):
     def download_file(self, file: SourceFile, destination_path: str) -> None:
         shutil.copy2(file.download_url, destination_path)
 
+    def prepare_export(self, workspace, local_folder_path: str) -> None:
+        users_csv = os.path.join(workspace.source_id, _USERS_CSV)
+        if not os.path.isfile(users_csv):
+            return
+        with open(users_csv, newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+        workspace.members = [
+            {"name": row[0], "firstName": row[1], "email": row[2]}
+            for row in rows
+            if len(row) >= 3 and any(row)
+        ]
+        workspace.save()
+
     def _build_folder(self, path: str) -> SourceFolder:
         folder = SourceFolder(name=os.path.basename(path))
         for entry in os.scandir(path):
             if entry.is_dir():
                 folder.children.append(self._build_folder(entry.path))
-            else:
+            elif entry.name != _USERS_CSV:
                 name, ext = os.path.splitext(entry.name)
                 folder.files.append(
                     SourceFile(

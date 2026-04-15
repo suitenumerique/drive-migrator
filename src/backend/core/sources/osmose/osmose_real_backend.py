@@ -1,4 +1,3 @@
-import csv
 import json
 import logging
 import os
@@ -16,7 +15,6 @@ from cryptography.hazmat.primitives import serialization
 from retry import retry
 
 from core.models import Workspace
-from core.processing.folder_creator import FolderCreator
 from core.sources.osmose.osmose_backend import (
     OsmoseBackend,
     OsmoseFile,
@@ -185,27 +183,19 @@ class OsmoseRealBackend(OsmoseBackend):
             size_formatted = sizeof_fmt(size)
             get_logger().info("File: %s %s (%s) ...", destination, size_formatted, size)
 
-    def create_users_csv(self, workspace):
+    def get_members(self, workspace) -> list[dict]:
+        """Return workspace members as a list of {name, firstName, email} dicts."""
         users = self.__fetch_users(workspace)
-        get_logger().info("Users to write: %s", len(users))
-        folder_creator = FolderCreator()
-        path = os.path.join(
-            folder_creator.get_workspace_path(workspace), "osmose_users.csv"
-        )
-        with open(path, "w", encoding="utf-8") as file:
-            writer = csv.writer(file)
-            row_list = []
-            for user in users:
-                if not user:
-                    continue
-                row_list.append(
-                    [
-                        user.get("name", ""),
-                        user.get("firstName", ""),
-                        user.get("email", ""),
-                    ]
-                )
-            writer.writerows(row_list)
+        get_logger().info("Members fetched: %s", len(users))
+        return [
+            {
+                "name": user.get("name", ""),
+                "firstName": user.get("firstName", ""),
+                "email": user.get("email", ""),
+            }
+            for user in users
+            if user
+        ]
 
     def fetch(self, url, params=None):
         self.init_jwt()

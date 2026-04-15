@@ -88,8 +88,16 @@ class AbstractSourceBackend(ABC):
     def prepare_export(self, workspace, local_folder_path: str) -> None:  # noqa: B027
         """
         Optional hook called after the local folder is assembled and before
-        destinations are invoked. Use this to write source-specific supplementary
-        files into the export directory (e.g. a members CSV for Osmose).
+        destinations are invoked.
+
+        Implementations should populate workspace.members with the list of workspace
+        members fetched from the source platform, then call workspace.save().
+        Each entry must be a dict with keys: name, firstName, email.
+
+        Destination backends consume workspace.members to share/invite users or
+        generate platform-specific member files (e.g. osmose_users.csv for Resana,
+        users.csv for archive).
+
         Default implementation is a no-op.
         """
 

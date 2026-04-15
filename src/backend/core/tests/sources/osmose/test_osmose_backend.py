@@ -103,13 +103,19 @@ def test_download_file_calls_real_backend(settings):
     )
 
 
-def test_prepare_export_writes_members_csv():
-    """prepare_export() calls OsmoseRealBackend.create_users_csv()."""
+def test_prepare_export_populates_workspace_members():
+    """prepare_export() fetches members from Osmose and stores them on workspace."""
     workspace = MagicMock()
+    members = [
+        {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
+    ]
 
     with patch("core.sources.osmose.backend.OsmoseRealBackend") as mock_real_cls:
         mock_real = mock_real_cls.return_value
+        mock_real.get_members.return_value = members
         backend = OsmoseSourceBackend()
         backend.prepare_export(workspace, "/tmp/workspace")
 
-    mock_real.create_users_csv.assert_called_once_with(workspace)
+    mock_real.get_members.assert_called_once_with(workspace)
+    assert workspace.members == members
+    workspace.save.assert_called_once()
