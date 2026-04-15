@@ -198,6 +198,11 @@ class Base(Configuration):
         environ_prefix=None,
     )
 
+    # Filesystem source backend
+    FILESYSTEM_SOURCE_ROOT = values.Value(
+        environ_name="FILESYSTEM_SOURCE_ROOT", environ_prefix=None, default="/demo-data"
+    )
+
     # La Suite Drive
     DRIVE_API_BASE_URL = values.Value(
         environ_name="DRIVE_API_BASE_URL", environ_prefix=None, default=""

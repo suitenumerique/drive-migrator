@@ -62,6 +62,8 @@ services:
     volumes:
       - ./src/backend:/app
       - ./data/static:/data/static
+      - ./data/workdir:/workdir
+      - ./data/demo-data:/demo-data:ro
     depends_on:
       - postgresql
       - mailcatcher
@@ -89,7 +91,9 @@ services:
       - env.d/development/postgresql
     volumes:
       - ./src/backend:/app
+      - ./data/workdir:/workdir
       - ./data/static:/data/static
+      - ./data/demo-data:/demo-data:ro
     depends_on:
       - app-dev
 
