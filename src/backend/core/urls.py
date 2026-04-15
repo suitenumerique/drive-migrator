@@ -8,6 +8,7 @@ from core.api import viewsets
 from core.api.views.dev import dev_view
 from core.api.views.error import ErrorApiView
 from core.api.views.feature_flags import FeatureFlagsApiView
+from core.api.views.available_destinations import AvailableDestinationsAPIView
 from core.api.views.resana_email_mapping import ResanaEmailMappingApiView
 from core.api.views.synchronize import SynchronizeAPIView
 from core.api.views.workspaces import WorkspacesViewset
@@ -28,6 +29,7 @@ urlpatterns = [
                 *oidc_urls,
                 path("synchronize/", SynchronizeAPIView.as_view()),
                 path("workspaces/process", WorkspacesProcessAPIView.as_view()),
+                path("available-destinations/", AvailableDestinationsAPIView.as_view()),
                 path("feature-flags", FeatureFlagsApiView.as_view()),
                 path("super-secret-error-test", ErrorApiView.as_view()),
                 path(
