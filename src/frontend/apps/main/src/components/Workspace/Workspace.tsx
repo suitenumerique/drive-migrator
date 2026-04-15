@@ -30,10 +30,8 @@ export interface Workspace {
   id: string;
   title: string;
   status: WorkspaceStatus;
-  status_archive: WorkspaceStatus;
-  status_resana: WorkspaceStatus;
-  resana_files_success?: number;
-  resana_files_error?: number;
+  destination_statuses: Record<string, WorkspaceStatus>;
+  destination_metadata: Record<string, Record<string, unknown>>;
 }
 
 const WorkspaceStatusBadge = ({
@@ -76,10 +74,13 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
   const modal = useModal();
   const [resanaErrorDetails, setResanaErrorDetails] = useState<any>();
 
+  const archiveStatus = workspace.destination_statuses['archive'];
+  const resanaStatus = workspace.destination_statuses['resana'];
+
   const showDetails = () => {
     return !!(
-      workspace.status_archive === WorkspaceStatus.SUCCESS ||
-      (workspace.resana_files_error && workspace.resana_files_error > 0)
+      archiveStatus === WorkspaceStatus.SUCCESS ||
+      resanaStatus === WorkspaceStatus.FAILURE
     );
   };
 
@@ -120,7 +121,7 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
       }
     >
       <ul>
-        {workspace.status_archive === WorkspaceStatus.SUCCESS && (
+        {archiveStatus === WorkspaceStatus.SUCCESS && (
           <li>
             <Button
               color="primary-text"
@@ -131,7 +132,7 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
             </Button>
           </li>
         )}
-        {!!workspace.resana_files_error && workspace.resana_files_error > 0 && (
+        {resanaStatus === WorkspaceStatus.FAILURE && (
           <li>
             <Button
               color="primary-text"
@@ -152,23 +153,17 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
       className="suite__workspace--exporting"
     >
       <div className="suite__workspace__status">
-        <WorkspaceStatusBadge status={workspace.status_archive}>
-          {t('Archive')}
-        </WorkspaceStatusBadge>
-        <WorkspaceStatusBadge
-          status={workspace.status_resana}
-          variantOverride={
-            workspace.resana_files_error && workspace.resana_files_error > 0
-              ? VariantType.WARNING
-              : undefined
-          }
-        >
-          {t('Resana')}
-        </WorkspaceStatusBadge>
+        {Object.entries(workspace.destination_statuses).map(
+          ([name, status]) => (
+            <WorkspaceStatusBadge key={name} status={status}>
+              {name}
+            </WorkspaceStatusBadge>
+          ),
+        )}
       </div>
       {showDetails() && options}
       <Modal
-        title={t('Details erreurs Resana')}
+        title={t('Détails erreurs Resana')}
         size={ModalSize.EXTRA_LARGE}
         {...modal}
       >
@@ -258,7 +253,13 @@ export const Workspace = ({ workspace }: { workspace: Workspace }) => {
   );
 };
 
-export const WorkspacePreExport = ({ workspace }: { workspace: Workspace }) => {
+export const WorkspacePreExport = ({
+  workspace,
+  destinations,
+}: {
+  workspace: Workspace;
+  destinations: { name: string; label: string }[];
+}) => {
   const { t } = useTranslation();
   const { register, ...methods } = useFormContext();
   const fieldPrefix = `workspaces.${workspace.id}`;
@@ -271,16 +272,14 @@ export const WorkspacePreExport = ({ workspace }: { workspace: Workspace }) => {
         className="suite__workspace--pre-export"
       >
         <div className="suite__workspace__switches">
-          <Switch
-            label={t('Archive')}
-            {...register(fieldPrefix)}
-            value="archive"
-          />
-          <Switch
-            label={t('Resana')}
-            {...register(fieldPrefix)}
-            value="resana"
-          />
+          {destinations.map((dest) => (
+            <Switch
+              key={dest.name}
+              label={t(dest.label)}
+              {...register(fieldPrefix)}
+              value={dest.name}
+            />
+          ))}
         </div>
       </GenericWorkspace>
       {error && (

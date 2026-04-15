@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 
 import { WorkspacePreExport } from '@/components/Workspace/Workspace';
 import { useApi } from '@/hooks/useApi';
+import { useAvailableDestinations } from '@/hooks/useAvailableDestinations';
 import { useWorkspaces } from '@/hooks/useWorkspaces';
 
 export interface IForm {
@@ -18,6 +19,7 @@ export default function Prepare() {
   const [isLoading, setIsLoading] = useState(false);
   const { workspaces, fetch, hasError } = useWorkspaces();
   const { fetchApi } = useApi();
+  const { destinations } = useAvailableDestinations();
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -40,7 +42,7 @@ export default function Prepare() {
 
     if (data.workspaces) {
       Object.entries(data.workspaces).forEach(([id, values]) => {
-        const isValid = Array.isArray(values) && values.length > 0;
+        const isValid = Array.isArray(values) ? values.length > 0 : !!values;
         if (isValid) {
           return;
         }
@@ -67,7 +69,12 @@ export default function Prepare() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          workspaces: data.workspaces,
+          workspaces: Object.fromEntries(
+            Object.entries(data.workspaces).map(([id, values]) => [
+              id,
+              Array.isArray(values) ? values : [values],
+            ]),
+          ),
         }),
       });
       router.replace('/finish');
@@ -87,7 +94,7 @@ export default function Prepare() {
     return null;
   }
 
-  const displayLoader = isLoading || !workspaces;
+  const displayLoader = isLoading || !workspaces || !destinations;
 
   return (
     <div className="container">
@@ -102,25 +109,17 @@ export default function Prepare() {
             <Alert>
               <div>
                 {t(
-                  "Vous pouvez choisir jusqu'à deux types d'exports pour chaque communauté: ",
+                  "Sélectionnez au moins une destination d'export pour chaque communauté. Vous recevrez un mail de confirmation une fois la migration terminée.",
                 )}
-                <ul>
-                  <li>
-                    {t(
-                      "Un export de type 'Archive' qui vous permettra de récupérer l'ensemble des données de votre communauté dans un fichier compressé. Un lien de téléchargement vous sera envoyé par mail une fois que l'achive sera prête.",
-                    )}
-                  </li>
-                  <li className="mt-s">
-                    {t(
-                      "Un export de type 'Resana' qui vous permettra de migrer votre communauté vers Resana, l'espace de travail sera créé automatiquement sur Resana. Vous pourrez retrouver votre communauté sur la plateforme Resana une fois la migration terminée, nous vous enverrons un mail pour vous avertir.",
-                    )}
-                  </li>
-                </ul>
               </div>
             </Alert>
             <div className="suite__workspaces mt-s">
               {workspaces.map((workspace) => (
-                <WorkspacePreExport workspace={workspace} key={workspace.id} />
+                <WorkspacePreExport
+                  workspace={workspace}
+                  key={workspace.id}
+                  destinations={destinations!}
+                />
               ))}
             </div>
             <div className="suite__workspaces__footer">
