@@ -41,8 +41,7 @@ class FolderCreator:
         self.delete_folder(workspace)
 
         path = self.get_workspace_path(workspace)
-        if not os.path.exists(path):
-            os.mkdir(path)
+        os.makedirs(path, exist_ok=True)
 
         # Do not create folder for the root folder, it is virtual.
         for child in folder.children:

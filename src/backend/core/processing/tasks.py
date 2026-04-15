@@ -22,6 +22,7 @@ logger = get_task_logger(__name__)
 
 def list_work_dir():
     logger.info("Listing work dir")
+    os.makedirs(settings.APP_WORK_DIR, exist_ok=True)
     with os.scandir(settings.APP_WORK_DIR) as it:
         for entry in it:
             size = 0
@@ -133,8 +134,12 @@ def create_task_result_on_publish(sender=None, headers=None, body=None, **kwargs
 
 @task_success.connect
 def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
-    task_result = TaskResult.objects.get(task_id=sender.request.id)
-    extra_task = ExtraTaskInfo.objects.get(task_result=task_result)
+    task_result = TaskResult.objects.filter(task_id=sender.request.id).first()
+    if task_result is None:
+        return
+    extra_task = ExtraTaskInfo.objects.filter(task_result=task_result).first()
+    if extra_task is None:
+        return
     workspace = extra_task.workspace
     workspace.save()
 
@@ -143,8 +148,12 @@ def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
 
 @task_failure.connect
 def task_failure(sender=None, **kwargs):
-    task_result = TaskResult.objects.get(task_id=sender.request.id)
-    extra_task = ExtraTaskInfo.objects.get(task_result=task_result)
+    task_result = TaskResult.objects.filter(task_id=sender.request.id).first()
+    if task_result is None:
+        return
+    extra_task = ExtraTaskInfo.objects.filter(task_result=task_result).first()
+    if extra_task is None:
+        return
     workspace = extra_task.workspace
 
     for dest_name, status in workspace.destination_statuses.items():

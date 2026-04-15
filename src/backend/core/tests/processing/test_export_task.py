@@ -267,8 +267,8 @@ def test_task_success_handler_saves_workspace_and_cleans_up():
         patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
         patch("core.processing.tasks.cleanup_workspace_dir") as mock_cleanup,
     ):
-        mock_tr_cls.objects.get.return_value = mock_task_result
-        mock_et_cls.objects.get.return_value = mock_extra_task
+        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
+        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
 
         task_success_handler(sender=mock_sender)
 
@@ -301,8 +301,8 @@ def test_task_failure_handler_sets_pending_statuses_to_failure():
         patch("core.processing.tasks.cleanup_workspace_dir"),
         patch("core.processing.tasks.MailsManager"),
     ):
-        mock_tr_cls.objects.get.return_value = mock_task_result
-        mock_et_cls.objects.get.return_value = mock_extra_task
+        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
+        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
 
         task_failure_handler(sender=mock_sender)
 
@@ -329,8 +329,8 @@ def test_task_failure_handler_sends_fail_mail():
         patch("core.processing.tasks.cleanup_workspace_dir"),
         patch("core.processing.tasks.MailsManager") as mock_mails_cls,
     ):
-        mock_tr_cls.objects.get.return_value = mock_task_result
-        mock_et_cls.objects.get.return_value = mock_extra_task
+        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
+        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
 
         task_failure_handler(sender=mock_sender)
 
