@@ -31,13 +31,17 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         # Recursively upload the local folder tree
         self._upload_tree(backend, token, local_folder_path, root_id)
 
-        # Share with workspace members
-        for member in workspace.users.all():
-            drive_user = backend.find_user_by_email(member.email, token=token)
+        # Share with the migration user
+        if workspace.migration_user and workspace.migration_user.email:
+            drive_user = backend.find_user_by_email(
+                workspace.migration_user.email, token=token
+            )
             if drive_user:
                 backend.share_with_user(root_id, drive_user["id"], token=token)
             else:
-                backend.invite_by_email(root_id, member.email, token=token)
+                backend.invite_by_email(
+                    root_id, workspace.migration_user.email, token=token
+                )
 
         workspace.set_destination_status("drive", Workspace.Status.SUCCESS)
         workspace.save()

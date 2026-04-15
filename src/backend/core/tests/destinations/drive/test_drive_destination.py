@@ -1,7 +1,6 @@
 """Tests for DriveDestinationBackend."""
 
-import os
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.drive.backend import DriveDestinationBackend
@@ -26,12 +25,11 @@ def test_label_is_set():
 # ---------------------------------------------------------------------------
 
 
-def _make_workspace(destination_statuses=None):
+def _make_workspace(migration_user=None, destination_statuses=None):
     ws = MagicMock(spec=Workspace)
     ws.title = "My Workspace"
     ws.destination_statuses = destination_statuses or {}
-    ws.users = MagicMock()
-    ws.users.all.return_value = []
+    ws.migration_user = migration_user
     return ws
 
 
@@ -116,13 +114,12 @@ def test_export_uploads_files(mock_backend_cls, tmp_path):
 
 
 @patch("core.destinations.drive.backend.DriveBackend")
-def test_export_shares_with_existing_members(mock_backend_cls, tmp_path):
-    """export() shares the workspace with members already registered in Drive."""
-    workspace = _make_workspace()
-    user = MagicMock()
+def test_export_shares_with_migration_user_when_in_drive(mock_backend_cls, tmp_path):
+    """export() shares the workspace with migration_user when they exist in Drive."""
     member = MagicMock()
     member.email = "alice@example.com"
-    workspace.users.all.return_value = [member]
+    workspace = _make_workspace(migration_user=member)
+    user = MagicMock()
 
     mock_backend = mock_backend_cls.return_value
     mock_backend.get_access_token.return_value = "tok"
@@ -132,24 +129,26 @@ def test_export_shares_with_existing_members(mock_backend_cls, tmp_path):
     backend = DriveDestinationBackend()
     backend.export(workspace, user, str(tmp_path))
 
+    mock_backend.find_user_by_email.assert_called_once_with(
+        "alice@example.com", token="tok"
+    )
     mock_backend.share_with_user.assert_called_once_with(
         "root-uuid", "user-uuid", token="tok"
     )
 
 
 @patch("core.destinations.drive.backend.DriveBackend")
-def test_export_invites_unknown_members(mock_backend_cls, tmp_path):
-    """export() sends an invitation for members not yet registered in Drive."""
-    workspace = _make_workspace()
-    user = MagicMock()
+def test_export_invites_migration_user_when_not_in_drive(mock_backend_cls, tmp_path):
+    """export() invites migration_user by email when they are not yet registered in Drive."""
     member = MagicMock()
     member.email = "new@example.com"
-    workspace.users.all.return_value = [member]
+    workspace = _make_workspace(migration_user=member)
+    user = MagicMock()
 
     mock_backend = mock_backend_cls.return_value
     mock_backend.get_access_token.return_value = "tok"
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = None  # not in Drive yet
+    mock_backend.find_user_by_email.return_value = None
 
     backend = DriveDestinationBackend()
     backend.export(workspace, user, str(tmp_path))
@@ -157,6 +156,24 @@ def test_export_invites_unknown_members(mock_backend_cls, tmp_path):
     mock_backend.invite_by_email.assert_called_once_with(
         "root-uuid", "new@example.com", token="tok"
     )
+
+
+@patch("core.destinations.drive.backend.DriveBackend")
+def test_export_skips_sharing_when_no_migration_user(mock_backend_cls, tmp_path):
+    """export() skips Drive sharing when migration_user is None."""
+    workspace = _make_workspace(migration_user=None)
+    user = MagicMock()
+
+    mock_backend = mock_backend_cls.return_value
+    mock_backend.get_access_token.return_value = "tok"
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+
+    backend = DriveDestinationBackend()
+    backend.export(workspace, user, str(tmp_path))
+
+    mock_backend.find_user_by_email.assert_not_called()
+    mock_backend.share_with_user.assert_not_called()
+    mock_backend.invite_by_email.assert_not_called()
 
 
 @patch("core.destinations.drive.backend.DriveBackend")

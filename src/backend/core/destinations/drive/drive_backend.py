@@ -21,6 +21,7 @@ class DriveBackend:
                 "grant_type": "client_credentials",
                 "client_id": settings.DRIVE_OIDC_CLIENT_ID,
                 "client_secret": settings.DRIVE_OIDC_CLIENT_SECRET,
+                "scope": "openid email",
             },
             timeout=30,
         )
@@ -76,13 +77,15 @@ class DriveBackend:
     def upload_to_s3(self, policy_url: str, file_path: str) -> None:
         """Step 2: Upload the file content directly to the S3 presigned URL."""
         with open(file_path, "rb") as f:
-            response = requests.put(policy_url, data=f.read(), timeout=300)
+            response = requests.put(
+                policy_url, data=f.read(), headers={"x-amz-acl": "private"}, timeout=300
+            )
         response.raise_for_status()
 
     def notify_upload_ended(self, item_id: str, token: str) -> None:
         """Step 3: Notify Drive that the S3 upload is complete."""
         response = requests.post(
-            f"{self._base_url()}/api/v1.0/items/{item_id}/upload-ended/",
+            f"{self._base_url()}/external_api/v1.0/items/{item_id}/upload-ended/",
             headers=self._headers(token),
             timeout=30,
         )
@@ -102,24 +105,25 @@ class DriveBackend:
             timeout=30,
         )
         response.raise_for_status()
-        results = response.json().get("results", [])
+        data = response.json()
+        results = data if isinstance(data, list) else data.get("results", [])
         return results[0] if results else None
 
     def share_with_user(self, item_id: str, user_id: str, token: str) -> None:
-        """Grant editor access to an existing Drive user."""
+        """Grant owner access to an existing Drive user (item appears in their account)."""
         response = requests.post(
             f"{self._base_url()}/external_api/v1.0/items/{item_id}/accesses/",
-            json={"user_id": user_id, "role": "editor"},
+            json={"user_id": user_id, "role": "owner"},
             headers=self._headers(token),
             timeout=30,
         )
         response.raise_for_status()
 
     def invite_by_email(self, item_id: str, email: str, token: str) -> None:
-        """Send an invitation to a user not yet registered in Drive."""
+        """Invite a user not yet registered in Drive as owner."""
         response = requests.post(
             f"{self._base_url()}/external_api/v1.0/items/{item_id}/invitations/",
-            json={"email": email, "role": "editor"},
+            json={"email": email, "role": "owner"},
             headers=self._headers(token),
             timeout=30,
         )
