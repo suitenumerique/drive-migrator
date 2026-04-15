@@ -11,6 +11,12 @@ def test_workspace_defaults():
     assert workspace.status == Workspace.Status.NONE
 
 
+def test_members_defaults_to_empty_list():
+    """A new Workspace has an empty members list."""
+    workspace = Workspace()
+    assert workspace.members == []
+
+
 def test_get_destination_status_defaults_to_none():
     """get_destination_status returns NONE for an unknown destination."""
     workspace = Workspace()

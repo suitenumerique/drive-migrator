@@ -90,6 +90,10 @@ class Workspace(BaseModel):
     # Arbitrary per-destination metadata (IDs, job IDs, file counts, etc.).
     destination_metadata = models.JSONField(default=dict, blank=True)
 
+    # Workspace members populated by the source backend during prepare_export().
+    # Each entry: {"name": str, "firstName": str, "email": str}
+    members = models.JSONField(default=list, blank=True)
+
     def get_destination_status(self, destination_name: str) -> str:
         return self.destination_statuses.get(destination_name, Workspace.Status.NONE)
 
