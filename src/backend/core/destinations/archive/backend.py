@@ -1,5 +1,8 @@
 """ArchiveDestinationBackend — wraps ArchiveManager and implements AbstractDestinationBackend."""
 
+import csv
+import os
+
 from core.backends.destination import AbstractDestinationBackend
 from core.mails_manager import MailsManager
 from core.models import Workspace
@@ -19,6 +22,13 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
     label = "Archive ZIP"
 
     def export(self, workspace, user, local_folder_path: str) -> None:
+        if workspace.members:
+            csv_path = os.path.join(local_folder_path, "users.csv")
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerows(
+                    [m["name"], m["firstName"], m["email"]] for m in workspace.members
+                )
         manager = ArchiveManager()
         manager.zip_workspace_folder(workspace)
         archive_url = manager.upload_archive(workspace)

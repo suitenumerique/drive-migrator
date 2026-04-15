@@ -43,6 +43,17 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                     root_id, workspace.migration_user.email, token=token
                 )
 
+        # Share with workspace members
+        for member in workspace.members or []:
+            email = member.get("email", "")
+            if not email:
+                continue
+            drive_user = backend.find_user_by_email(email, token=token)
+            if drive_user:
+                backend.share_with_user(root_id, drive_user["id"], token=token)
+            else:
+                backend.invite_by_email(root_id, email, token=token)
+
         workspace.set_destination_status("drive", Workspace.Status.SUCCESS)
         workspace.save()
 

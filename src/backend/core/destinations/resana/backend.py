@@ -1,5 +1,8 @@
 """ResanaDestinationBackend — wraps ResanaBackend and implements AbstractDestinationBackend."""
 
+import csv
+import os
+
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.resana.resana_backend import ResanaBackend
 from core.models import Workspace
@@ -18,6 +21,13 @@ class ResanaDestinationBackend(AbstractDestinationBackend):
     label = "Resana"
 
     def export(self, workspace, user, local_folder_path: str) -> None:
+        if workspace.members:
+            csv_path = os.path.join(local_folder_path, "osmose_users.csv")
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerows(
+                    [m["name"], m["firstName"], m["email"]] for m in workspace.members
+                )
         backend = ResanaBackend()
         backend.create_workspace(workspace, user)
         workspace.set_destination_status("resana", Workspace.Status.PENDING)

@@ -27,6 +27,7 @@ def test_label_is_set():
 def test_export_calls_create_workspace():
     """export() delegates workspace creation to ResanaBackend."""
     workspace = MagicMock(spec=Workspace)
+    workspace.members = []
     user = MagicMock()
 
     with patch("core.destinations.resana.backend.ResanaBackend") as mock_backend_cls:
@@ -38,9 +39,43 @@ def test_export_calls_create_workspace():
     mock_backend.create_workspace.assert_called_once_with(workspace, user)
 
 
+def test_export_writes_osmose_users_csv_from_members(tmp_path):
+    """export() writes osmose_users.csv into local_folder_path from workspace.members."""
+    workspace = MagicMock(spec=Workspace)
+    workspace.members = [
+        {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
+        {"name": "Martin", "firstName": "Alice", "email": "alice@example.com"},
+    ]
+    user = MagicMock()
+
+    with patch("core.destinations.resana.backend.ResanaBackend"):
+        backend = ResanaDestinationBackend()
+        backend.export(workspace, user, str(tmp_path))
+
+    csv_path = tmp_path / "osmose_users.csv"
+    assert csv_path.exists()
+    lines = csv_path.read_text().splitlines()
+    assert lines[0] == "Dupont,Jean,jean@example.com"
+    assert lines[1] == "Martin,Alice,alice@example.com"
+
+
+def test_export_skips_osmose_users_csv_when_no_members(tmp_path):
+    """export() does not write osmose_users.csv when workspace.members is empty."""
+    workspace = MagicMock(spec=Workspace)
+    workspace.members = []
+    user = MagicMock()
+
+    with patch("core.destinations.resana.backend.ResanaBackend"):
+        backend = ResanaDestinationBackend()
+        backend.export(workspace, user, str(tmp_path))
+
+    assert not (tmp_path / "osmose_users.csv").exists()
+
+
 def test_export_sets_status_pending_for_async_job():
     """export() sets destination status to PENDING — Resana is an async job."""
     workspace = MagicMock(spec=Workspace)
+    workspace.members = []
     user = MagicMock()
 
     with patch("core.destinations.resana.backend.ResanaBackend"):

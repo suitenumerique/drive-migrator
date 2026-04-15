@@ -192,3 +192,67 @@ def test_export_sets_status_success(mock_backend_cls, tmp_path):
         "drive", Workspace.Status.SUCCESS
     )
     workspace.save.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# export() — workspace members sharing from workspace.members
+# ---------------------------------------------------------------------------
+
+
+@patch("core.destinations.drive.backend.DriveBackend")
+def test_export_shares_with_known_workspace_members(mock_backend_cls, tmp_path):
+    """export() shares the workspace with each member in workspace.members who exists in Drive."""
+    workspace = _make_workspace()
+    workspace.members = [
+        {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
+        {"name": "Martin", "firstName": "Alice", "email": "alice@example.com"},
+    ]
+    user = MagicMock()
+    mock_backend = mock_backend_cls.return_value
+    mock_backend.get_access_token.return_value = "tok"
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.find_user_by_email.return_value = {"id": "user-uuid"}
+
+    DriveDestinationBackend().export(workspace, user, str(tmp_path))
+
+    emails = [call.args[0] for call in mock_backend.find_user_by_email.call_args_list]
+    assert "jean@example.com" in emails
+    assert "alice@example.com" in emails
+    assert mock_backend.share_with_user.call_count == 2
+
+
+@patch("core.destinations.drive.backend.DriveBackend")
+def test_export_invites_unknown_workspace_members(mock_backend_cls, tmp_path):
+    """export() invites by email members from workspace.members not yet registered in Drive."""
+    workspace = _make_workspace()
+    workspace.members = [
+        {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
+    ]
+    user = MagicMock()
+    mock_backend = mock_backend_cls.return_value
+    mock_backend.get_access_token.return_value = "tok"
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.find_user_by_email.return_value = None
+
+    DriveDestinationBackend().export(workspace, user, str(tmp_path))
+
+    mock_backend.invite_by_email.assert_called_with(
+        "root-uuid", "jean@example.com", token="tok"
+    )
+
+
+@patch("core.destinations.drive.backend.DriveBackend")
+def test_export_skips_member_sharing_when_members_empty(mock_backend_cls, tmp_path):
+    """export() does not call find_user_by_email when workspace.members is empty."""
+    workspace = _make_workspace(migration_user=None)
+    workspace.members = []
+    user = MagicMock()
+    mock_backend = mock_backend_cls.return_value
+    mock_backend.get_access_token.return_value = "tok"
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+
+    DriveDestinationBackend().export(workspace, user, str(tmp_path))
+
+    mock_backend.find_user_by_email.assert_not_called()
+    mock_backend.share_with_user.assert_not_called()
+    mock_backend.invite_by_email.assert_not_called()
