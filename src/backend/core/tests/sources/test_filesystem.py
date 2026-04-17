@@ -9,11 +9,23 @@ import pytest
 from core.backends.source import AbstractSourceBackend, SourceFolder, SourceWorkspace
 from core.sources.filesystem import FileSystemSourceBackend
 
+USER_EMAIL = "user@example.com"
+
+
+@pytest.fixture
+def user():
+    u = MagicMock()
+    u.email = USER_EMAIL
+    return u
+
 
 @pytest.fixture
 def source_root(tmp_path):
-    """Create a temporary filesystem source root with sample workspaces."""
-    ws_a = tmp_path / "Workspace A"
+    """Create a temporary filesystem source root with sample workspaces under a user dir."""
+    user_dir = tmp_path / USER_EMAIL
+    user_dir.mkdir()
+
+    ws_a = user_dir / "Workspace A"
     ws_a.mkdir()
     (ws_a / "Folder 1").mkdir()
     (ws_a / "Folder 1" / "document.pdf").write_bytes(b"pdf content")
@@ -21,7 +33,7 @@ def source_root(tmp_path):
     (ws_a / "Folder 2").mkdir()
     (ws_a / "Folder 2" / "image.png").write_bytes(b"png content")
 
-    ws_b = tmp_path / "Workspace B"
+    ws_b = user_dir / "Workspace B"
     ws_b.mkdir()
     (ws_b / "fichier.txt").write_bytes(b"text content")
 
@@ -44,50 +56,51 @@ def test_source_type_is_filesystem():
     assert FileSystemSourceBackend.source_type == "filesystem"
 
 
-def test_get_workspaces_returns_subdirectories(backend):
+def test_get_workspaces_returns_subdirectories(backend, user):
     """get_workspaces() returns one SourceWorkspace per immediate subdirectory."""
-    workspaces = backend.get_workspaces(user=None)
+    workspaces = backend.get_workspaces(user=user)
     assert len(workspaces) == 2
     titles = {ws.title for ws in workspaces}
     assert titles == {"Workspace A", "Workspace B"}
 
 
-def test_get_workspaces_uses_path_as_id(backend, source_root):
+def test_get_workspaces_uses_path_as_id(backend, source_root, user):
     """Each workspace id is the absolute path to its directory."""
-    workspaces = backend.get_workspaces(user=None)
+    workspaces = backend.get_workspaces(user=user)
     for ws in workspaces:
         assert os.path.isabs(ws.id)
         assert os.path.isdir(ws.id)
-        assert ws.id == os.path.join(str(source_root), ws.title)
+        assert ws.id == os.path.join(str(source_root), USER_EMAIL, ws.title)
 
 
-def test_get_workspaces_returns_source_workspace_instances(backend):
+def test_get_workspaces_returns_source_workspace_instances(backend, user):
     """get_workspaces() returns SourceWorkspace objects."""
-    workspaces = backend.get_workspaces(user=None)
+    workspaces = backend.get_workspaces(user=user)
     for ws in workspaces:
         assert isinstance(ws, SourceWorkspace)
 
 
-def test_get_workspaces_empty_root(settings, tmp_path):
-    """get_workspaces() returns an empty list when the root has no subdirectories."""
-    settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
-    fs_backend = FileSystemSourceBackend()
-    assert not fs_backend.get_workspaces(user=None)
-
-
-def test_get_workspaces_ignores_files_at_root(settings, tmp_path):
-    """get_workspaces() ignores plain files at the root level."""
-    (tmp_path / "some_file.txt").write_bytes(b"ignored")
+def test_get_workspaces_returns_empty_when_no_user(settings, tmp_path):
+    """get_workspaces() returns an empty list when user is None."""
     (tmp_path / "a_workspace").mkdir()
     settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
     fs_backend = FileSystemSourceBackend()
-    workspaces = fs_backend.get_workspaces(user=None)
-    assert len(workspaces) == 1
+    assert fs_backend.get_workspaces(user=None) == []
 
 
-def test_get_workspace_structure_flat(backend):
+def test_get_workspaces_returns_empty_when_no_user_directory(settings, tmp_path):
+    """get_workspaces() returns an empty list when {root}/{user.email}/ does not exist."""
+    user = MagicMock()
+    user.email = "unknown@example.com"
+    (tmp_path / "WS-A").mkdir()
+    settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
+    fs_backend = FileSystemSourceBackend()
+    assert fs_backend.get_workspaces(user=user) == []
+
+
+def test_get_workspace_structure_flat(backend, user):
     """get_workspace_structure() returns a SourceFolder with files at root level."""
-    ws = backend.get_workspaces(user=None)
+    ws = backend.get_workspaces(user=user)
     ws_b = next(w for w in ws if w.title == "Workspace B")
 
     workspace = type("Workspace", (), {"source_id": ws_b.id})()
@@ -99,9 +112,9 @@ def test_get_workspace_structure_flat(backend):
     assert root.files[0].extension == ".txt"
 
 
-def test_get_workspace_structure_nested(backend):
+def test_get_workspace_structure_nested(backend, user):
     """get_workspace_structure() recursively builds nested folders."""
-    ws = backend.get_workspaces(user=None)
+    ws = backend.get_workspaces(user=user)
     ws_a = next(w for w in ws if w.title == "Workspace A")
 
     workspace = type("Workspace", (), {"source_id": ws_a.id})()
@@ -121,9 +134,9 @@ def test_get_workspace_structure_nested(backend):
     assert folder2.files[0].name_with_extension == "image.png"
 
 
-def test_download_file_copies_to_destination(backend, tmp_path):
+def test_download_file_copies_to_destination(backend, user, tmp_path):
     """download_file() copies the file content to the given destination path."""
-    ws = backend.get_workspaces(user=None)
+    ws = backend.get_workspaces(user=user)
     ws_b = next(w for w in ws if w.title == "Workspace B")
 
     workspace = type("Workspace", (), {"source_id": ws_b.id})()
@@ -137,9 +150,9 @@ def test_download_file_copies_to_destination(backend, tmp_path):
         assert f.read() == b"text content"
 
 
-def test_download_file_uses_download_url(backend):
+def test_download_file_uses_download_url(backend, user):
     """download_file() uses file.download_url as the source path."""
-    ws = backend.get_workspaces(user=None)
+    ws = backend.get_workspaces(user=user)
     ws_b = next(w for w in ws if w.title == "Workspace B")
 
     workspace = type("Workspace", (), {"source_id": ws_b.id})()
@@ -155,7 +168,7 @@ def test_download_file_uses_download_url(backend):
 
 
 def test_get_workspaces_uses_user_email_subdirectory(settings, tmp_path):
-    """When {root}/{user.email}/ exists, only workspaces inside it are returned."""
+    """Only workspaces inside {root}/{user.email}/ are returned."""
     user = MagicMock()
     user.email = "admin@example.com"
     user_dir = tmp_path / "admin@example.com"
@@ -168,19 +181,6 @@ def test_get_workspaces_uses_user_email_subdirectory(settings, tmp_path):
     workspaces = fs_backend.get_workspaces(user=user)
     titles = {ws.title for ws in workspaces}
     assert titles == {"WS-1", "WS-2"}
-
-
-def test_get_workspaces_falls_back_to_root_when_no_user_directory(settings, tmp_path):
-    """When {root}/{user.email}/ does not exist, all root-level dirs are returned."""
-    user = MagicMock()
-    user.email = "unknown@example.com"
-    (tmp_path / "WS-A").mkdir()
-    (tmp_path / "WS-B").mkdir()
-    settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
-    fs_backend = FileSystemSourceBackend()
-    workspaces = fs_backend.get_workspaces(user=user)
-    titles = {ws.title for ws in workspaces}
-    assert titles == {"WS-A", "WS-B"}
 
 
 # ---------------------------------------------------------------------------

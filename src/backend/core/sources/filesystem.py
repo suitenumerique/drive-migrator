@@ -24,14 +24,13 @@ class FileSystemSourceBackend(AbstractSourceBackend):
     Directory layout under settings.FILESYSTEM_SOURCE_ROOT:
 
         <root>/
-          <user-email>/          ← optional per-admin subfolder
+          <user-email>/
             <workspace>/
               _users.csv         ← optional members (name,firstName,email — no header)
               <files…>
-          <workspace>/           ← fallback: all root-level dirs if no user subfolder
 
-    When {root}/{user.email}/ exists, only workspaces inside it are returned.
-    Otherwise all root-level subdirectories are returned (single-user demo mode).
+    Only workspaces inside {root}/{user.email}/ are returned.
+    If that directory does not exist, an empty list is returned.
 
     _users.csv is excluded from the file tree and parsed by prepare_export() to
     populate workspace.members.
@@ -42,9 +41,10 @@ class FileSystemSourceBackend(AbstractSourceBackend):
     def get_workspaces(self, user) -> list[SourceWorkspace]:
         root = settings.FILESYSTEM_SOURCE_ROOT
         user_dir = os.path.join(root, user.email) if user else None
-        scan_root = user_dir if user_dir and os.path.isdir(user_dir) else root
+        if not user_dir or not os.path.isdir(user_dir):
+            return []
         workspaces = []
-        for entry in os.scandir(scan_root):
+        for entry in os.scandir(user_dir):
             if entry.is_dir():
                 workspaces.append(SourceWorkspace(id=entry.path, title=entry.name))
         return workspaces
