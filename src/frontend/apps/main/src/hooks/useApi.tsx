@@ -53,8 +53,14 @@ export const useApi = () => {
     if (response.ok) {
       return response;
     }
-    const data = await response.json();
-    throw new APIError(data);
+    try {
+      const data = await response.json();
+      throw new APIError(data);
+    } catch (e) {
+      if (e instanceof APIError) throw e;
+      // Non-JSON response (e.g. HTML error page from server)
+      throw new APIError({});
+    }
   };
 
   const fetchAPIProxy = async (
