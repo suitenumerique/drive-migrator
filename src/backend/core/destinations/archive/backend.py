@@ -22,6 +22,7 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
     label = "Archive ZIP"
 
     def export(self, workspace, user, local_folder_path: str) -> None:
+        csv_path = None
         if workspace.members:
             csv_path = os.path.join(local_folder_path, "users.csv")
             with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -31,6 +32,8 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
                 )
         manager = ArchiveManager()
         manager.zip_workspace_folder(workspace)
+        if csv_path:
+            os.remove(csv_path)
         archive_url = manager.upload_archive(workspace)
         MailsManager().send_archive_download_mail(user, workspace, archive_url)
         workspace.set_destination_status("archive", Workspace.Status.SUCCESS)

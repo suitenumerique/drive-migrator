@@ -124,24 +124,27 @@ def test_export_includes_any_extra_files_in_local_folder():
     mock_manager.zip_workspace_folder.assert_called_once_with(workspace)
 
 
-def test_export_writes_users_csv_from_members(tmp_path):
-    """export() writes users.csv into local_folder_path from workspace.members."""
+def test_export_writes_users_csv_then_removes_it(tmp_path):
+    """export() writes users.csv before zipping then removes it so Drive won't upload it."""
     workspace = MagicMock(spec=Workspace)
     workspace.members = [
         {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
     ]
     user = MagicMock()
+    csv_path = tmp_path / "users.csv"
+
+    def assert_csv_exists_during_zip(ws):
+        assert csv_path.exists()
+        assert csv_path.read_text().strip() == "Dupont,Jean,jean@example.com"
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
+        mock_manager.zip_workspace_folder.side_effect = assert_csv_exists_during_zip
         mock_manager.upload_archive.return_value = "http://s3.example.com/ws.zip"
 
-        backend = ArchiveDestinationBackend()
-        backend.export(workspace, user, str(tmp_path))
+        ArchiveDestinationBackend().export(workspace, user, str(tmp_path))
 
-    csv_path = tmp_path / "users.csv"
-    assert csv_path.exists()
-    assert csv_path.read_text().strip() == "Dupont,Jean,jean@example.com"
+    assert not csv_path.exists()
 
 
 def test_export_skips_users_csv_when_no_members(tmp_path):
