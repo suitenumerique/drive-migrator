@@ -128,3 +128,35 @@ class DriveBackend:
             timeout=30,
         )
         response.raise_for_status()
+
+    # --- Keycloak admin ---
+
+    def find_user_sub_by_email(self, email: str, admin_token: str) -> str | None:
+        """Look up a user's Keycloak sub by email via the Admin API."""
+        response = requests.get(
+            f"{settings.DRIVE_OIDC_ADMIN_API_URL}/users",
+            params={"email": email, "exact": True},
+            headers={"Authorization": f"Bearer {admin_token}"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        users = response.json()
+        return users[0]["id"] if users else None
+
+    def exchange_token(self, service_token: str, subject_sub: str) -> str:
+        """Exchange a service account token for one impersonating the target user (RFC 8693)."""
+        response = requests.post(
+            settings.DRIVE_OIDC_TOKEN_ENDPOINT,
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                "client_id": settings.DRIVE_OIDC_CLIENT_ID,
+                "client_secret": settings.DRIVE_OIDC_CLIENT_SECRET,
+                "subject_token": service_token,
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "requested_subject": subject_sub,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()["access_token"]

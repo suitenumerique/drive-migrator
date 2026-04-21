@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, mock_open, patch
 
+import pytest
+
 from core.destinations.drive.drive_backend import DriveBackend
 
 # ---------------------------------------------------------------------------
@@ -254,3 +256,86 @@ def test_invite_by_email_posts_to_invitations_endpoint(settings):
         headers={"Authorization": "Bearer tok"},
         timeout=30,
     )
+
+
+# ---------------------------------------------------------------------------
+# Keycloak — user lookup and token exchange
+# ---------------------------------------------------------------------------
+
+
+def test_find_user_sub_by_email_returns_sub_when_found(settings):
+    """find_user_sub_by_email() returns the Keycloak sub when the user exists in the realm."""
+    settings.DRIVE_OIDC_ADMIN_API_URL = "https://keycloak.example.com/admin/realms/drive"
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.get.return_value.json.return_value = [
+            {"id": "user-sub-uuid", "email": "alice@example.com"}
+        ]
+        mock_requests.get.return_value.raise_for_status = MagicMock()
+
+        result = DriveBackend().find_user_sub_by_email("alice@example.com", "admin-tok")
+
+    mock_requests.get.assert_called_once_with(
+        "https://keycloak.example.com/admin/realms/drive/users",
+        params={"email": "alice@example.com", "exact": True},
+        headers={"Authorization": "Bearer admin-tok"},
+        timeout=30,
+    )
+    assert result == "user-sub-uuid"
+
+
+def test_find_user_sub_by_email_returns_none_when_not_found(settings):
+    """find_user_sub_by_email() returns None when the user does not exist in the realm."""
+    settings.DRIVE_OIDC_ADMIN_API_URL = "https://keycloak.example.com/admin/realms/drive"
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.get.return_value.json.return_value = []
+        mock_requests.get.return_value.raise_for_status = MagicMock()
+
+        result = DriveBackend().find_user_sub_by_email("unknown@example.com", "admin-tok")
+
+    assert result is None
+
+
+def test_exchange_token_returns_user_token(settings):
+    """exchange_token() exchanges a service account token for a user-impersonating token."""
+    settings.DRIVE_OIDC_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.DRIVE_OIDC_CLIENT_ID = "client-id"
+    settings.DRIVE_OIDC_CLIENT_SECRET = "client-secret"
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {"access_token": "user-tok-xyz"}
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+
+        result = DriveBackend().exchange_token("svc-tok", "user-sub-uuid")
+
+    mock_requests.post.assert_called_once_with(
+        "https://oidc.example.com/token",
+        data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "client_id": "client-id",
+            "client_secret": "client-secret",
+            "subject_token": "svc-tok",
+            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "requested_subject": "user-sub-uuid",
+        },
+        timeout=30,
+    )
+    assert result == "user-tok-xyz"
+
+
+def test_exchange_token_raises_on_http_error(settings):
+    """exchange_token() propagates HTTPError so the caller can decide on fallback."""
+    settings.DRIVE_OIDC_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.DRIVE_OIDC_CLIENT_ID = "client-id"
+    settings.DRIVE_OIDC_CLIENT_SECRET = "client-secret"
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        import requests as req
+
+        mock_requests.HTTPError = req.HTTPError
+        mock_requests.post.return_value.raise_for_status.side_effect = req.HTTPError("403")
+
+        with pytest.raises(req.HTTPError):
+            DriveBackend().exchange_token("svc-tok", "user-sub-uuid")

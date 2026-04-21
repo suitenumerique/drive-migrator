@@ -1,10 +1,15 @@
 """DriveDestinationBackend — uploads a workspace to La Suite Drive."""
 
+import logging
 import os
+
+import requests
 
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.drive.drive_backend import DriveBackend
 from core.models import Workspace
+
+logger = logging.getLogger(__name__)
 
 
 class DriveDestinationBackend(AbstractDestinationBackend):
@@ -21,29 +26,31 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
     def export(self, workspace, user, local_folder_path: str) -> None:
         backend = DriveBackend()
-        token = backend.get_access_token()
+        service_token = backend.get_access_token()
 
-        # Create the root workspace folder in Drive
+        migration_email = (
+            workspace.migration_user.email if workspace.migration_user else None
+        )
+        user_token = (
+            self._resolve_user_token(backend, service_token, migration_email)
+            if migration_email
+            else None
+        )
+        token = user_token or service_token
+
         root = backend.create_folder(workspace.title, token=token)
         root_id = root["id"]
         workspace.set_destination_metadata("drive", {"workspace_id": root_id})
 
-        # Recursively upload the local folder tree
         self._upload_tree(backend, token, local_folder_path, root_id)
 
-        # Share with the migration user
-        if workspace.migration_user and workspace.migration_user.email:
-            drive_user = backend.find_user_by_email(
-                workspace.migration_user.email, token=token
-            )
+        if not user_token and migration_email:
+            drive_user = backend.find_user_by_email(migration_email, token=token)
             if drive_user:
                 backend.share_with_user(root_id, drive_user["id"], token=token)
             else:
-                backend.invite_by_email(
-                    root_id, workspace.migration_user.email, token=token
-                )
+                backend.invite_by_email(root_id, migration_email, token=token)
 
-        # Share with workspace members
         for member in workspace.members or []:
             email = member.get("email", "")
             if not email:
@@ -56,6 +63,26 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
         workspace.set_destination_status("drive", Workspace.Status.SUCCESS)
         workspace.save()
+
+    def _resolve_user_token(
+        self, backend: DriveBackend, service_token: str, email: str
+    ) -> str | None:
+        """
+        Try to get a token impersonating the migration user via Keycloak token exchange.
+
+        Admin API errors propagate (broken config). Exchange errors → None (fallback).
+        """
+        sub = backend.find_user_sub_by_email(email, service_token)
+        if not sub:
+            logger.info("User %s not found in Keycloak Drive realm, using fallback", email)
+            return None
+        try:
+            user_token = backend.exchange_token(service_token, sub)
+            logger.info("Token exchange successful for %s", email)
+            return user_token
+        except requests.HTTPError as exc:
+            logger.warning("Token exchange failed for %s: %s", email, exc)
+            return None
 
     def _upload_tree(
         self, backend: DriveBackend, token: str, local_path: str, drive_parent_id: str

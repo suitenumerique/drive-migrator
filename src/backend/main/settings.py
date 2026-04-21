@@ -216,6 +216,9 @@ class Base(Configuration):
     DRIVE_OIDC_CLIENT_SECRET = values.Value(
         environ_name="DRIVE_OIDC_CLIENT_SECRET", environ_prefix=None, default=""
     )
+    DRIVE_OIDC_ADMIN_API_URL = values.Value(
+        environ_name="DRIVE_OIDC_ADMIN_API_URL", environ_prefix=None, default=""
+    )
 
     # Osmose
     OSMOSE_PKI_RSA_PRIVATE_KEY = values.Value(
@@ -594,7 +597,11 @@ class Development(Base):
 
     ALLOWED_HOSTS = ["*"]
     CORS_ALLOW_ALL_ORIGINS = True
-    CSRF_TRUSTED_ORIGINS = ["http://localhost:8072", "http://localhost:3000"]
+    CSRF_TRUSTED_ORIGINS = [
+        "http://localhost:8072",
+        "http://localhost:3000",
+        "http://localhost:3010",
+    ]
     DEBUG = True
 
     SESSION_COOKIE_NAME = "main_sessionid"

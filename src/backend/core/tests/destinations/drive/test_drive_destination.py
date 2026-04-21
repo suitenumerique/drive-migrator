@@ -2,6 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+import requests
+
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.drive.backend import DriveDestinationBackend
 from core.models import Workspace
@@ -114,48 +117,150 @@ def test_export_uploads_files(mock_backend_cls, tmp_path):
 
 
 @patch("core.destinations.drive.backend.DriveBackend")
-def test_export_shares_with_migration_user_when_in_drive(mock_backend_cls, tmp_path):
-    """export() shares the workspace with migration_user when they exist in Drive."""
+def test_export_shares_with_migration_user_when_exchange_refused(mock_backend_cls, tmp_path):
+    """export() falls back to sharing when the user exists in Keycloak but exchange is refused."""
+    member = MagicMock()
+    member.email = "alice@example.com"
+    workspace = _make_workspace(migration_user=member)
+    workspace.members = []
+    user = MagicMock()
+
+    mock_backend = mock_backend_cls.return_value
+    mock_backend.get_access_token.return_value = "svc-tok"
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.find_user_sub_by_email.return_value = "user-sub"
+    mock_backend.exchange_token.side_effect = requests.HTTPError("403")
+    mock_backend.find_user_by_email.return_value = {"id": "user-uuid"}
+
+    DriveDestinationBackend().export(workspace, user, str(tmp_path))
+
+    mock_backend.create_folder.assert_called_once_with(workspace.title, token="svc-tok")
+    mock_backend.find_user_by_email.assert_called_once_with("alice@example.com", token="svc-tok")
+    mock_backend.share_with_user.assert_called_once_with("root-uuid", "user-uuid", token="svc-tok")
+
+
+@patch("core.destinations.drive.backend.DriveBackend")
+def test_export_invites_migration_user_when_not_in_keycloak(mock_backend_cls, tmp_path):
+    """export() invites migration_user by email when they are absent from Keycloak Drive."""
+    member = MagicMock()
+    member.email = "new@example.com"
+    workspace = _make_workspace(migration_user=member)
+    workspace.members = []
+    user = MagicMock()
+
+    mock_backend = mock_backend_cls.return_value
+    mock_backend.get_access_token.return_value = "svc-tok"
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.find_user_sub_by_email.return_value = None  # not in Keycloak → not in Drive
+    mock_backend.find_user_by_email.return_value = None
+
+    DriveDestinationBackend().export(workspace, user, str(tmp_path))
+
+    mock_backend.invite_by_email.assert_called_once_with(
+        "root-uuid", "new@example.com", token="svc-tok"
+    )
+
+
+# ---------------------------------------------------------------------------
+# export() — token exchange (items in "Mes fichiers")
+# ---------------------------------------------------------------------------
+
+
+@patch("core.destinations.drive.backend.DriveBackend")
+def test_export_uses_user_token_when_exchange_succeeds(mock_backend_cls, tmp_path):
+    """export() creates items with the user token so they land in their 'Mes fichiers'."""
+    member = MagicMock()
+    member.email = "alice@example.com"
+    workspace = _make_workspace(migration_user=member)
+    workspace.members = []
+    user = MagicMock()
+
+    mock_backend = mock_backend_cls.return_value
+    mock_backend.get_access_token.return_value = "svc-tok"
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.find_user_sub_by_email.return_value = "user-sub"
+    mock_backend.exchange_token.return_value = "user-tok"
+
+    DriveDestinationBackend().export(workspace, user, str(tmp_path))
+
+    mock_backend.create_folder.assert_called_once_with(workspace.title, token="user-tok")
+    mock_backend.find_user_by_email.assert_not_called()
+    mock_backend.share_with_user.assert_not_called()
+    mock_backend.invite_by_email.assert_not_called()
+
+
+
+@patch("core.destinations.drive.backend.DriveBackend")
+def test_export_raises_when_admin_api_fails(mock_backend_cls, tmp_path):
+    """export() propagates an error from the Keycloak admin API instead of silently falling back."""
     member = MagicMock()
     member.email = "alice@example.com"
     workspace = _make_workspace(migration_user=member)
     user = MagicMock()
 
     mock_backend = mock_backend_cls.return_value
-    mock_backend.get_access_token.return_value = "tok"
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = {"id": "user-uuid"}
+    mock_backend.get_access_token.return_value = "svc-tok"
+    mock_backend.find_user_sub_by_email.side_effect = requests.HTTPError("503")
 
-    backend = DriveDestinationBackend()
-    backend.export(workspace, user, str(tmp_path))
+    with pytest.raises(requests.HTTPError):
+        DriveDestinationBackend().export(workspace, user, str(tmp_path))
 
-    mock_backend.find_user_by_email.assert_called_once_with(
-        "alice@example.com", token="tok"
+
+# ---------------------------------------------------------------------------
+# _resolve_user_token()
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_user_token_returns_user_token_when_exchange_succeeds():
+    """_resolve_user_token() returns the user token on successful exchange."""
+    mock_backend = MagicMock()
+    mock_backend.find_user_sub_by_email.return_value = "user-sub"
+    mock_backend.exchange_token.return_value = "user-tok"
+
+    result = DriveDestinationBackend()._resolve_user_token(
+        mock_backend, "svc-tok", "alice@example.com"
     )
-    mock_backend.share_with_user.assert_called_once_with(
-        "root-uuid", "user-uuid", token="tok"
+
+    mock_backend.find_user_sub_by_email.assert_called_once_with("alice@example.com", "svc-tok")
+    mock_backend.exchange_token.assert_called_once_with("svc-tok", "user-sub")
+    assert result == "user-tok"
+
+
+def test_resolve_user_token_returns_none_when_user_not_in_keycloak():
+    """_resolve_user_token() returns None when the user has no Keycloak sub."""
+    mock_backend = MagicMock()
+    mock_backend.find_user_sub_by_email.return_value = None
+
+    result = DriveDestinationBackend()._resolve_user_token(
+        mock_backend, "svc-tok", "unknown@example.com"
     )
 
+    mock_backend.exchange_token.assert_not_called()
+    assert result is None
 
-@patch("core.destinations.drive.backend.DriveBackend")
-def test_export_invites_migration_user_when_not_in_drive(mock_backend_cls, tmp_path):
-    """export() invites migration_user by email when they are not yet registered in Drive."""
-    member = MagicMock()
-    member.email = "new@example.com"
-    workspace = _make_workspace(migration_user=member)
-    user = MagicMock()
 
-    mock_backend = mock_backend_cls.return_value
-    mock_backend.get_access_token.return_value = "tok"
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = None
+def test_resolve_user_token_returns_none_when_exchange_fails():
+    """_resolve_user_token() returns None when the token exchange is refused (fallback)."""
+    mock_backend = MagicMock()
+    mock_backend.find_user_sub_by_email.return_value = "user-sub"
+    mock_backend.exchange_token.side_effect = requests.HTTPError("403 Forbidden")
 
-    backend = DriveDestinationBackend()
-    backend.export(workspace, user, str(tmp_path))
-
-    mock_backend.invite_by_email.assert_called_once_with(
-        "root-uuid", "new@example.com", token="tok"
+    result = DriveDestinationBackend()._resolve_user_token(
+        mock_backend, "svc-tok", "alice@example.com"
     )
+
+    assert result is None
+
+
+def test_resolve_user_token_propagates_admin_api_error():
+    """_resolve_user_token() lets admin API errors bubble up — config is broken, not a fallback."""
+    mock_backend = MagicMock()
+    mock_backend.find_user_sub_by_email.side_effect = requests.HTTPError("503")
+
+    with pytest.raises(requests.HTTPError):
+        DriveDestinationBackend()._resolve_user_token(
+            mock_backend, "svc-tok", "alice@example.com"
+        )
 
 
 @patch("core.destinations.drive.backend.DriveBackend")
