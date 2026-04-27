@@ -43,9 +43,10 @@ class FolderCreator:
         path = self.get_workspace_path(workspace)
         os.makedirs(path, exist_ok=True)
 
-        # Do not create folder for the root folder, it is virtual.
         for child in folder.children:
             self.__create_folder(path, workspace, child, source_backend)
+
+        self.__download_folder_files(folder, path, source_backend)
 
         return path
 

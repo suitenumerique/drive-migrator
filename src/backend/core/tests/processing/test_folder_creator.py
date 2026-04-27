@@ -92,6 +92,24 @@ def test_create_folder_downloads_files(tmp_path, settings):
     assert file_b in downloaded_files
 
 
+def test_create_folder_downloads_root_level_files(tmp_path, settings):
+    """create_folder() downloads files placed directly at the workspace root."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws3b")
+    root_file = SourceFile(
+        id="f1", name="readme", extension=".pdf", download_url="http://src/readme.pdf"
+    )
+    folder = SourceFolder(name="root", files=[root_file])
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert backend.download_file.call_count == 1
+    called_file = backend.download_file.call_args[0][0]
+    assert called_file == root_file
+
+
 def test_create_folder_returns_local_path(tmp_path, settings):
     """create_folder() returns the path of the created workspace directory."""
     settings.APP_WORK_DIR = str(tmp_path)
