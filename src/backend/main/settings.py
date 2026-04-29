@@ -221,6 +221,11 @@ class Base(Configuration):
     DRIVE_AUTH_MODE = values.Value(
         "service_account", environ_name="DRIVE_AUTH_MODE", environ_prefix=None
     )
+    # Fernet key (URL-safe base64, 32 bytes) used to encrypt OIDC tokens at rest.
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    OIDC_TOKENS_ENCRYPTION_KEY = values.Value(
+        environ_name="OIDC_TOKENS_ENCRYPTION_KEY", environ_prefix=None
+    )
 
     # Osmose
     OSMOSE_PKI_RSA_PRIVATE_KEY = values.Value(
