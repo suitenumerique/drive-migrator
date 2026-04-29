@@ -2,8 +2,13 @@
 
 import os
 
+from django.conf import settings
+
 from core.backends.destination import AbstractDestinationBackend
-from core.destinations.drive.drive_backend import DriveBackend
+from core.destinations.drive.drive_backend import (
+    DriveServiceAccountBackend,
+    DriveUserTokenBackend,
+)
 from core.models import Workspace
 
 
@@ -11,65 +16,77 @@ class DriveDestinationBackend(AbstractDestinationBackend):
     """
     Destination backend that creates a workspace in La Suite Drive.
 
-    The export is synchronous: folder structure is created, files are uploaded
-    via the 3-step process (create item → PUT S3 → upload-ended), then members
-    are shared or invited.
+    Two auth modes are supported via DRIVE_AUTH_MODE:
+    - "service_account" (default): uses OAuth2 client_credentials grant and
+      /external_api/v1.0/. The migration user is explicitly shared as owner.
+    - "user_token": uses the authenticated user's ProConnect token and /api/v1.0/.
+      Drive automatically assigns ownership to the token holder, so the migration
+      user is excluded from the sharing step.
     """
 
     name = "drive"
     label = "La Suite Drive"
 
-    def export(self, workspace, user, local_folder_path: str) -> None:
-        backend = DriveBackend()
-        token = backend.get_access_token()
+    def _make_backend(self, user):
+        auth_mode = getattr(settings, "DRIVE_AUTH_MODE", "service_account")
+        if auth_mode == "user_token":
+            return DriveUserTokenBackend(user)
+        return DriveServiceAccountBackend()
 
-        # Create the root workspace folder in Drive
-        root = backend.create_folder(workspace.title, token=token)
+    def export(self, workspace, user, local_folder_path: str) -> None:
+        backend = self._make_backend(user)
+
+        root = backend.create_folder(workspace.title)
         root_id = root["id"]
         workspace.set_destination_metadata("drive", {"workspace_id": root_id})
 
-        # Recursively upload the local folder tree
-        self._upload_tree(backend, token, local_folder_path, root_id)
+        self._upload_tree(backend, local_folder_path, root_id)
 
-        # Share with the migration user
-        if workspace.migration_user and workspace.migration_user.email:
-            drive_user = backend.find_user_by_email(
-                workspace.migration_user.email, token=token
-            )
-            if drive_user:
-                backend.share_with_user(root_id, drive_user["id"], token=token)
-            else:
-                backend.invite_by_email(
-                    root_id, workspace.migration_user.email, token=token
-                )
-
-        # Share with workspace members
-        for member in workspace.members or []:
-            email = member.get("email", "")
-            if not email:
-                continue
-            drive_user = backend.find_user_by_email(email, token=token)
-            if drive_user:
-                backend.share_with_user(root_id, drive_user["id"], token=token)
-            else:
-                backend.invite_by_email(root_id, email, token=token)
+        self._share_members(backend, workspace, root_id)
 
         workspace.set_destination_status("drive", Workspace.Status.SUCCESS)
         workspace.save()
 
-    def _upload_tree(
-        self, backend: DriveBackend, token: str, local_path: str, drive_parent_id: str
-    ) -> None:
+    def _share_members(self, backend, workspace, root_id: str) -> None:
+        """Share root_id with all relevant emails, respecting the auth mode."""
+        auth_mode = getattr(settings, "DRIVE_AUTH_MODE", "service_account")
+        migration_email = (
+            workspace.migration_user.email
+            if workspace.migration_user and workspace.migration_user.email
+            else None
+        )
+
+        # Collect all emails to share, deduplicating across migration_user + members.
+        # In user_token mode the token holder is already owner — skip their email.
+        emails_to_skip = set()
+        if auth_mode == "user_token" and migration_email:
+            emails_to_skip.add(migration_email)
+
+        emails_to_share = set()
+        if migration_email and migration_email not in emails_to_skip:
+            emails_to_share.add(migration_email)
+        for member in workspace.members or []:
+            email = member.get("email", "")
+            if email and email not in emails_to_skip:
+                emails_to_share.add(email)
+
+        for email in emails_to_share:
+            self._share_with_email(backend, root_id, email)
+
+    def _share_with_email(self, backend, item_id: str, email: str) -> None:
+        drive_user = backend.find_user_by_email(email)
+        if drive_user:
+            backend.share_with_user(item_id, drive_user["id"])
+        else:
+            backend.invite_by_email(item_id, email)
+
+    def _upload_tree(self, backend, local_path: str, drive_parent_id: str) -> None:
         """Recursively create Drive folders and upload files from the local tree."""
         for entry in sorted(os.scandir(local_path), key=lambda e: e.name):
             if entry.is_dir():
-                folder = backend.create_subfolder(
-                    entry.name, parent_id=drive_parent_id, token=token
-                )
-                self._upload_tree(backend, token, entry.path, folder["id"])
+                folder = backend.create_subfolder(entry.name, parent_id=drive_parent_id)
+                self._upload_tree(backend, entry.path, folder["id"])
             elif entry.is_file():
-                item = backend.create_file_item(
-                    entry.name, parent_id=drive_parent_id, token=token
-                )
+                item = backend.create_file_item(entry.name, parent_id=drive_parent_id)
                 backend.upload_to_s3(item["policy"], entry.path)
-                backend.notify_upload_ended(item["id"], token=token)
+                backend.notify_upload_ended(item["id"])

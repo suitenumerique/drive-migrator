@@ -216,6 +216,11 @@ class Base(Configuration):
     DRIVE_OIDC_CLIENT_SECRET = values.Value(
         environ_name="DRIVE_OIDC_CLIENT_SECRET", environ_prefix=None, default=""
     )
+    # "service_account": client_credentials grant via /external_api/v1.0/ (default)
+    # "user_token": authenticated user's ProConnect token via /api/v1.0/
+    DRIVE_AUTH_MODE = values.Value(
+        "service_account", environ_name="DRIVE_AUTH_MODE", environ_prefix=None
+    )
 
     # Osmose
     OSMOSE_PKI_RSA_PRIVATE_KEY = values.Value(
@@ -594,7 +599,7 @@ class Development(Base):
 
     ALLOWED_HOSTS = ["*"]
     CORS_ALLOW_ALL_ORIGINS = True
-    CSRF_TRUSTED_ORIGINS = ["http://localhost:8072", "http://localhost:3000"]
+    CSRF_TRUSTED_ORIGINS = ["http://localhost:8072", "http://localhost:3010"]
     DEBUG = True
 
     SESSION_COOKIE_NAME = "main_sessionid"
