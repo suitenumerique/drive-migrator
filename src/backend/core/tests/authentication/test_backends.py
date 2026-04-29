@@ -4,12 +4,21 @@ from django.core.exceptions import SuspiciousOperation
 from django.utils import timezone
 
 import pytest
+from cryptography.fernet import Fernet
 
 from core import models
 from core.authentication.backends import OIDCAuthenticationBackend
+from core.encryption import decrypt_token
 from core.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
+
+TEST_KEY = Fernet.generate_key().decode()
+
+
+@pytest.fixture(autouse=True)
+def set_encryption_key(settings):
+    settings.OIDC_TOKENS_ENCRYPTION_KEY = TEST_KEY
 
 
 def test_authentication_getter_existing_user_no_email(
@@ -126,7 +135,7 @@ def test_get_or_create_user_persists_access_token_to_existing_user(monkeypatch):
     )
 
     db_user.refresh_from_db()
-    assert db_user.oidc_access_token == "new-access-tok"
+    assert decrypt_token(db_user.oidc_access_token) == "new-access-tok"
 
 
 def test_get_or_create_user_persists_access_token_to_new_user(monkeypatch):
@@ -144,7 +153,7 @@ def test_get_or_create_user_persists_access_token_to_new_user(monkeypatch):
         access_token="access-for-new-user", id_token=None, payload=None
     )
 
-    assert user.oidc_access_token == "access-for-new-user"
+    assert decrypt_token(user.oidc_access_token) == "access-for-new-user"
 
 
 def test_get_or_create_user_persists_refresh_token(monkeypatch):
@@ -162,7 +171,7 @@ def test_get_or_create_user_persists_refresh_token(monkeypatch):
     backend.get_or_create_user(access_token="tok", id_token=None, payload=None)
 
     db_user.refresh_from_db()
-    assert db_user.oidc_refresh_token == "my-refresh-tok"
+    assert decrypt_token(db_user.oidc_refresh_token) == "my-refresh-tok"
 
 
 def test_get_or_create_user_persists_token_expiry(monkeypatch):
@@ -224,3 +233,83 @@ def test_get_token_stores_token_info_on_instance(monkeypatch):
     backend.get_token({"some": "payload"})
 
     assert backend._token_info == token_response
+
+
+# ---------------------------------------------------------------------------
+# Token encryption at rest
+# ---------------------------------------------------------------------------
+
+
+def test_stored_access_token_is_encrypted_not_plaintext(monkeypatch):
+    """The access_token written to DB must not be the raw plaintext value."""
+    backend = OIDCAuthenticationBackend()
+    db_user = UserFactory()
+    backend._token_info = {"refresh_token": "", "expires_in": None}
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": db_user.sub},
+    )
+
+    backend.get_or_create_user(
+        access_token="plaintext-access", id_token=None, payload=None
+    )
+
+    db_user.refresh_from_db()
+    assert db_user.oidc_access_token != "plaintext-access"
+
+
+def test_stored_refresh_token_is_encrypted_not_plaintext(monkeypatch):
+    """The refresh_token written to DB must not be the raw plaintext value."""
+    backend = OIDCAuthenticationBackend()
+    db_user = UserFactory()
+    backend._token_info = {"refresh_token": "plaintext-refresh", "expires_in": None}
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": db_user.sub},
+    )
+
+    backend.get_or_create_user(access_token="tok", id_token=None, payload=None)
+
+    db_user.refresh_from_db()
+    assert db_user.oidc_refresh_token != "plaintext-refresh"
+
+
+def test_stored_tokens_decrypt_to_original_values(monkeypatch):
+    """Tokens stored in DB decrypt back to the original plaintext values."""
+    backend = OIDCAuthenticationBackend()
+    db_user = UserFactory()
+    backend._token_info = {"refresh_token": "my-refresh", "expires_in": None}
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": db_user.sub},
+    )
+
+    backend.get_or_create_user(access_token="my-access", id_token=None, payload=None)
+
+    db_user.refresh_from_db()
+    assert decrypt_token(db_user.oidc_access_token) == "my-access"
+    assert decrypt_token(db_user.oidc_refresh_token) == "my-refresh"
+
+
+def test_empty_refresh_token_stored_as_empty_without_encryption(monkeypatch):
+    """An empty refresh_token is stored as empty string, not as Fernet ciphertext."""
+    backend = OIDCAuthenticationBackend()
+    db_user = UserFactory()
+    backend._token_info = {"refresh_token": "", "expires_in": None}
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": db_user.sub},
+    )
+
+    backend.get_or_create_user(access_token="tok", id_token=None, payload=None)
+
+    db_user.refresh_from_db()
+    assert db_user.oidc_refresh_token == ""

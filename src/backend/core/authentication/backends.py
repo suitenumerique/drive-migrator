@@ -11,6 +11,7 @@ from mozilla_django_oidc.auth import (
     OIDCAuthenticationBackend as MozillaOIDCAuthenticationBackend,
 )
 
+from core.encryption import encrypt_token
 from core.models import User
 
 
@@ -107,8 +108,8 @@ class OIDCAuthenticationBackend(MozillaOIDCAuthenticationBackend):
         refresh_token = token_info.get("refresh_token") or ""
         expires_in = token_info.get("expires_in")
 
-        user.oidc_access_token = access_token
-        user.oidc_refresh_token = refresh_token
+        user.oidc_access_token = encrypt_token(access_token)
+        user.oidc_refresh_token = encrypt_token(refresh_token)
         user.oidc_token_expires_at = (
             timezone.now() + timedelta(seconds=expires_in) if expires_in else None
         )
