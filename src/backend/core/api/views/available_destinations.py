@@ -3,8 +3,8 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.backends.destination import DestinationRegistry
 from core.api.permissions import IsAuthenticated
+from core.backends.destination import DestinationRegistry
 
 
 class AvailableDestinationsAPIView(APIView):

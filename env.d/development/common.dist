@@ -23,10 +23,10 @@ AWS_S3_ACCESS_KEY_ID=impress
 AWS_S3_SECRET_ACCESS_KEY=password
 
 # OIDC
-OIDC_OP_JWKS_ENDPOINT=http://nginx:8083/realms/impress/protocol/openid-connect/certs
+OIDC_OP_JWKS_ENDPOINT=http://nginx-migration:8083/realms/impress/protocol/openid-connect/certs
 OIDC_OP_AUTHORIZATION_ENDPOINT=http://localhost:8083/realms/impress/protocol/openid-connect/auth
-OIDC_OP_TOKEN_ENDPOINT=http://nginx:8083/realms/impress/protocol/openid-connect/token
-OIDC_OP_USER_ENDPOINT=http://nginx:8083/realms/impress/protocol/openid-connect/userinfo
+OIDC_OP_TOKEN_ENDPOINT=http://nginx-migration:8083/realms/impress/protocol/openid-connect/token
+OIDC_OP_USER_ENDPOINT=http://nginx-migration:8083/realms/impress/protocol/openid-connect/userinfo
 
 OIDC_RP_CLIENT_ID=impress
 OIDC_RP_CLIENT_SECRET=ThisIsAnExampleKeyForDevPurposeOnly
@@ -39,3 +39,7 @@ LOGOUT_REDIRECT_URL=http://localhost:3000
 
 OIDC_REDIRECT_ALLOWED_HOSTS=["http://localhost:8083", "http://localhost:3000"]
 OIDC_AUTH_REQUEST_EXTRA_PARAMS={"acr_values": "eidas1"}
+
+# Fernet key for OIDC token encryption at rest
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+OIDC_TOKENS_ENCRYPTION_KEY=

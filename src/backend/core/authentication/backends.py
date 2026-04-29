@@ -59,8 +59,10 @@ class OIDCAuthenticationBackend(MozillaOIDCAuthenticationBackend):
             proxies=self.get_settings("OIDC_PROXY", None),
         )
         user_response.raise_for_status()
-        userinfo = self.verify_token(user_response.text)
-        return userinfo
+        # ProConnect returns a signed JWT; standard Keycloak returns plain JSON.
+        if "application/json" in user_response.headers.get("Content-Type", ""):
+            return user_response.json()
+        return self.verify_token(user_response.text)
 
     def get_or_create_user(self, access_token, id_token, payload):
         """Return a User based on userinfo. Get or create a new user if no user matches the Sub.

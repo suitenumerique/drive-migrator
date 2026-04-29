@@ -611,7 +611,7 @@ class Development(Base):
 
     USE_SWAGGER = True
 
-    SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = False
     SOCIAL_AUTH_REDIRECT_IS_HTTPS = True
 
     def __init__(self):
