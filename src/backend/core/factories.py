@@ -21,6 +21,9 @@ class UserFactory(factory.django.DjangoModelFactory):
     email = factory.Faker("email")
     language = factory.fuzzy.FuzzyChoice([lang[0] for lang in settings.LANGUAGES])
     password = make_password("password")
+    oidc_access_token = ""
+    oidc_refresh_token = ""
+    oidc_token_expires_at = None
 
 
 class WorkspaceFactory(factory.django.DjangoModelFactory):

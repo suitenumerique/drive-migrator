@@ -201,6 +201,16 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
 
     workspaces = models.ManyToManyField(Workspace)
 
+    # OIDC tokens stored for async Celery tasks (e.g. Drive migration with user token auth).
+    # These are refreshed at each login and updated during token refresh.
+    oidc_access_token = models.TextField(blank=True, default="")
+    oidc_refresh_token = models.TextField(blank=True, default="")
+    oidc_token_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("Expiry datetime of the stored OIDC access token."),
+    )
+
     objects = auth_models.UserManager()
 
     USERNAME_FIELD = "admin_email"
