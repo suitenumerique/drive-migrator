@@ -7,6 +7,8 @@ from django.utils import timezone
 
 import requests
 
+from core.encryption import decrypt_token, encrypt_token
+
 
 class DriveBackend:
     """Base HTTP client for La Suite Drive API.
@@ -169,14 +171,15 @@ class DriveUserTokenBackend(DriveBackend):
     def __init__(self, user):
         super().__init__()
         self._user = user
-        self._access_token = user.oidc_access_token or None
+        self._access_token = decrypt_token(user.oidc_access_token) or None
         self._token_expires_at = user.oidc_token_expires_at
 
     def _api_prefix(self) -> str:
         return "/api/v1.0"
 
     def _refresh(self):
-        if not self._user.oidc_refresh_token:
+        plaintext_refresh = decrypt_token(self._user.oidc_refresh_token)
+        if not plaintext_refresh:
             raise RuntimeError(
                 f"No refresh token stored for user {self._user.email}. "
                 "Cannot refresh the ProConnect token for Drive migration."
@@ -187,7 +190,7 @@ class DriveUserTokenBackend(DriveBackend):
                 "grant_type": "refresh_token",
                 "client_id": settings.OIDC_RP_CLIENT_ID,
                 "client_secret": settings.OIDC_RP_CLIENT_SECRET,
-                "refresh_token": self._user.oidc_refresh_token,
+                "refresh_token": plaintext_refresh,
             },
             timeout=30,
         )
@@ -198,9 +201,9 @@ class DriveUserTokenBackend(DriveBackend):
         self._token_expires_at = (
             timezone.now() + timedelta(seconds=expires_in) if expires_in else None
         )
-        self._user.oidc_access_token = self._access_token
+        self._user.oidc_access_token = encrypt_token(self._access_token)
         if data.get("refresh_token"):
-            self._user.oidc_refresh_token = data["refresh_token"]
+            self._user.oidc_refresh_token = encrypt_token(data["refresh_token"])
         self._user.oidc_token_expires_at = self._token_expires_at
         self._user.save(
             update_fields=[

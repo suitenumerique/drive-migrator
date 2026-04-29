@@ -6,11 +6,21 @@ from unittest.mock import MagicMock, call, mock_open, patch
 from django.utils import timezone
 
 import pytest
+from cryptography.fernet import Fernet
 
 from core.destinations.drive.drive_backend import (
     DriveServiceAccountBackend,
     DriveUserTokenBackend,
 )
+from core.encryption import decrypt_token, encrypt_token
+
+TEST_KEY = Fernet.generate_key().decode()
+
+
+@pytest.fixture(autouse=True)
+def set_encryption_key(settings):
+    settings.OIDC_TOKENS_ENCRYPTION_KEY = TEST_KEY
+
 
 # ---------------------------------------------------------------------------
 # DriveServiceAccountBackend — token management
@@ -339,10 +349,11 @@ def _make_user(
     expires_at=None,
     email="user@example.com",
 ):
+    """Build a mock user with tokens already encrypted, as stored in the real DB."""
     user = MagicMock()
     user.email = email
-    user.oidc_access_token = access_token
-    user.oidc_refresh_token = refresh_token
+    user.oidc_access_token = encrypt_token(access_token) if access_token else ""
+    user.oidc_refresh_token = encrypt_token(refresh_token) if refresh_token else ""
     user.oidc_token_expires_at = expires_at
     return user
 
@@ -415,8 +426,8 @@ def test_user_token_refresh_persists_new_tokens_to_user(settings):
         mock_requests.post.return_value.raise_for_status = MagicMock()
         DriveUserTokenBackend(user)._get_token()
 
-    assert user.oidc_access_token == "new-access"
-    assert user.oidc_refresh_token == "new-refresh"
+    assert decrypt_token(user.oidc_access_token) == "new-access"
+    assert decrypt_token(user.oidc_refresh_token) == "new-refresh"
     assert user.oidc_token_expires_at is not None
     user.save.assert_called_once_with(
         update_fields=[
@@ -449,7 +460,7 @@ def test_user_token_refresh_keeps_old_refresh_token_when_none_returned(settings)
         mock_requests.post.return_value.raise_for_status = MagicMock()
         DriveUserTokenBackend(user)._get_token()
 
-    assert user.oidc_refresh_token == "keep-this-refresh"
+    assert decrypt_token(user.oidc_refresh_token) == "keep-this-refresh"
 
 
 def test_user_token_raises_when_no_refresh_token():
@@ -604,3 +615,78 @@ def test_user_token_find_user_by_email_always_uses_api_v1(settings):
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
     )
+
+
+# ---------------------------------------------------------------------------
+# DriveUserTokenBackend — token encryption at rest
+# ---------------------------------------------------------------------------
+
+
+def test_user_token_decrypts_stored_access_token_on_init():
+    """DriveUserTokenBackend decrypts the stored access token when initialised."""
+    user = _make_user(
+        access_token="secret-access",
+        expires_at=timezone.now() + timedelta(hours=1),
+    )
+    backend = DriveUserTokenBackend(user)
+    assert backend._access_token == "secret-access"
+
+
+def test_user_token_get_token_returns_decrypted_plaintext():
+    """_get_token() returns the plaintext token usable in HTTP headers."""
+    user = _make_user(
+        access_token="secret-access",
+        expires_at=timezone.now() + timedelta(hours=1),
+    )
+    with patch("core.destinations.drive.drive_backend.requests"):
+        token = DriveUserTokenBackend(user)._get_token()
+    assert token == "secret-access"
+
+
+def test_user_token_refresh_stores_access_token_encrypted(settings):
+    """After refresh, the new access_token is stored encrypted in the user model."""
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.OIDC_RP_CLIENT_ID = "osmose-client"
+    settings.OIDC_RP_CLIENT_SECRET = "osmose-secret"
+
+    user = _make_user(
+        access_token="expired-tok",
+        refresh_token="valid-refresh",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {
+            "access_token": "new-plaintext-access",
+            "expires_in": 60,
+        }
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user)._get_token()
+
+    assert user.oidc_access_token != "new-plaintext-access"
+    assert decrypt_token(user.oidc_access_token) == "new-plaintext-access"
+
+
+def test_user_token_refresh_stores_refresh_token_encrypted(settings):
+    """After refresh, the new refresh_token is stored encrypted in the user model."""
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.OIDC_RP_CLIENT_ID = "osmose-client"
+    settings.OIDC_RP_CLIENT_SECRET = "osmose-secret"
+
+    user = _make_user(
+        access_token="expired-tok",
+        refresh_token="old-refresh",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {
+            "access_token": "new-access",
+            "refresh_token": "new-plaintext-refresh",
+            "expires_in": 60,
+        }
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user)._get_token()
+
+    assert user.oidc_refresh_token != "new-plaintext-refresh"
+    assert decrypt_token(user.oidc_refresh_token) == "new-plaintext-refresh"
