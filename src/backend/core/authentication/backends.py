@@ -1,6 +1,9 @@
 """Authentication Backends for the core app."""
 
+from datetime import timedelta
+
 from django.core.exceptions import SuspiciousOperation
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 import requests
@@ -17,6 +20,16 @@ class OIDCAuthenticationBackend(MozillaOIDCAuthenticationBackend):
     This class overrides the default OIDC Authentication Backend to accommodate differences
     in the User and Identity models, and handles signed and/or encrypted UserInfo response.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._token_info = {}
+
+    def get_token(self, payload):
+        """Intercept the token response to capture refresh_token/expires_in for persistence."""
+        token_info = super().get_token(payload)
+        self._token_info = token_info
+        return token_info
 
     def get_userinfo(self, access_token, id_token, payload):
         """Return user details dictionary.
@@ -79,7 +92,34 @@ class OIDCAuthenticationBackend(MozillaOIDCAuthenticationBackend):
             else:
                 user = None
 
+        if user is not None:
+            self._persist_oidc_tokens(user, access_token)
+
         return user
+
+    def _persist_oidc_tokens(self, user, access_token: str) -> None:
+        """Save access_token, refresh_token and expiry to the user model.
+
+        Called after each successful login so Celery tasks can use the token
+        for Drive migrations without needing a live HTTP session.
+        """
+        token_info = getattr(self, "_token_info", {})
+        refresh_token = token_info.get("refresh_token") or ""
+        expires_in = token_info.get("expires_in")
+
+        user.oidc_access_token = access_token
+        user.oidc_refresh_token = refresh_token
+        user.oidc_token_expires_at = (
+            timezone.now() + timedelta(seconds=expires_in) if expires_in else None
+        )
+        user.save(
+            update_fields=[
+                "oidc_access_token",
+                "oidc_refresh_token",
+                "oidc_token_expires_at",
+                "updated_at",
+            ]
+        )
 
     def create_user(self, claims):
         """Return a newly created User instance."""

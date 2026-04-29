@@ -1,6 +1,7 @@
 """Unit tests for the Authentication Backends."""
 
 from django.core.exceptions import SuspiciousOperation
+from django.utils import timezone
 
 import pytest
 
@@ -16,6 +17,7 @@ def test_authentication_getter_existing_user_no_email(
 ):
     """
     If an existing user matches the user's info sub, the user should be returned.
+    get_or_create_user() now also persists OIDC tokens (1 SELECT + 1 UPDATE).
     """
 
     klass = OIDCAuthenticationBackend()
@@ -26,7 +28,8 @@ def test_authentication_getter_existing_user_no_email(
 
     monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", get_userinfo_mocked)
 
-    with django_assert_num_queries(1):
+    # 1 SELECT to find user + 1 SELECT for unique validation (full_clean) + 1 UPDATE for tokens
+    with django_assert_num_queries(3):
         user = klass.get_or_create_user(
             access_token="test-token", id_token=None, payload=None
         )
@@ -99,3 +102,125 @@ def test_models_oidc_user_getter_invalid_token(django_assert_num_queries, monkey
         klass.get_or_create_user(access_token="test-token", id_token=None, payload=None)
 
     assert models.User.objects.exists() is False
+
+
+# ---------------------------------------------------------------------------
+# OIDC token persistence (for Drive user_token auth mode)
+# ---------------------------------------------------------------------------
+
+
+def test_get_or_create_user_persists_access_token_to_existing_user(monkeypatch):
+    """get_or_create_user() saves the access_token on an existing user."""
+    backend = OIDCAuthenticationBackend()
+    db_user = UserFactory()
+    backend._token_info = {"refresh_token": "", "expires_in": None}
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": db_user.sub},
+    )
+
+    backend.get_or_create_user(
+        access_token="new-access-tok", id_token=None, payload=None
+    )
+
+    db_user.refresh_from_db()
+    assert db_user.oidc_access_token == "new-access-tok"
+
+
+def test_get_or_create_user_persists_access_token_to_new_user(monkeypatch):
+    """get_or_create_user() saves the access_token when creating a new user."""
+    backend = OIDCAuthenticationBackend()
+    backend._token_info = {"refresh_token": "", "expires_in": None}
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": "brand-new-sub"},
+    )
+
+    user = backend.get_or_create_user(
+        access_token="access-for-new-user", id_token=None, payload=None
+    )
+
+    assert user.oidc_access_token == "access-for-new-user"
+
+
+def test_get_or_create_user_persists_refresh_token(monkeypatch):
+    """get_or_create_user() saves the refresh_token from _token_info."""
+    backend = OIDCAuthenticationBackend()
+    db_user = UserFactory()
+    backend._token_info = {"refresh_token": "my-refresh-tok", "expires_in": None}
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": db_user.sub},
+    )
+
+    backend.get_or_create_user(access_token="tok", id_token=None, payload=None)
+
+    db_user.refresh_from_db()
+    assert db_user.oidc_refresh_token == "my-refresh-tok"
+
+
+def test_get_or_create_user_persists_token_expiry(monkeypatch):
+    """get_or_create_user() computes and saves oidc_token_expires_at from expires_in."""
+    backend = OIDCAuthenticationBackend()
+    db_user = UserFactory()
+    backend._token_info = {"refresh_token": "", "expires_in": 60}
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": db_user.sub},
+    )
+
+    before = timezone.now()
+    backend.get_or_create_user(access_token="tok", id_token=None, payload=None)
+    after = timezone.now()
+
+    db_user.refresh_from_db()
+    assert db_user.oidc_token_expires_at is not None
+    assert (
+        before < db_user.oidc_token_expires_at < after + timezone.timedelta(seconds=60)
+    )
+
+
+def test_get_or_create_user_leaves_expiry_null_when_no_expires_in(monkeypatch):
+    """oidc_token_expires_at stays None when the token response has no expires_in."""
+    backend = OIDCAuthenticationBackend()
+    db_user = UserFactory(oidc_token_expires_at=None)
+    backend._token_info = {"refresh_token": "", "expires_in": None}
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": db_user.sub},
+    )
+
+    backend.get_or_create_user(access_token="tok", id_token=None, payload=None)
+
+    db_user.refresh_from_db()
+    assert db_user.oidc_token_expires_at is None
+
+
+def test_get_token_stores_token_info_on_instance(monkeypatch):
+    """get_token() stores the full token_info on self._token_info for later use."""
+    backend = OIDCAuthenticationBackend()
+    token_response = {
+        "access_token": "acc",
+        "refresh_token": "ref",
+        "expires_in": 60,
+        "id_token": "id",
+    }
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend.__bases__[0],
+        "get_token",
+        lambda self, payload: token_response,
+    )
+
+    backend.get_token({"some": "payload"})
+
+    assert backend._token_info == token_response
