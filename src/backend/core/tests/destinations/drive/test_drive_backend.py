@@ -1,26 +1,37 @@
-"""Tests for DriveBackend — HTTP client wrapping La Suite Drive API."""
+"""Tests for DriveServiceAccountBackend and DriveUserTokenBackend."""
 
-from unittest.mock import MagicMock, mock_open, patch
+from datetime import timedelta
+from unittest.mock import MagicMock, call, mock_open, patch
 
-from core.destinations.drive.drive_backend import DriveBackend
+from django.utils import timezone
+
+import pytest
+
+from core.destinations.drive.drive_backend import (
+    DriveServiceAccountBackend,
+    DriveUserTokenBackend,
+)
 
 # ---------------------------------------------------------------------------
-# Authentication
+# DriveServiceAccountBackend — token management
 # ---------------------------------------------------------------------------
 
 
-def test_get_access_token_calls_token_endpoint(settings):
-    """get_access_token() performs a client_credentials grant against the OIDC endpoint."""
+def test_service_account_get_token_calls_client_credentials(settings):
+    """_get_token() fetches a token via client_credentials when none is cached."""
     settings.DRIVE_OIDC_TOKEN_ENDPOINT = "https://oidc.example.com/token"
     settings.DRIVE_OIDC_CLIENT_ID = "client-id"
     settings.DRIVE_OIDC_CLIENT_SECRET = "client-secret"
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
-        mock_requests.post.return_value.json.return_value = {"access_token": "tok-abc"}
+        mock_requests.post.return_value.json.return_value = {
+            "access_token": "tok-abc",
+            "expires_in": 3600,
+        }
         mock_requests.post.return_value.raise_for_status = MagicMock()
 
-        backend = DriveBackend()
-        token = backend.get_access_token()
+        backend = DriveServiceAccountBackend()
+        token = backend._get_token()
 
     mock_requests.post.assert_called_once_with(
         "https://oidc.example.com/token",
@@ -35,25 +46,83 @@ def test_get_access_token_calls_token_endpoint(settings):
     assert token == "tok-abc"
 
 
-# ---------------------------------------------------------------------------
-# Folder creation
-# ---------------------------------------------------------------------------
+def test_service_account_get_token_uses_cache_when_valid(settings):
+    """_get_token() reuses the cached token when it has not yet expired."""
+    settings.DRIVE_OIDC_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.DRIVE_OIDC_CLIENT_ID = "client-id"
+    settings.DRIVE_OIDC_CLIENT_SECRET = "client-secret"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "cached-tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        token = backend._get_token()
+
+    mock_requests.post.assert_not_called()
+    assert token == "cached-tok"
 
 
-def test_create_folder_posts_to_items_endpoint(settings):
-    """create_folder() creates a root folder via POST /external_api/v1.0/items/."""
-    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+def test_service_account_get_token_refreshes_when_expired(settings):
+    """_get_token() refreshes via client_credentials when the cached token is expired."""
+    settings.DRIVE_OIDC_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.DRIVE_OIDC_CLIENT_ID = "client-id"
+    settings.DRIVE_OIDC_CLIENT_SECRET = "client-secret"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "old-tok"
+    backend._token_expires_at = timezone.now() - timedelta(seconds=1)
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.post.return_value.json.return_value = {
-            "id": "folder-uuid",
-            "type": "folder",
-            "title": "My Workspace",
+            "access_token": "new-tok",
+            "expires_in": 3600,
         }
         mock_requests.post.return_value.raise_for_status = MagicMock()
+        token = backend._get_token()
 
-        backend = DriveBackend()
-        result = backend.create_folder("My Workspace", token="tok")
+    assert token == "new-tok"
+    mock_requests.post.assert_called_once()
+
+
+def test_service_account_get_token_refreshes_within_buffer(settings):
+    """_get_token() refreshes proactively when the token expires within 10 seconds."""
+    settings.DRIVE_OIDC_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.DRIVE_OIDC_CLIENT_ID = "client-id"
+    settings.DRIVE_OIDC_CLIENT_SECRET = "client-secret"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "almost-expired-tok"
+    backend._token_expires_at = timezone.now() + timedelta(seconds=5)
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {
+            "access_token": "refreshed-tok",
+            "expires_in": 3600,
+        }
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        token = backend._get_token()
+
+    assert token == "refreshed-tok"
+
+
+# ---------------------------------------------------------------------------
+# DriveServiceAccountBackend — folder operations
+# ---------------------------------------------------------------------------
+
+
+def test_service_account_create_folder_uses_external_api(settings):
+    """create_folder() posts to /external_api/v1.0/items/ with the internal token."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {"id": "folder-uuid"}
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        result = backend.create_folder("My Workspace")
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/",
@@ -64,26 +133,22 @@ def test_create_folder_posts_to_items_endpoint(settings):
     assert result["id"] == "folder-uuid"
 
 
-def test_create_subfolder_posts_to_children_endpoint(settings):
-    """create_subfolder() creates a child folder via POST /external_api/v1.0/items/{parent_id}/children/."""
+def test_service_account_create_subfolder(settings):
+    """create_subfolder() posts to /external_api/v1.0/items/{parent_id}/children/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
-        mock_requests.post.return_value.json.return_value = {
-            "id": "child-uuid",
-            "type": "folder",
-            "title": "Subfolder",
-        }
-        mock_requests.post.return_value.raise_for_status = MagicMock()
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-        backend = DriveBackend()
-        result = backend.create_subfolder(
-            "Subfolder", parent_id="parent-uuid", token="tok"
-        )
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {"id": "child-uuid"}
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        result = backend.create_subfolder("docs", parent_id="parent-uuid")
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/parent-uuid/children/",
-        json={"type": "folder", "title": "Subfolder"},
+        json={"type": "folder", "title": "docs"},
         headers={"Authorization": "Bearer tok"},
         timeout=30,
     )
@@ -91,28 +156,25 @@ def test_create_subfolder_posts_to_children_endpoint(settings):
 
 
 # ---------------------------------------------------------------------------
-# File upload (3-step)
+# DriveServiceAccountBackend — file upload (3-step)
 # ---------------------------------------------------------------------------
 
 
-def test_create_file_item_posts_to_children_endpoint(settings):
-    """create_file_item() creates a file item and returns the S3 policy URL."""
+def test_service_account_create_file_item(settings):
+    """create_file_item() posts to /external_api/v1.0/items/{parent}/children/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "id": "file-uuid",
-            "type": "file",
-            "filename": "doc.pdf",
-            "upload_state": "pending",
-            "policy": "https://s3.example.com/bucket/doc.pdf?sig=abc",
+            "policy": "https://s3.example.com/file.pdf?sig=x",
         }
         mock_requests.post.return_value.raise_for_status = MagicMock()
-
-        backend = DriveBackend()
-        result = backend.create_file_item(
-            "doc.pdf", parent_id="folder-uuid", token="tok"
-        )
+        result = backend.create_file_item("doc.pdf", parent_id="folder-uuid")
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/folder-uuid/children/",
@@ -121,22 +183,20 @@ def test_create_file_item_posts_to_children_endpoint(settings):
         timeout=30,
     )
     assert result["id"] == "file-uuid"
-    assert result["policy"] == "https://s3.example.com/bucket/doc.pdf?sig=abc"
+    assert result["policy"] == "https://s3.example.com/file.pdf?sig=x"
 
 
-def test_upload_to_s3_puts_file_content():
-    """upload_to_s3() sends a PUT request with the file content to the presigned URL."""
-    policy_url = "https://s3.example.com/bucket/doc.pdf?sig=abc"
+def test_service_account_upload_to_s3_puts_file_content():
+    """upload_to_s3() sends a PUT with file content to the presigned URL (no Drive token)."""
     file_content = b"binary content"
+    policy_url = "https://s3.example.com/file.pdf?sig=x"
 
     with (
         patch("core.destinations.drive.drive_backend.requests") as mock_requests,
         patch("builtins.open", mock_open(read_data=file_content)),
     ):
         mock_requests.put.return_value.raise_for_status = MagicMock()
-
-        backend = DriveBackend()
-        backend.upload_to_s3(policy_url, "/tmp/workspace/doc.pdf")
+        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
 
     mock_requests.put.assert_called_once_with(
         policy_url,
@@ -146,15 +206,17 @@ def test_upload_to_s3_puts_file_content():
     )
 
 
-def test_notify_upload_ended_calls_endpoint(settings):
-    """notify_upload_ended() calls POST /external_api/v1.0/items/{id}/upload-ended/."""
+def test_service_account_notify_upload_ended(settings):
+    """notify_upload_ended() posts to /external_api/v1.0/items/{id}/upload-ended/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.post.return_value.raise_for_status = MagicMock()
-
-        backend = DriveBackend()
-        backend.notify_upload_ended("file-uuid", token="tok")
+        backend.notify_upload_ended("file-uuid")
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/file-uuid/upload-ended/",
@@ -164,22 +226,24 @@ def test_notify_upload_ended_calls_endpoint(settings):
 
 
 # ---------------------------------------------------------------------------
-# Sharing
+# DriveServiceAccountBackend — sharing
 # ---------------------------------------------------------------------------
 
 
-def test_find_user_by_email_returns_user_when_found_paginated(settings):
-    """find_user_by_email() returns the user dict from a paginated response."""
+def test_service_account_find_user_by_email_paginated(settings):
+    """find_user_by_email() always uses /api/v1.0/users/ regardless of auth mode."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.get.return_value.json.return_value = {
             "results": [{"id": "user-uuid", "email": "alice@example.com"}]
         }
         mock_requests.get.return_value.raise_for_status = MagicMock()
-
-        backend = DriveBackend()
-        result = backend.find_user_by_email("alice@example.com", token="tok")
+        result = backend.find_user_by_email("alice@example.com")
 
     mock_requests.get.assert_called_once_with(
         "https://drive.example.com/api/v1.0/users/",
@@ -190,45 +254,51 @@ def test_find_user_by_email_returns_user_when_found_paginated(settings):
     assert result == {"id": "user-uuid", "email": "alice@example.com"}
 
 
-def test_find_user_by_email_returns_user_when_found_list(settings):
-    """find_user_by_email() returns the user dict from a flat list response."""
+def test_service_account_find_user_by_email_flat_list(settings):
+    """find_user_by_email() handles a flat list response."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.get.return_value.json.return_value = [
             {"id": "user-uuid", "email": "alice@example.com"}
         ]
         mock_requests.get.return_value.raise_for_status = MagicMock()
-
-        backend = DriveBackend()
-        result = backend.find_user_by_email("alice@example.com", token="tok")
+        result = backend.find_user_by_email("alice@example.com")
 
     assert result == {"id": "user-uuid", "email": "alice@example.com"}
 
 
-def test_find_user_by_email_returns_none_when_not_found(settings):
+def test_service_account_find_user_by_email_not_found(settings):
     """find_user_by_email() returns None when Drive returns an empty result set."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.get.return_value.json.return_value = {"results": []}
         mock_requests.get.return_value.raise_for_status = MagicMock()
-
-        backend = DriveBackend()
-        result = backend.find_user_by_email("unknown@example.com", token="tok")
+        result = backend.find_user_by_email("unknown@example.com")
 
     assert result is None
 
 
-def test_share_with_user_posts_to_accesses_endpoint(settings):
-    """share_with_user() creates an access for an existing Drive user."""
+def test_service_account_share_with_user(settings):
+    """share_with_user() posts to /external_api/v1.0/items/{id}/accesses/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.post.return_value.raise_for_status = MagicMock()
-
-        backend = DriveBackend()
-        backend.share_with_user("item-uuid", "user-uuid", token="tok")
+        backend.share_with_user("item-uuid", "user-uuid")
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/item-uuid/accesses/",
@@ -238,19 +308,299 @@ def test_share_with_user_posts_to_accesses_endpoint(settings):
     )
 
 
-def test_invite_by_email_posts_to_invitations_endpoint(settings):
-    """invite_by_email() sends an invitation to a user not yet registered in Drive."""
+def test_service_account_invite_by_email(settings):
+    """invite_by_email() posts to /external_api/v1.0/items/{id}/invitations/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.post.return_value.raise_for_status = MagicMock()
-
-        backend = DriveBackend()
-        backend.invite_by_email("item-uuid", "new@example.com", token="tok")
+        backend.invite_by_email("item-uuid", "new@example.com")
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/item-uuid/invitations/",
         json={"email": "new@example.com", "role": "owner"},
         headers={"Authorization": "Bearer tok"},
+        timeout=30,
+    )
+
+
+# ---------------------------------------------------------------------------
+# DriveUserTokenBackend — token management
+# ---------------------------------------------------------------------------
+
+
+def _make_user(
+    access_token="initial-tok",
+    refresh_token="refresh-tok",
+    expires_at=None,
+    email="user@example.com",
+):
+    user = MagicMock()
+    user.email = email
+    user.oidc_access_token = access_token
+    user.oidc_refresh_token = refresh_token
+    user.oidc_token_expires_at = expires_at
+    return user
+
+
+def test_user_token_uses_stored_access_token_when_valid():
+    """_get_token() returns the user's stored access token when not expired."""
+    user = _make_user(
+        access_token="stored-tok",
+        expires_at=timezone.now() + timedelta(hours=1),
+    )
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        token = DriveUserTokenBackend(user)._get_token()
+
+    mock_requests.post.assert_not_called()
+    assert token == "stored-tok"
+
+
+def test_user_token_refreshes_when_access_token_expired(settings):
+    """_get_token() uses the refresh_token when the stored access token is expired."""
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.OIDC_RP_CLIENT_ID = "osmose-client"
+    settings.OIDC_RP_CLIENT_SECRET = "osmose-secret"
+
+    user = _make_user(
+        access_token="expired-tok",
+        refresh_token="valid-refresh-tok",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {
+            "access_token": "new-tok",
+            "expires_in": 60,
+        }
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        token = DriveUserTokenBackend(user)._get_token()
+
+    mock_requests.post.assert_called_once_with(
+        "https://oidc.example.com/token",
+        data={
+            "grant_type": "refresh_token",
+            "client_id": "osmose-client",
+            "client_secret": "osmose-secret",
+            "refresh_token": "valid-refresh-tok",
+        },
+        timeout=30,
+    )
+    assert token == "new-tok"
+
+
+def test_user_token_refresh_persists_new_tokens_to_user(settings):
+    """After refresh, updated tokens are saved back to the user model."""
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.OIDC_RP_CLIENT_ID = "osmose-client"
+    settings.OIDC_RP_CLIENT_SECRET = "osmose-secret"
+
+    user = _make_user(
+        access_token="expired-tok",
+        refresh_token="old-refresh",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 60,
+        }
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user)._get_token()
+
+    assert user.oidc_access_token == "new-access"
+    assert user.oidc_refresh_token == "new-refresh"
+    assert user.oidc_token_expires_at is not None
+    user.save.assert_called_once_with(
+        update_fields=[
+            "oidc_access_token",
+            "oidc_refresh_token",
+            "oidc_token_expires_at",
+            "updated_at",
+        ]
+    )
+
+
+def test_user_token_refresh_keeps_old_refresh_token_when_none_returned(settings):
+    """If the OIDC response has no new refresh_token, the existing one is kept."""
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.OIDC_RP_CLIENT_ID = "osmose-client"
+    settings.OIDC_RP_CLIENT_SECRET = "osmose-secret"
+
+    user = _make_user(
+        access_token="expired-tok",
+        refresh_token="keep-this-refresh",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {
+            "access_token": "new-access",
+            "expires_in": 60,
+            # no refresh_token in response
+        }
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user)._get_token()
+
+    assert user.oidc_refresh_token == "keep-this-refresh"
+
+
+def test_user_token_raises_when_no_refresh_token():
+    """_get_token() raises RuntimeError when the token is expired and no refresh_token is stored."""
+    user = _make_user(
+        access_token="expired-tok",
+        refresh_token="",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    with pytest.raises(RuntimeError, match="No refresh token stored"):
+        DriveUserTokenBackend(user)._get_token()
+
+
+# ---------------------------------------------------------------------------
+# DriveUserTokenBackend — uses /api/v1.0/ endpoints
+# ---------------------------------------------------------------------------
+
+
+def test_user_token_create_folder_uses_api_v1(settings):
+    """create_folder() uses /api/v1.0/ (not /external_api/) when in user_token mode."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {"id": "folder-uuid"}
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user).create_folder("My Workspace")
+
+    mock_requests.post.assert_called_once_with(
+        "https://drive.example.com/api/v1.0/items/",
+        json={"type": "folder", "title": "My Workspace"},
+        headers={"Authorization": "Bearer initial-tok"},
+        timeout=30,
+    )
+
+
+def test_user_token_create_subfolder_uses_api_v1(settings):
+    """create_subfolder() uses /api/v1.0/items/{parent_id}/children/."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {"id": "child-uuid"}
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user).create_subfolder("docs", parent_id="parent-uuid")
+
+    mock_requests.post.assert_called_once_with(
+        "https://drive.example.com/api/v1.0/items/parent-uuid/children/",
+        json={"type": "folder", "title": "docs"},
+        headers={"Authorization": "Bearer initial-tok"},
+        timeout=30,
+    )
+
+
+def test_user_token_create_file_item_uses_api_v1(settings):
+    """create_file_item() uses /api/v1.0/items/{parent_id}/children/."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.json.return_value = {
+            "id": "file-uuid",
+            "policy": "https://s3.example.com/file.pdf?sig=x",
+        }
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        result = DriveUserTokenBackend(user).create_file_item(
+            "doc.pdf", parent_id="folder-uuid"
+        )
+
+    mock_requests.post.assert_called_once_with(
+        "https://drive.example.com/api/v1.0/items/folder-uuid/children/",
+        json={"type": "file", "filename": "doc.pdf"},
+        headers={"Authorization": "Bearer initial-tok"},
+        timeout=30,
+    )
+    assert result["policy"] == "https://s3.example.com/file.pdf?sig=x"
+
+
+def test_user_token_notify_upload_ended_uses_api_v1(settings):
+    """notify_upload_ended() uses /api/v1.0/items/{id}/upload-ended/."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user).notify_upload_ended("file-uuid")
+
+    mock_requests.post.assert_called_once_with(
+        "https://drive.example.com/api/v1.0/items/file-uuid/upload-ended/",
+        headers={"Authorization": "Bearer initial-tok"},
+        timeout=30,
+    )
+
+
+def test_user_token_share_with_user_uses_api_v1(settings):
+    """share_with_user() uses /api/v1.0/items/{id}/accesses/."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user).share_with_user("item-uuid", "user-uuid")
+
+    mock_requests.post.assert_called_once_with(
+        "https://drive.example.com/api/v1.0/items/item-uuid/accesses/",
+        json={"user_id": "user-uuid", "role": "owner"},
+        headers={"Authorization": "Bearer initial-tok"},
+        timeout=30,
+    )
+
+
+def test_user_token_invite_by_email_uses_api_v1(settings):
+    """invite_by_email() uses /api/v1.0/items/{id}/invitations/."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user).invite_by_email("item-uuid", "new@example.com")
+
+    mock_requests.post.assert_called_once_with(
+        "https://drive.example.com/api/v1.0/items/item-uuid/invitations/",
+        json={"email": "new@example.com", "role": "owner"},
+        headers={"Authorization": "Bearer initial-tok"},
+        timeout=30,
+    )
+
+
+def test_user_token_find_user_by_email_always_uses_api_v1(settings):
+    """find_user_by_email() always uses /api/v1.0/users/ (same as service account mode)."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.get.return_value.json.return_value = {
+            "results": [{"id": "user-uuid"}]
+        }
+        mock_requests.get.return_value.raise_for_status = MagicMock()
+        DriveUserTokenBackend(user).find_user_by_email("alice@example.com")
+
+    mock_requests.get.assert_called_once_with(
+        "https://drive.example.com/api/v1.0/users/",
+        params={"q": "alice@example.com"},
+        headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
     )
