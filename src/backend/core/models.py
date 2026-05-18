@@ -211,6 +211,16 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
         help_text=_("Expiry datetime of the stored OIDC access token."),
     )
 
+    # Resana tokens stored for async Celery tasks (source Resana migration).
+    # Populated via the /api/v1.0/resana/auth/connect endpoint (Keycloak flow).
+    resana_access_token = models.TextField(blank=True, default="")
+    resana_refresh_token = models.TextField(blank=True, default="")
+    resana_token_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("Expiry datetime of the stored Resana access token (3h lifetime)."),
+    )
+
     objects = auth_models.UserManager()
 
     USERNAME_FIELD = "admin_email"
