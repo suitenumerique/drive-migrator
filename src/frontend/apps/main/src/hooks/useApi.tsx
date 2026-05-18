@@ -3,8 +3,10 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { fetchAPI, fetchAPIOptions } from '@/api/fetchApi';
+import { baseApiUrl } from '@/core/conf';
 
 const GENERIC_API_ERROR = 'generic_api_error';
+const DRIVE_TOKEN_REQUIRED = 'DriveTokenRequired';
 
 class APIError extends Error {
   data: any;
@@ -24,6 +26,11 @@ export const useApi = () => {
     // The following comment are used by i18next-parser ( i18n:extract )
     // t('api_errors.generic_api_error')
     // t('api_errors.WorkspaceAlreadyExporting')
+    // t('api_errors.DriveTokenRequired')
+    if (errorName === DRIVE_TOKEN_REQUIRED) {
+      window.location.replace(new URL('authenticate/', baseApiUrl()).href);
+      return;
+    }
     const errorMessage = t('api_errors.' + errorName);
     void modals.messageModal({
       messageType: VariantType.ERROR,

@@ -1,7 +1,8 @@
 """Tests for GET /available-destinations/ endpoint."""
 
-import pytest
 from django.test import override_settings
+
+import pytest
 from rest_framework.test import APIClient
 
 from core import factories

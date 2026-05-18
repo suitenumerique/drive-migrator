@@ -45,6 +45,17 @@ class UserAdmin(auth_admin.UserAdmin):
             },
         ),
         (_("Important dates"), {"fields": ("created_at", "updated_at")}),
+        (
+            _("OIDC tokens"),
+            {
+                "fields": (
+                    "oidc_access_token",
+                    "oidc_refresh_token",
+                    "oidc_token_expires_at",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
     )
     add_fieldsets = (
         (
@@ -72,7 +83,15 @@ class UserAdmin(auth_admin.UserAdmin):
     search_fields = ("id", "sub", "admin_email", "email")
 
     def get_readonly_fields(self, request, obj=None):
-        fields = ("id", "sub", "created_at", "updated_at")
+        fields = (
+            "id",
+            "sub",
+            "created_at",
+            "updated_at",
+            "oidc_access_token",
+            "oidc_refresh_token",
+            "oidc_token_expires_at",
+        )
         return fields
 
 

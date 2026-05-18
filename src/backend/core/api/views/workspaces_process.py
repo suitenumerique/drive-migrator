@@ -1,9 +1,12 @@
+from django.conf import settings
+
 from django_celery_results.models import TaskResult
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.sources.osmose.serializers import WorkspaceSerializer
 
+from ...destinations.drive.drive_backend import DriveUserTokenBackend
 from ...destinations.resana.resana_backend import ResanaBackend
 from ...models import ExtraTaskInfo, FeatureFlag, Workspace
 from ...processing.tasks import export
@@ -49,17 +52,25 @@ class WorkspacesProcessAPIView(APIView):
         Here we want to make sure the user exist on Resana if we are going to export to Resana at least one workspace.
         """
         check_resana_user = False
+        check_drive_token = False
         for workspace in workspaces:
             types = data.get(str(workspace.id))
             if "resana" in types:
                 check_resana_user = True
-                break
+            if "drive" in types:
+                check_drive_token = True
 
         if check_resana_user:
             resana_backend = ResanaBackend()
             resana_user = resana_backend.fetch_user(user)
             if not resana_user:
                 raise APIException("ResanaUserNotFound")
+
+        if check_drive_token and getattr(settings, "DRIVE_AUTH_MODE", "service_account") == "user_token":
+            try:
+                DriveUserTokenBackend(user)._get_token()
+            except Exception:
+                raise APIException("DriveTokenRequired")
 
     def post(self, request):
         if not is_feature(FeatureFlag.Name.ALLOW_NEW_TASKS):

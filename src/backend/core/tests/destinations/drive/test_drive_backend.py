@@ -690,3 +690,60 @@ def test_user_token_refresh_stores_refresh_token_encrypted(settings):
 
     assert user.oidc_refresh_token != "new-plaintext-refresh"
     assert decrypt_token(user.oidc_refresh_token) == "new-plaintext-refresh"
+
+
+# ---------------------------------------------------------------------------
+# user_has_usable_drive_token()
+# ---------------------------------------------------------------------------
+
+
+def test_has_usable_token_returns_false_when_no_tokens():
+    """Returns False when both access and refresh tokens are empty."""
+    from core.destinations.drive.drive_backend import user_has_usable_drive_token
+
+    user = _make_user(access_token="", refresh_token="", expires_at=None)
+    assert user_has_usable_drive_token(user) is False
+
+
+def test_has_usable_token_returns_true_when_valid_access_token():
+    """Returns True when the access token is present and not yet expired."""
+    from core.destinations.drive.drive_backend import user_has_usable_drive_token
+
+    user = _make_user(
+        access_token="valid-tok",
+        refresh_token="",
+        expires_at=timezone.now() + timedelta(hours=1),
+    )
+    assert user_has_usable_drive_token(user) is True
+
+
+def test_has_usable_token_returns_false_when_access_expired_and_no_refresh():
+    """Returns False when the access token is expired and no refresh token is stored."""
+    from core.destinations.drive.drive_backend import user_has_usable_drive_token
+
+    user = _make_user(
+        access_token="expired-tok",
+        refresh_token="",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+    assert user_has_usable_drive_token(user) is False
+
+
+def test_has_usable_token_returns_true_when_access_expired_but_refresh_present():
+    """Returns True when the access token is expired but a refresh token exists."""
+    from core.destinations.drive.drive_backend import user_has_usable_drive_token
+
+    user = _make_user(
+        access_token="expired-tok",
+        refresh_token="valid-refresh",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+    assert user_has_usable_drive_token(user) is True
+
+
+def test_has_usable_token_returns_true_when_no_expiry_date():
+    """Returns True when access token is present but expires_at is None (trust it)."""
+    from core.destinations.drive.drive_backend import user_has_usable_drive_token
+
+    user = _make_user(access_token="tok", refresh_token="", expires_at=None)
+    assert user_has_usable_drive_token(user) is True

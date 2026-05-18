@@ -10,6 +10,24 @@ import requests
 from core.encryption import decrypt_token, encrypt_token
 
 
+def user_has_usable_drive_token(user) -> bool:
+    """Return True if user has a Drive token that can be used or refreshed."""
+    has_access = bool(user.oidc_access_token)
+    has_refresh = bool(user.oidc_refresh_token)
+
+    if not has_access:
+        return False
+
+    expires_at = user.oidc_token_expires_at
+    buffer = timedelta(seconds=10)
+    access_is_valid = expires_at is None or timezone.now() < expires_at - buffer
+
+    if access_is_valid:
+        return True
+
+    return has_refresh
+
+
 class DriveBackend:
     """Base HTTP client for La Suite Drive API.
 
