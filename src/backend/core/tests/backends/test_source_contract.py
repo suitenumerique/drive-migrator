@@ -8,6 +8,7 @@ from core.backends.source import (
     SourceFolder,
     SourceWorkspace,
 )
+from core.sources.resana.backend import ResanaSourceBackend
 
 
 def test_abstract_source_cannot_be_instantiated():
@@ -62,6 +63,19 @@ def test_prepare_export_default_is_noop():
     backend = MinimalSource()
     # Must not raise — default implementation is a no-op
     backend.prepare_export(workspace=None, local_folder_path="/tmp")
+
+
+def test_resana_source_backend_is_concrete_implementation():
+    """ResanaSourceBackend is a fully concrete AbstractSourceBackend subclass."""
+    assert issubclass(ResanaSourceBackend, AbstractSourceBackend)
+    backend = ResanaSourceBackend()
+    assert backend.source_type == "resana"
+
+
+def test_resana_source_type_does_not_collide_with_existing_backends():
+    """source_type 'resana' must not collide with osmose or filesystem."""
+    assert ResanaSourceBackend.source_type != "osmose"
+    assert ResanaSourceBackend.source_type != "filesystem"
 
 
 def test_subclass_without_source_type_raises():
