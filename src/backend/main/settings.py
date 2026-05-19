@@ -203,6 +203,11 @@ class Base(Configuration):
         environ_name="DESTINATION_BACKENDS",
         environ_prefix=None,
     )
+    EXTRA_API_URL_MODULES = values.ListValue(
+        [],
+        environ_name="EXTRA_API_URL_MODULES",
+        environ_prefix=None,
+    )
 
     # Filesystem source backend
     FILESYSTEM_SOURCE_ROOT = values.Value(
@@ -632,6 +637,8 @@ class Development(Base):
 
 class Test(Base):
     """Test environment settings"""
+
+    EXTRA_API_URL_MODULES = ["core.sources.resana.urls"]
 
     LOGGING = values.DictValue(
         {

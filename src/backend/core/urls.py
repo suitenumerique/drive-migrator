@@ -1,4 +1,6 @@
 """URL configuration for the core app."""
+from importlib import import_module
+
 from django.conf import settings
 from django.urls import include, path
 
@@ -20,6 +22,10 @@ router = DefaultRouter()
 router.register("users", viewsets.UserViewSet, basename="users")
 router.register("workspaces", WorkspacesViewset, basename="workspaces")
 
+_extra_patterns = []
+for _module_path in getattr(settings, "EXTRA_API_URL_MODULES", []):
+    _extra_patterns.extend(import_module(_module_path).urlpatterns)
+
 urlpatterns = [
     path(
         f"api/{settings.API_VERSION}/",
@@ -27,6 +33,7 @@ urlpatterns = [
             [
                 *router.urls,
                 *oidc_urls,
+                *_extra_patterns,
                 path("synchronize/", SynchronizeAPIView.as_view()),
                 path("workspaces/process", WorkspacesProcessAPIView.as_view()),
                 path("available-destinations/", AvailableDestinationsAPIView.as_view()),
