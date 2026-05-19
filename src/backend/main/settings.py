@@ -170,6 +170,12 @@ class Base(Configuration):
     RESANA_ALT_API_ENDPOINT = values.Value(
         environ_name="RESANA_ALT_API_ENDPOINT", environ_prefix=None
     )
+    RESANA_KEYCLOAK_ENDPOINT = values.Value(
+        environ_name="RESANA_KEYCLOAK_ENDPOINT", environ_prefix=None
+    )
+    RESANA_AUTHSERVICE_ENDPOINT = values.Value(
+        environ_name="RESANA_AUTHSERVICE_ENDPOINT", environ_prefix=None
+    )
     RESANA_S3_BUCKET = values.Value(
         environ_name="RESANA_S3_BUCKET", environ_prefix=None
     )
