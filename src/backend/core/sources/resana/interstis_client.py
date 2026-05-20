@@ -9,38 +9,12 @@ CHUNK_SIZE = 8192
 
 
 class InterstisClient:
-    def __init__(self):
-        self.session = None
-        self.token = None
-
-    def authenticate(self):
+    def __init__(self, token: str):
+        self.token = token
         self.session = requests.Session()
-        response = self.session.post(
-            settings.RESANA_AUTH_ENDPOINT,
-            {
-                "mail_inscription": settings.RESANA_AUTH_USER,
-                "password": settings.RESANA_AUTH_PASSWORD,
-                "perimetre_id": "",
-                "information_id": "",
-                "new_licence": "",
-                "choix_formule": "",
-                "id_licence": "",
-                "parsec_password_derive": "",
-                "langue": "",
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            allow_redirects=False,
-        )
-        response.raise_for_status()
-        self.token = response.cookies.get("interstis_access")
-        self.session.headers["Authorization"] = f"Bearer {self.token}"
-
-    def _ensure_authenticated(self):
-        if not self.token:
-            self.authenticate()
+        self.session.headers["Authorization"] = f"Bearer {token}"
 
     def _get_paginated(self, url: str, extra_params: dict | None = None) -> list[dict]:
-        self._ensure_authenticated()
         results = []
         page = 1
         while True:
@@ -63,7 +37,6 @@ class InterstisClient:
         )
 
     def download_file(self, uuid: str, destination_path: str) -> None:
-        self._ensure_authenticated()
         url = f"{settings.RESANA_API_ENDPOINT}/api/targets/{uuid}/download"
         with self.session.get(url, stream=True, timeout=60) as response:
             response.raise_for_status()

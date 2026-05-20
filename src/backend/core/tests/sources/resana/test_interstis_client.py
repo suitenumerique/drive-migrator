@@ -8,72 +8,29 @@ import requests as req_lib
 from core.sources.resana.interstis_client import InterstisClient
 
 # ---------------------------------------------------------------------------
-# Group 1 — Authentication
+# Group 1 — Constructor
 # ---------------------------------------------------------------------------
 
 
-def test_authenticate_posts_credentials_and_stores_token(settings):
-    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/auth"
-    settings.RESANA_AUTH_USER = "admin@example.com"
-    settings.RESANA_AUTH_PASSWORD = "s3cr3t"
+def test_client_sets_bearer_token_header(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
 
-    with patch(
-        "core.sources.resana.interstis_client.requests.Session"
-    ) as mock_session_cls:
-        mock_session = mock_session_cls.return_value
-        mock_response = MagicMock()
-        mock_response.cookies.get.return_value = "my-jwt-token"
-        mock_session.post.return_value = mock_response
+    with patch("core.sources.resana.interstis_client.requests.Session") as MockSession:
+        client = InterstisClient("my-token")
 
-        client = InterstisClient()
-        client.authenticate()
-
-    mock_session.post.assert_called_once_with(
-        "https://resana.example.com/auth",
-        {
-            "mail_inscription": "admin@example.com",
-            "password": "s3cr3t",
-            "perimetre_id": "",
-            "information_id": "",
-            "new_licence": "",
-            "choix_formule": "",
-            "id_licence": "",
-            "parsec_password_derive": "",
-            "langue": "",
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        allow_redirects=False,
+    MockSession.return_value.headers.__setitem__.assert_called_once_with(
+        "Authorization", "Bearer my-token"
     )
-    assert client.token == "my-jwt-token"
+    assert client.token == "my-token"
 
 
-def test_ensure_authenticated_calls_authenticate_when_no_token(settings):
-    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/auth"
-    settings.RESANA_AUTH_USER = "u"
-    settings.RESANA_AUTH_PASSWORD = "p"
+def test_client_creates_session_on_init(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
 
-    client = InterstisClient()
-    with patch.object(client, "authenticate") as mock_auth:
-        client._ensure_authenticated()
+    with patch("core.sources.resana.interstis_client.requests.Session") as MockSession:
+        InterstisClient("tok")
 
-    mock_auth.assert_called_once()
-
-
-def test_ensure_authenticated_does_not_call_authenticate_when_token_set(settings):
-    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/auth"
-    settings.RESANA_AUTH_USER = "u"
-    settings.RESANA_AUTH_PASSWORD = "p"
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-
-    client = InterstisClient()
-    client.token = "already-set"
-    with patch.object(client, "authenticate") as mock_auth:
-        client._ensure_authenticated()
-        client._ensure_authenticated()
-
-    mock_auth.assert_not_called()
+    MockSession.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -92,8 +49,7 @@ def test_get_workspaces_returns_members_from_single_page(settings):
         "hydra:totalItems": 2,
     }
 
-    client = InterstisClient()
-    client.token = "fake-token"
+    client = InterstisClient("fake-token")
     client.session = MagicMock()
     client.session.get.return_value.json.return_value = page_1
     client.session.get.return_value.raise_for_status = MagicMock()
@@ -121,8 +77,7 @@ def test_get_workspaces_paginates_until_all_fetched(settings):
         "hydra:totalItems": 750,
     }
 
-    client = InterstisClient()
-    client.token = "tok"
+    client = InterstisClient("tok")
     client.session = MagicMock()
     client.session.get.return_value.raise_for_status = MagicMock()
     client.session.get.return_value.json.side_effect = [page_1, page_2]
@@ -162,8 +117,7 @@ def test_explore_returns_folders_and_files(settings):
         "hydra:totalItems": 1,
     }
 
-    client = InterstisClient()
-    client.token = "tok"
+    client = InterstisClient("tok")
     client.session = MagicMock()
     client.session.get.return_value.json.return_value = explore_response
     client.session.get.return_value.raise_for_status = MagicMock()
@@ -198,8 +152,7 @@ def test_download_file_writes_binary_content_to_path(settings, tmp_path):
     mock_response.__enter__ = lambda s: mock_response
     mock_response.__exit__ = MagicMock(return_value=False)
 
-    client = InterstisClient()
-    client.token = "tok"
+    client = InterstisClient("tok")
     client.session = MagicMock()
     client.session.get.return_value = mock_response
 
@@ -222,8 +175,7 @@ def test_download_file_raises_on_http_error(settings):
     mock_response.__enter__ = lambda s: mock_response
     mock_response.__exit__ = MagicMock(return_value=False)
 
-    client = InterstisClient()
-    client.token = "tok"
+    client = InterstisClient("tok")
     client.session = MagicMock()
     client.session.get.return_value = mock_response
 
