@@ -10,6 +10,7 @@ from ...destinations.drive.drive_backend import DriveUserTokenBackend
 from ...destinations.resana.resana_backend import ResanaBackend
 from ...models import ExtraTaskInfo, FeatureFlag, Workspace
 from ...processing.tasks import export
+from ...sources.resana.token_manager import ResanaTokenManager
 from ...utils import is_feature
 from .. import APIException
 from ..serializers import UserSerializer
@@ -53,12 +54,15 @@ class WorkspacesProcessAPIView(APIView):
         """
         check_resana_user = False
         check_drive_token = False
+        check_resana_source_token = False
         for workspace in workspaces:
             types = data.get(str(workspace.id))
             if "resana" in types:
                 check_resana_user = True
             if "drive" in types:
                 check_drive_token = True
+            if workspace.source_type == "resana":
+                check_resana_source_token = True
 
         if check_resana_user:
             resana_backend = ResanaBackend()
@@ -66,11 +70,17 @@ class WorkspacesProcessAPIView(APIView):
             if not resana_user:
                 raise APIException("ResanaUserNotFound")
 
-        if check_drive_token and getattr(settings, "DRIVE_AUTH_MODE", "service_account") == "user_token":
+        if (
+            check_drive_token
+            and getattr(settings, "DRIVE_AUTH_MODE", "service_account") == "user_token"
+        ):
             try:
-                DriveUserTokenBackend(user)._get_token()
-            except Exception:
-                raise APIException("DriveTokenRequired")
+                DriveUserTokenBackend(user)._get_token()  # noqa: SLF001
+            except Exception as exc:  # noqa: BLE001
+                raise APIException("DriveTokenRequired") from exc
+
+        if check_resana_source_token and not ResanaTokenManager(user).is_connected():
+            raise APIException("ResanaTokenRequired")
 
     def post(self, request):
         if not is_feature(FeatureFlag.Name.ALLOW_NEW_TASKS):
