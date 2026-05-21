@@ -40,19 +40,27 @@ class ResanaSourceBackend(AbstractSourceBackend):
     def get_workspace_structure(self, workspace) -> SourceFolder:
         self._user = workspace.migration_user
         client = self._get_client()
-        members = client.explore(workspace.source_id)
-        if not members:
-            return SourceFolder(name="")
-        return self._convert_folder(members[0])
+        return self._explore_folder(workspace.source_id, "", client)
 
     def download_file(self, file: SourceFile, destination_path: str) -> None:
         client = self._get_client()
         client.download_file(file.download_url, destination_path)
 
-    def _convert_folder(self, raw: dict) -> SourceFolder:
-        folder = SourceFolder(name=raw.get("name", ""))
+    def _explore_folder(self, uuid: str, name: str, client) -> SourceFolder:
+        """Recursively fetch a folder's contents via the Interstis explore endpoint.
+
+        The API returns one level at a time, so each child folder requires a
+        separate explore() call.
+        """
+        members = client.explore(uuid)
+        folder = SourceFolder(name=name)
+        if not members:
+            return folder
+        raw = members[0]
         for raw_child in raw.get("folders", []):
-            folder.children.append(self._convert_folder(raw_child))
+            folder.children.append(
+                self._explore_folder(raw_child["uuid"], raw_child.get("name", ""), client)
+            )
         for raw_file in raw.get("files", []):
             extension = raw_file.get("extension", "")
             if extension and not extension.startswith("."):

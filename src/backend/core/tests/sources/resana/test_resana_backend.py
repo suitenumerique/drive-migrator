@@ -140,24 +140,22 @@ def test_get_workspace_structure_stores_migration_user(settings):
 
 def test_get_workspace_structure_flat_folder(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-    explore_root = [
-        {
-            "uuid": "ws-uuid",
-            "name": "My Workspace",
-            "folders": [
-                {"uuid": "folder-1", "name": "Documents", "folders": [], "files": []},
-            ],
-            "files": [
-                {"uuid": "file-1", "name": "readme", "extension": ".txt"},
-            ],
-        }
-    ]
     workspace = _make_workspace()
+
+    def explore_side_effect(uuid):
+        if uuid == workspace.source_id:
+            return [
+                {
+                    "folders": [{"uuid": "folder-1", "name": "Documents"}],
+                    "files": [{"uuid": "file-1", "name": "readme", "extension": ".txt"}],
+                }
+            ]
+        return []
 
     with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
         MockTM.return_value.get_valid_token.return_value = "tok"
         with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.explore.return_value = explore_root
+            MockClient.return_value.explore.side_effect = explore_side_effect
             result = ResanaSourceBackend().get_workspace_structure(workspace)
 
     assert isinstance(result, SourceFolder)
@@ -187,23 +185,97 @@ def test_get_workspace_structure_empty_workspace(settings):
 
 def test_get_workspace_structure_normalises_extension_without_dot(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-    explore_root = [
-        {
-            "uuid": "ws-uuid",
-            "name": "Root",
-            "folders": [],
-            "files": [{"uuid": "f1", "name": "photo", "extension": "jpg"}],
-        }
-    ]
     workspace = _make_workspace()
+
+    def explore_side_effect(uuid):
+        if uuid == workspace.source_id:
+            return [{"folders": [], "files": [{"uuid": "f1", "name": "photo", "extension": "jpg"}]}]
+        return []
 
     with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
         MockTM.return_value.get_valid_token.return_value = "tok"
         with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.explore.return_value = explore_root
+            MockClient.return_value.explore.side_effect = explore_side_effect
             result = ResanaSourceBackend().get_workspace_structure(workspace)
 
     assert result.files[0].extension == ".jpg"
+
+
+def test_get_workspace_structure_recurses_into_subfolders(settings):
+    """explore() must be called for each child folder UUID — not just the root."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    workspace = _make_workspace()
+
+    def explore_side_effect(uuid):
+        if uuid == workspace.source_id:
+            return [{"folders": [{"uuid": "folder-1", "name": "Documents"}], "files": []}]
+        if uuid == "folder-1":
+            return [{"folders": [], "files": [{"uuid": "file-2", "name": "report", "extension": "pdf"}]}]
+        return []
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
+        MockTM.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
+            MockClient.return_value.explore.side_effect = explore_side_effect
+            result = ResanaSourceBackend().get_workspace_structure(workspace)
+
+    assert len(result.children) == 1
+    subfolder = result.children[0]
+    assert subfolder.name == "Documents"
+    assert len(subfolder.files) == 1
+    assert subfolder.files[0].name == "report"
+    assert subfolder.files[0].extension == ".pdf"
+    MockClient.return_value.explore.assert_any_call("folder-1")
+
+
+def test_get_workspace_structure_deep_nesting(settings):
+    """Two levels of subfolders are fully explored recursively."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    workspace = _make_workspace()
+
+    def explore_side_effect(uuid):
+        if uuid == workspace.source_id:
+            return [{"folders": [{"uuid": "lvl1", "name": "Level1"}], "files": []}]
+        if uuid == "lvl1":
+            return [{"folders": [{"uuid": "lvl2", "name": "Level2"}], "files": []}]
+        if uuid == "lvl2":
+            return [{"folders": [], "files": [{"uuid": "f1", "name": "deep", "extension": "txt"}]}]
+        return []
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
+        MockTM.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
+            MockClient.return_value.explore.side_effect = explore_side_effect
+            result = ResanaSourceBackend().get_workspace_structure(workspace)
+
+    lvl1 = result.children[0]
+    assert lvl1.name == "Level1"
+    lvl2 = lvl1.children[0]
+    assert lvl2.name == "Level2"
+    assert len(lvl2.files) == 1
+    assert lvl2.files[0].name == "deep"
+
+
+def test_get_workspace_structure_empty_subfolder_does_not_crash(settings):
+    """A subfolder whose explore returns [] yields an empty SourceFolder."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    workspace = _make_workspace()
+
+    def explore_side_effect(uuid):
+        if uuid == workspace.source_id:
+            return [{"folders": [{"uuid": "empty-f", "name": "Empty"}], "files": []}]
+        return []
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
+        MockTM.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
+            MockClient.return_value.explore.side_effect = explore_side_effect
+            result = ResanaSourceBackend().get_workspace_structure(workspace)
+
+    assert len(result.children) == 1
+    assert result.children[0].name == "Empty"
+    assert result.children[0].files == []
+    assert result.children[0].children == []
 
 
 # ---------------------------------------------------------------------------
