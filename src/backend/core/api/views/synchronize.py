@@ -2,9 +2,11 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.api import APIException
 from core.api.permissions import IsAuthenticated
 from core.backends.source import SourceManager
 from core.models import FeatureFlag
+from core.sources.resana.token_manager import ResanaTokenExpired
 from core.utils import is_feature
 
 
@@ -18,5 +20,8 @@ class SynchronizeAPIView(APIView):
         if is_feature(FeatureFlag.Name.READ_ONLY_MODE):
             return Response({"message": "Read only mode is enabled."})
         manager = SourceManager()
-        manager.synchronize(request.user)
+        try:
+            manager.synchronize(request.user)
+        except ResanaTokenExpired as exc:
+            raise APIException("ResanaTokenRequired") from exc
         return Response()

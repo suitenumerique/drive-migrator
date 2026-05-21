@@ -7,6 +7,7 @@ import { baseApiUrl } from '@/core/conf';
 
 const GENERIC_API_ERROR = 'generic_api_error';
 const DRIVE_TOKEN_REQUIRED = 'DriveTokenRequired';
+const RESANA_TOKEN_REQUIRED = 'ResanaTokenRequired';
 
 class APIError extends Error {
   data: any;
@@ -27,8 +28,13 @@ export const useApi = () => {
     // t('api_errors.generic_api_error')
     // t('api_errors.WorkspaceAlreadyExporting')
     // t('api_errors.DriveTokenRequired')
+    // t('api_errors.ResanaTokenRequired')
     if (errorName === DRIVE_TOKEN_REQUIRED) {
       window.location.replace(new URL('authenticate/', baseApiUrl()).href);
+      return;
+    }
+    if (errorName === RESANA_TOKEN_REQUIRED) {
+      window.location.replace('/connect-resana');
       return;
     }
     const errorMessage = t('api_errors.' + errorName);
