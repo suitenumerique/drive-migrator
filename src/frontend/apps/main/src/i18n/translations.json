@@ -2,7 +2,8 @@
   "en": {
     "translation": {
       "api_errors.generic_api_error": "An error occurred, please try again later",
-      "api_errors.WorkspaceNotFound": "Workspace not found"
+      "api_errors.WorkspaceNotFound": "Workspace not found",
+      "api_errors.ResanaTokenRequired": "You need to connect to Resana before starting the migration."
     }
   },
   "fr": {
@@ -12,7 +13,8 @@
       "api_errors.generic_api_error": "Une erreur a eu lieu, réessayez dans quelques instants",
       "api_errors.WorkspaceNotFound": "Communauté non trouvée",
       "api_errors.ResanaUserNotFound": "Vous semblez ne pas avoir de compte Resana avec cette addresse email, veuillez vous créer un compte au préalable.",
-      "api_errors.DriveTokenRequired": "Votre session Drive LaSuite a expiré, veuillez vous reconnecter."
+      "api_errors.DriveTokenRequired": "Votre session Drive LaSuite a expiré, veuillez vous reconnecter.",
+      "api_errors.ResanaTokenRequired": "Vous devez vous connecter à Resana avant de lancer la migration."
     }
   }
 }

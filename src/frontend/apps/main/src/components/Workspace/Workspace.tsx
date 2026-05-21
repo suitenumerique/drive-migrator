@@ -30,6 +30,7 @@ export interface Workspace {
   id: string;
   title: string;
   status: WorkspaceStatus;
+  source_type?: string;
   destination_statuses: Record<string, WorkspaceStatus>;
   destination_metadata: Record<string, Record<string, unknown>>;
 }

@@ -5,9 +5,11 @@ import { useEffect, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
+import { ResanaConnectSection } from '@/components/ResanaConnect/ResanaConnectSection';
 import { WorkspacePreExport } from '@/components/Workspace/Workspace';
 import { useApi } from '@/hooks/useApi';
 import { useAvailableDestinations } from '@/hooks/useAvailableDestinations';
+import { useResanaAuthStatus } from '@/hooks/useResanaAuthStatus';
 import { useWorkspaces } from '@/hooks/useWorkspaces';
 
 export interface IForm {
@@ -20,6 +22,11 @@ export default function Prepare() {
   const { workspaces, fetch, hasError } = useWorkspaces();
   const { fetchApi } = useApi();
   const { destinations } = useAvailableDestinations();
+  const {
+    connected: resanaConnected,
+    check: checkResana,
+    markConnected: markResanaConnected,
+  } = useResanaAuthStatus();
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -34,6 +41,12 @@ export default function Prepare() {
       router.replace('/');
     }
   }, []);
+
+  useEffect(() => {
+    if (workspaces?.some((ws) => ws.source_type === 'resana')) {
+      void checkResana();
+    }
+  }, [workspaces]);
 
   const { t } = useTranslation();
 
@@ -94,7 +107,14 @@ export default function Prepare() {
     return null;
   }
 
-  const displayLoader = isLoading || !workspaces || !destinations;
+  const hasResanaSource =
+    workspaces?.some((ws) => ws.source_type === 'resana') ?? false;
+  const needsResanaConnect = hasResanaSource && resanaConnected === false;
+  const displayLoader =
+    isLoading ||
+    !workspaces ||
+    !destinations ||
+    (hasResanaSource && resanaConnected === null);
 
   return (
     <div className="container">
@@ -102,6 +122,8 @@ export default function Prepare() {
         <div className="container__loader">
           <Loader size="medium" />
         </div>
+      ) : needsResanaConnect ? (
+        <ResanaConnectSection onConnected={markResanaConnected} />
       ) : (
         <FormProvider {...methods}>
           {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
