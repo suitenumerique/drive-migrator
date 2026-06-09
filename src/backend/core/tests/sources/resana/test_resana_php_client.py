@@ -1,5 +1,6 @@
 """Tests for ResanaPhpClient — Resana internal PHP API client."""
 
+# pylint: disable=protected-access
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -43,24 +44,31 @@ def _make_client(token="test-token"):
 
 
 def test_init_sets_access_token_cookie():
-    with patch("core.sources.resana.resana_php_client.requests.Session") as MockSession:
+    """Constructor sets interstis_access cookie with the provided token."""
+    with patch(
+        "core.sources.resana.resana_php_client.requests.Session"
+    ) as mock_session:
         ResanaPhpClient("my-token", BASE_URL)
 
-    MockSession.return_value.cookies.set.assert_called_once_with(
+    mock_session.return_value.cookies.set.assert_called_once_with(
         "interstis_access", "my-token"
     )
 
 
 def test_init_sets_xhr_header():
-    with patch("core.sources.resana.resana_php_client.requests.Session") as MockSession:
+    """Constructor adds X-Requested-With: XMLHttpRequest header."""
+    with patch(
+        "core.sources.resana.resana_php_client.requests.Session"
+    ) as mock_session:
         ResanaPhpClient("my-token", BASE_URL)
 
-    MockSession.return_value.headers.__setitem__.assert_called_with(
+    mock_session.return_value.headers.__setitem__.assert_called_with(
         "X-Requested-With", "XMLHttpRequest"
     )
 
 
 def test_init_csrf_token_is_none():
+    """_csrf_token starts as None before any request."""
     client = ResanaPhpClient("tok", BASE_URL)
     assert client._csrf_token is None
 
@@ -71,6 +79,7 @@ def test_init_csrf_token_is_none():
 
 
 def test_ensure_csrf_fetches_token_from_cookie():
+    """_ensure_csrf() fetches the CSRF token from the perimetre page cookie."""
     client = _make_client()
     client.session.get.return_value.cookies = {"CSRF-TOKEN": "deadbeef"}
 
@@ -84,6 +93,7 @@ def test_ensure_csrf_fetches_token_from_cookie():
 
 
 def test_ensure_csrf_raises_on_http_error():
+    """_ensure_csrf() propagates HTTP errors from the server."""
     client = _make_client()
     client.session.get.return_value.raise_for_status.side_effect = req_lib.HTTPError(
         "401"
@@ -94,6 +104,7 @@ def test_ensure_csrf_raises_on_http_error():
 
 
 def test_ensure_csrf_not_called_twice():
+    """_ensure_csrf() skips the request if a token is already cached."""
     client = _make_client()
     client._csrf_token = "cached"
 
@@ -108,6 +119,7 @@ def test_ensure_csrf_not_called_twice():
 
 
 def test_get_folders_returns_folder_list():
+    """get_folders() returns all folders from the PHP API."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.json.return_value = {
@@ -131,6 +143,7 @@ def test_get_folders_returns_folder_list():
 
 
 def test_get_folders_returns_empty_list():
+    """get_folders() returns an empty list when no folders exist."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.json.return_value = {"folders": []}
@@ -145,6 +158,7 @@ def test_get_folders_returns_empty_list():
 
 
 def test_get_ged_info_returns_files_single_page():
+    """get_ged_info() returns files from a single-page response."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.json.return_value = {
@@ -163,6 +177,7 @@ def test_get_ged_info_returns_files_single_page():
 
 
 def test_get_ged_info_paginates_across_multiple_pages():
+    """get_ged_info() fetches all pages when total exceeds one page size."""
     client = _make_client()
     client._csrf_token = "tok"
     page1 = {"gedTab": [{"id": i} for i in range(100)], "nb_info": "150"}
@@ -177,6 +192,7 @@ def test_get_ged_info_paginates_across_multiple_pages():
 
 
 def test_get_ged_info_returns_empty_list_for_empty_folder():
+    """get_ged_info() returns an empty list for a folder with no files."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.json.return_value = {
@@ -192,6 +208,7 @@ def test_get_ged_info_returns_empty_list_for_empty_folder():
 
 
 def test_get_ged_info_raises_on_http_error():
+    """get_ged_info() propagates HTTP errors."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.raise_for_status.side_effect = req_lib.HTTPError(
@@ -208,6 +225,7 @@ def test_get_ged_info_raises_on_http_error():
 
 
 def test_parse_file_details_html_extracts_all_vars():
+    """_parse_file_details_html() extracts all four JS variables from the HTML response."""
     result = ResanaPhpClient._parse_file_details_html(_SAMPLE_HTML)
 
     assert result["information"]["id"] == "48005540"
@@ -218,12 +236,14 @@ def test_parse_file_details_html_extracts_all_vars():
 
 
 def test_parse_file_details_html_handles_escaped_quotes():
+    """Escaped single quotes in JSON strings are unescaped correctly."""
     result = ResanaPhpClient._parse_file_details_html(_HTML_ESCAPED_QUOTES)
 
     assert result["information"]["titre"] == "it's a file"
 
 
 def test_parse_file_details_html_uses_defaults_when_vars_missing():
+    """Missing JS variables fall back to empty dicts/lists."""
     result = ResanaPhpClient._parse_file_details_html(_HTML_MISSING_VARS)
 
     assert result["information"] == {}
@@ -238,6 +258,7 @@ def test_parse_file_details_html_uses_defaults_when_vars_missing():
 
 
 def test_get_file_details_calls_correct_endpoint():
+    """get_file_details() POSTs to the afficherProfilDroit endpoint with the expected payload."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.text = _SAMPLE_HTML
@@ -260,6 +281,7 @@ def test_get_file_details_calls_correct_endpoint():
 
 
 def test_get_file_details_returns_parsed_result():
+    """get_file_details() returns the parsed HTML result."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.text = _SAMPLE_HTML
@@ -276,6 +298,7 @@ def test_get_file_details_returns_parsed_result():
 
 
 def test_list_users_by_file_returns_users():
+    """list_users_by_file() returns users with their permission details."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.json.return_value = [
@@ -311,6 +334,7 @@ def test_list_users_by_file_returns_users():
 
 
 def test_list_users_by_file_paginates_when_full_page():
+    """list_users_by_file() fetches the next page when a full page is returned."""
     client = _make_client()
     client._csrf_token = "tok"
     page1 = [{"id": str(i), "mail_inscription": f"u{i}@x.com"} for i in range(50)]
@@ -325,6 +349,7 @@ def test_list_users_by_file_paginates_when_full_page():
 
 
 def test_list_users_by_file_stops_on_empty_response():
+    """list_users_by_file() stops pagination when an empty page is returned."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.json.return_value = []
@@ -342,6 +367,7 @@ def test_list_users_by_file_stops_on_empty_response():
 
 
 def test_list_workspace_members_returns_members():
+    """list_workspace_members() returns all member records with email and profil_droit."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.json.return_value = [
@@ -362,6 +388,7 @@ def test_list_workspace_members_returns_members():
 
 
 def test_list_workspace_members_raises_on_http_error():
+    """list_workspace_members() propagates HTTP errors."""
     client = _make_client()
     client._csrf_token = "tok"
     client.session.post.return_value.raise_for_status.side_effect = req_lib.HTTPError(

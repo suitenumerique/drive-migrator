@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.drive.backend import DriveDestinationBackend
 from core.models import Workspace
@@ -18,14 +16,17 @@ def _patch_mails_manager():
 
 
 def test_implements_abstract_destination():
+    """DriveDestinationBackend satisfies the AbstractDestinationBackend interface."""
     assert issubclass(DriveDestinationBackend, AbstractDestinationBackend)
 
 
 def test_name_is_drive():
+    """name class attribute is 'drive'."""
     assert DriveDestinationBackend.name == "drive"
 
 
 def test_label_is_set():
+    """label class attribute is a non-empty string."""
     assert isinstance(DriveDestinationBackend.label, str)
     assert DriveDestinationBackend.label != ""
 

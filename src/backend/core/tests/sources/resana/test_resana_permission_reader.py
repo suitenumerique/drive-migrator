@@ -1,8 +1,7 @@
 """Tests for ResanaPermissionReader."""
 
-from unittest.mock import MagicMock, call
-
-import pytest
+# pylint: disable=protected-access
+from unittest.mock import MagicMock
 
 from core.permissions.models import (
     CanonicalRole,
@@ -32,6 +31,7 @@ def _make_reader():
 
 
 def test_get_workspace_members_returns_user_permissions():
+    """get_workspace_members() maps each member's profil_droit to the canonical role."""
     reader, php_client, _ = _make_reader()
     php_client.list_workspace_members.return_value = [
         {"id": "1", "email": "admin@example.com", "profil_droit": "10821219"},
@@ -55,6 +55,7 @@ def test_get_workspace_members_returns_user_permissions():
 
 
 def test_get_workspace_members_unknown_role_falls_back_to_read():
+    """Unknown profil_droit codes default to READ."""
     reader, php_client, _ = _make_reader()
     php_client.list_workspace_members.return_value = [
         {"id": "1", "email": "x@example.com", "profil_droit": "99999"},
@@ -71,6 +72,7 @@ def test_get_workspace_members_unknown_role_falls_back_to_read():
 
 
 def test_get_file_permission_returns_none_for_unknown_uuid():
+    """get_file_permission() returns None when the UUID is not in the cache."""
     reader, _, _ = _make_reader()
     reader._permission_cache = {}
 
@@ -78,6 +80,7 @@ def test_get_file_permission_returns_none_for_unknown_uuid():
 
 
 def test_get_file_permission_returns_cached_permission():
+    """get_file_permission() returns the cached NormalizedFilePermission for a known UUID."""
     reader, _, _ = _make_reader()
     perm = NormalizedFilePermission(target=PermissionTarget.ALL_MEMBERS)
     reader._permission_cache = {"ged-uuid-1": perm}
@@ -86,6 +89,7 @@ def test_get_file_permission_returns_cached_permission():
 
 
 def test_get_file_permission_triggers_cache_build_when_none():
+    """get_file_permission() triggers cache construction on first call."""
     reader, php_client, ged_client = _make_reader()
     php_client.get_folders.return_value = []
     ged_client.explore.return_value = []
@@ -97,7 +101,8 @@ def test_get_file_permission_triggers_cache_build_when_none():
 
 
 def test_get_file_permission_cache_built_only_once():
-    reader, php_client, ged_client = _make_reader()
+    """Cache is built once and reused on subsequent calls."""
+    reader, php_client, _ = _make_reader()
     reader._permission_cache = {}  # pre-inject empty cache
 
     reader.get_file_permission("x")
@@ -112,18 +117,21 @@ def test_get_file_permission_cache_built_only_once():
 
 
 def test_resolve_permission_unlocked_returns_all_members():
+    """UNLOCKED sharing type maps to ALL_MEMBERS."""
     reader, _, _ = _make_reader()
     result = reader._resolve_permission(php_id=100, sharing_type="UNLOCKED")
     assert result == NormalizedFilePermission(target=PermissionTarget.ALL_MEMBERS)
 
 
 def test_resolve_permission_locked_returns_private():
+    """LOCKED sharing type maps to PRIVATE."""
     reader, _, _ = _make_reader()
     result = reader._resolve_permission(php_id=100, sharing_type="LOCKED")
     assert result == NormalizedFilePermission(target=PermissionTarget.PRIVATE)
 
 
 def test_resolve_permission_restricted_calls_get_file_details():
+    """RESTRICTED sharing type fetches per-file details to determine the target."""
     reader, php_client, _ = _make_reader()
     php_client.get_file_details.return_value = {
         "information": {"visible_profil_droit": "GESTIONNAIRE_CONTRIBUTEUR"},
@@ -143,6 +151,7 @@ def test_resolve_permission_restricted_calls_get_file_details():
 
 
 def test_resolve_restricted_managers_contributors():
+    """visible_profil_droit=GESTIONNAIRE_CONTRIBUTEUR maps to MANAGERS_CONTRIBUTORS."""
     reader, _, _ = _make_reader()
     details = {
         "information": {"visible_profil_droit": "GESTIONNAIRE_CONTRIBUTEUR"},
@@ -156,6 +165,7 @@ def test_resolve_restricted_managers_contributors():
 
 
 def test_resolve_restricted_groups():
+    """Tab with known group IDs maps to RESTRICTED_GROUPS."""
     reader, _, _ = _make_reader()
     details = {
         "information": {"visible_profil_droit": None},
@@ -168,6 +178,7 @@ def test_resolve_restricted_groups():
 
 
 def test_resolve_restricted_groups_unknown_id_ignored():
+    """Unknown group IDs in tab_information_restreints are silently ignored."""
     reader, _, _ = _make_reader()
     details = {
         "information": {"visible_profil_droit": None},
@@ -179,6 +190,7 @@ def test_resolve_restricted_groups_unknown_id_ignored():
 
 
 def test_resolve_restricted_specific_users():
+    """Specific users are resolved with their individual roles."""
     reader, php_client, _ = _make_reader()
     php_client.list_users_by_file.return_value = [
         {
@@ -211,6 +223,7 @@ def test_resolve_restricted_specific_users():
 
 
 def test_resolve_restricted_specific_users_skips_unmatched():
+    """Users whose objet_source has no matching entry in tab_profil_droit_sources are skipped."""
     reader, php_client, _ = _make_reader()
     php_client.list_users_by_file.return_value = [
         {
@@ -235,18 +248,22 @@ def test_resolve_restricted_specific_users_skips_unmatched():
 
 
 def test_translate_role_gestionnaire():
+    """10821219 (GESTIONNAIRE) maps to MANAGE."""
     assert ResanaPermissionReader._translate_role("10821219") == CanonicalRole.MANAGE
 
 
 def test_translate_role_contributeur():
+    """10821218 (CONTRIBUTEUR) maps to WRITE."""
     assert ResanaPermissionReader._translate_role("10821218") == CanonicalRole.WRITE
 
 
 def test_translate_role_visiteur():
+    """10821217 (VISITEUR) maps to READ."""
     assert ResanaPermissionReader._translate_role("10821217") == CanonicalRole.READ
 
 
 def test_translate_role_unknown_falls_back_to_read():
+    """Unknown profil_droit IDs fall back to READ."""
     assert ResanaPermissionReader._translate_role("99999") == CanonicalRole.READ
 
 
@@ -256,6 +273,7 @@ def test_translate_role_unknown_falls_back_to_read():
 
 
 def test_resolve_php_folder_paths_root_folders():
+    """Root folders (dossier_mere=None) are stored under their own name."""
     folders = [
         {"id": 100, "name": "DossierA", "dossier_mere": None},
         {"id": 101, "name": "DossierB", "dossier_mere": None},
@@ -265,6 +283,7 @@ def test_resolve_php_folder_paths_root_folders():
 
 
 def test_resolve_php_folder_paths_nested():
+    """Nested folders resolve to slash-joined paths from root to leaf."""
     folders = [
         {"id": 100, "name": "Parent", "dossier_mere": None},
         {"id": 101, "name": "Child", "dossier_mere": 100},
@@ -293,6 +312,7 @@ def _ged_explore(members):
 
 
 def test_build_ged_file_map_single_folder():
+    """_build_ged_file_map() returns a {folder_path: {filename: uuid}} map for a flat tree."""
     reader, _, ged_client = _make_reader()
     ged_client.explore.side_effect = [
         # workspace root → one sub-folder, no root files
@@ -319,6 +339,7 @@ def test_build_ged_file_map_single_folder():
 
 
 def test_build_ged_file_map_nested_folders():
+    """Nested GED folders are mapped using slash-joined paths."""
     reader, _, ged_client = _make_reader()
     ged_client.explore.side_effect = [
         _ged_explore(
@@ -337,12 +358,13 @@ def test_build_ged_file_map_nested_folders():
 
 
 def test_build_ged_file_map_empty_workspace():
+    """An empty explore() response returns an empty map."""
     reader, _, ged_client = _make_reader()
     ged_client.explore.return_value = []
 
     result = reader._build_ged_file_map("", GED_WS_UUID)
 
-    assert result == {}
+    assert not result
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +373,7 @@ def test_build_ged_file_map_empty_workspace():
 
 
 def test_build_permission_cache_maps_ged_uuids_to_permissions():
+    """_build_permission_cache() produces a {ged_uuid: NormalizedFilePermission} map."""
     reader, php_client, ged_client = _make_reader()
 
     php_client.get_folders.return_value = [
@@ -375,6 +398,7 @@ def test_build_permission_cache_maps_ged_uuids_to_permissions():
 
 
 def test_build_permission_cache_skips_folder_with_no_ged_counterpart():
+    """PHP folders with no matching GED folder are skipped entirely."""
     reader, php_client, ged_client = _make_reader()
 
     php_client.get_folders.return_value = [
@@ -394,6 +418,7 @@ def test_build_permission_cache_skips_folder_with_no_ged_counterpart():
 
 
 def test_build_permission_cache_skips_unmatched_php_files():
+    """PHP files with no matching GED file are skipped."""
     reader, php_client, ged_client = _make_reader()
 
     php_client.get_folders.return_value = [
@@ -417,6 +442,7 @@ def test_build_permission_cache_skips_unmatched_php_files():
 
 
 def test_build_permission_cache_strips_extension_for_matching():
+    """PHP titre is stripped of its last extension before matching the GED name."""
     reader, php_client, ged_client = _make_reader()
 
     php_client.get_folders.return_value = [
@@ -438,6 +464,7 @@ def test_build_permission_cache_strips_extension_for_matching():
 
 
 def test_build_permission_cache_matches_file_without_extension():
+    """PHP titre with no extension matches the GED name as-is."""
     reader, php_client, ged_client = _make_reader()
 
     php_client.get_folders.return_value = [
@@ -460,7 +487,7 @@ def test_build_permission_cache_matches_file_without_extension():
 
 
 def test_build_permission_cache_compound_extension_matches_ged_name():
-    # "archive.tar.gz" → base name "archive.tar", which must match GED name "archive.tar"
+    """Compound extension (e.g. .tar.gz) strips only the last part, matching GED name 'archive.tar'."""
     reader, php_client, ged_client = _make_reader()
 
     php_client.get_folders.return_value = [
