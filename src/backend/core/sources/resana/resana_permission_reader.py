@@ -72,12 +72,7 @@ class ResanaPermissionReader(SourcePermissionReader):
             if not ged_files:
                 continue
             for php_file in self.php_client.get_ged_info(self.php_slug, folder_id):
-                # Strip the last extension only (e.g. "doc.pdf" → "doc").
-                # Files with compound extensions (e.g. "archive.tar.gz") will
-                # match GED name "archive.tar" — consistent with how the GED
-                # API exposes the name field.
-                base_name = php_file["titre"].rsplit(".", 1)[0]
-                ged_uuid = ged_files.get(base_name)
+                ged_uuid = ged_files.get(php_file["titre"])
                 if ged_uuid:
                     result[ged_uuid] = self._resolve_permission(
                         php_file["id"], php_file["sharingType"]
@@ -91,7 +86,12 @@ class ResanaPermissionReader(SourcePermissionReader):
             return {}
         raw = members[0]
         result = {}
-        files = {f["name"]: f["uuid"] for f in raw.get("files", [])}
+        files = {
+            (f"{f['name']}.{f['extension']}" if f.get("extension") else f["name"]): f[
+                "uuid"
+            ]
+            for f in raw.get("files", [])
+        }
         if files:
             result[path] = files
         for sub in raw.get("folders", []):

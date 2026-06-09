@@ -338,6 +338,29 @@ def test_build_ged_file_map_single_folder():
     }
 
 
+def test_build_ged_file_map_distinguishes_files_with_same_basename():
+    """Files with the same name but different extensions are stored as separate entries."""
+    reader, _, ged_client = _make_reader()
+    ged_client.explore.return_value = _ged_explore(
+        {
+            "folders": [],
+            "files": [
+                {"uuid": "budget-pdf-uuid", "name": "budget", "extension": "pdf"},
+                {"uuid": "budget-xlsx-uuid", "name": "budget", "extension": "xlsx"},
+            ],
+        }
+    )
+
+    result = reader._build_ged_file_map("Docs", "docs-uuid")
+
+    assert result == {
+        "Docs": {
+            "budget.pdf": "budget-pdf-uuid",
+            "budget.xlsx": "budget-xlsx-uuid",
+        }
+    }
+
+
 def test_build_ged_file_map_nested_folders():
     """Nested GED folders are mapped using slash-joined paths."""
     reader, _, ged_client = _make_reader()
@@ -384,7 +407,12 @@ def test_build_permission_cache_maps_ged_uuids_to_permissions():
             {"folders": [{"uuid": "folder-ged-uuid", "name": "DossierA"}], "files": []}
         ),
         _ged_explore(
-            {"folders": [], "files": [{"uuid": "file-ged-uuid", "name": "rapport"}]}
+            {
+                "folders": [],
+                "files": [
+                    {"uuid": "file-ged-uuid", "name": "rapport", "extension": "pdf"}
+                ],
+            }
         ),
     ]
     php_client.get_ged_info.return_value = [
@@ -442,7 +470,7 @@ def test_build_permission_cache_skips_unmatched_php_files():
 
 
 def test_build_permission_cache_strips_extension_for_matching():
-    """PHP titre is stripped of its last extension before matching the GED name."""
+    """PHP titre matches the GED file keyed as name.extension."""
     reader, php_client, ged_client = _make_reader()
 
     php_client.get_folders.return_value = [
@@ -451,7 +479,12 @@ def test_build_permission_cache_strips_extension_for_matching():
     ged_client.explore.side_effect = [
         _ged_explore({"folders": [{"uuid": "f-uuid", "name": "Docs"}], "files": []}),
         _ged_explore(
-            {"folders": [], "files": [{"uuid": "my-file-uuid", "name": "my_file"}]}
+            {
+                "folders": [],
+                "files": [
+                    {"uuid": "my-file-uuid", "name": "my_file", "extension": "docx"}
+                ],
+            }
         ),
     ]
     php_client.get_ged_info.return_value = [
@@ -487,7 +520,7 @@ def test_build_permission_cache_matches_file_without_extension():
 
 
 def test_build_permission_cache_compound_extension_matches_ged_name():
-    """Compound extension (e.g. .tar.gz) strips only the last part, matching GED name 'archive.tar'."""
+    """Compound extension (e.g. archive.tar.gz): GED name='archive.tar', extension='gz' → key 'archive.tar.gz'."""
     reader, php_client, ged_client = _make_reader()
 
     php_client.get_folders.return_value = [
@@ -496,7 +529,12 @@ def test_build_permission_cache_compound_extension_matches_ged_name():
     ged_client.explore.side_effect = [
         _ged_explore({"folders": [{"uuid": "f-uuid", "name": "Docs"}], "files": []}),
         _ged_explore(
-            {"folders": [], "files": [{"uuid": "arc-uuid", "name": "archive.tar"}]}
+            {
+                "folders": [],
+                "files": [
+                    {"uuid": "arc-uuid", "name": "archive.tar", "extension": "gz"}
+                ],
+            }
         ),
     ]
     php_client.get_ged_info.return_value = [
