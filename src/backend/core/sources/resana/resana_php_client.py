@@ -45,7 +45,8 @@ class ResanaPhpClient:
         self._ensure_csrf(slug)
         all_files = []
         offset = 0
-        while True:
+        total = None
+        while total is None or len(all_files) < total:
             resp = self.session.post(
                 f"{self.base_url}/public/information/getGedInfo",
                 params={"slug": slug},
@@ -63,11 +64,8 @@ class ResanaPhpClient:
             )
             resp.raise_for_status()
             data = resp.json()
-            batch = data.get("gedTab", [])
-            all_files.extend(batch)
+            all_files.extend(data.get("gedTab", []))
             total = int(data.get("nb_info", 0))
-            if len(all_files) >= total:
-                break
             offset += limit
         return all_files
 
