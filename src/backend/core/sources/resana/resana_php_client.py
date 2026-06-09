@@ -6,6 +6,7 @@ import re
 import requests
 
 _PAGE_SIZE = 50
+_REQUEST_TIMEOUT = 30
 
 
 class ResanaPhpClient:
@@ -22,7 +23,8 @@ class ResanaPhpClient:
         if self._csrf_token:
             return
         resp = self.session.get(
-            f"{self.base_url}/public/perimetre/consulter/{slug}", timeout=30
+            f"{self.base_url}/public/perimetre/consulter/{slug}",
+            timeout=_REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         self._csrf_token = resp.cookies.get("CSRF-TOKEN")
@@ -35,7 +37,7 @@ class ResanaPhpClient:
             f"{self.base_url}/public/dossier/getFolders",
             params={"slug": slug},
             data={"allFolders": "true", "perimeterId": slug},
-            timeout=30,
+            timeout=_REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         return resp.json().get("folders", [])
@@ -60,7 +62,7 @@ class ResanaPhpClient:
                     "limit": str(limit),
                     "id_socket": "",
                 },
-                timeout=30,
+                timeout=_REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -82,7 +84,7 @@ class ResanaPhpClient:
                 "tab_id_infos": f"[{php_file_id}]",
                 "fonction_retour": "sendToVue",
             },
-            timeout=30,
+            timeout=_REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         return self._parse_file_details_html(resp.text)
@@ -125,7 +127,7 @@ class ResanaPhpClient:
                     "nom_prenom": "",
                     "dossier_id": "",
                 },
-                timeout=30,
+                timeout=_REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
             batch = resp.json()
@@ -143,7 +145,7 @@ class ResanaPhpClient:
         resp = self.session.post(
             f"{self.base_url}/public/perimetre/listerUtilisateursAdminDroits",
             data={"perimetre_id": slug},
-            timeout=30,
+            timeout=_REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         return resp.json()
