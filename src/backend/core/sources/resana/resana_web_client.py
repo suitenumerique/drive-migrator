@@ -1,4 +1,4 @@
-"""HTTP client for the Resana internal PHP API."""
+"""HTTP client for the Resana web application (non-documented XHR endpoints)."""
 
 import json
 import re
@@ -9,8 +9,8 @@ _PAGE_SIZE = 50
 _REQUEST_TIMEOUT = 30
 
 
-class ResanaPhpClient:
-    """HTTP client for the Resana internal PHP API (non-documented XHR endpoints)."""
+class ResanaWebClient:
+    """HTTP client for the Resana web application (non-documented XHR endpoints)."""
 
     def __init__(self, token: str, base_url: str):
         self.base_url = base_url

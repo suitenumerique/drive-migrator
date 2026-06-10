@@ -1,4 +1,4 @@
-"""Tests for ResanaPhpClient — Resana internal PHP API client."""
+"""Tests for ResanaWebClient — Resana internal PHP API client."""
 
 # pylint: disable=protected-access
 from unittest.mock import MagicMock, patch
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests as req_lib
 
-from core.sources.resana.resana_php_client import ResanaPhpClient
+from core.sources.resana.resana_web_client import ResanaWebClient
 
 BASE_URL = "https://preprod.resana.numerique.gouv.fr"
 SLUG = "2137419"
@@ -33,7 +33,7 @@ _HTML_MISSING_VARS = "<html>no js vars here</html>"
 
 
 def _make_client(token="test-token"):
-    client = ResanaPhpClient(token, BASE_URL)
+    client = ResanaWebClient(token, BASE_URL)
     client.session = MagicMock()
     return client
 
@@ -46,9 +46,9 @@ def _make_client(token="test-token"):
 def test_init_sets_access_token_cookie():
     """Constructor sets interstis_access cookie with the provided token."""
     with patch(
-        "core.sources.resana.resana_php_client.requests.Session"
+        "core.sources.resana.resana_web_client.requests.Session"
     ) as mock_session:
-        ResanaPhpClient("my-token", BASE_URL)
+        ResanaWebClient("my-token", BASE_URL)
 
     mock_session.return_value.cookies.set.assert_called_once_with(
         "interstis_access", "my-token"
@@ -58,9 +58,9 @@ def test_init_sets_access_token_cookie():
 def test_init_sets_xhr_header():
     """Constructor adds X-Requested-With: XMLHttpRequest header."""
     with patch(
-        "core.sources.resana.resana_php_client.requests.Session"
+        "core.sources.resana.resana_web_client.requests.Session"
     ) as mock_session:
-        ResanaPhpClient("my-token", BASE_URL)
+        ResanaWebClient("my-token", BASE_URL)
 
     mock_session.return_value.headers.__setitem__.assert_called_with(
         "X-Requested-With", "XMLHttpRequest"
@@ -69,7 +69,7 @@ def test_init_sets_xhr_header():
 
 def test_init_csrf_token_is_none():
     """_csrf_token starts as None before any request."""
-    client = ResanaPhpClient("tok", BASE_URL)
+    client = ResanaWebClient("tok", BASE_URL)
     assert client._csrf_token is None
 
 
@@ -226,7 +226,7 @@ def test_get_ged_info_raises_on_http_error():
 
 def test_parse_file_details_html_extracts_all_vars():
     """_parse_file_details_html() extracts all four JS variables from the HTML response."""
-    result = ResanaPhpClient._parse_file_details_html(_SAMPLE_HTML)
+    result = ResanaWebClient._parse_file_details_html(_SAMPLE_HTML)
 
     assert result["information"]["id"] == "48005540"
     assert result["information"]["visible_profil_droit"] is None
@@ -237,14 +237,14 @@ def test_parse_file_details_html_extracts_all_vars():
 
 def test_parse_file_details_html_handles_escaped_quotes():
     """Escaped single quotes in JSON strings are unescaped correctly."""
-    result = ResanaPhpClient._parse_file_details_html(_HTML_ESCAPED_QUOTES)
+    result = ResanaWebClient._parse_file_details_html(_HTML_ESCAPED_QUOTES)
 
     assert result["information"]["titre"] == "it's a file"
 
 
 def test_parse_file_details_html_uses_defaults_when_vars_missing():
     """Missing JS variables fall back to empty dicts/lists."""
-    result = ResanaPhpClient._parse_file_details_html(_HTML_MISSING_VARS)
+    result = ResanaWebClient._parse_file_details_html(_HTML_MISSING_VARS)
 
     assert result["information"] == {}
     assert result["tab_profil_droit_sources"] == {}
