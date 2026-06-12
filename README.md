@@ -120,8 +120,8 @@ Contributions to add new integrations are very welcome.
 
 We welcome contributions of any kind — bug reports, feature requests, documentation improvements, and pull requests. 
 
-* Open a PR — see CONTRIBUTING.md for development setup
-* Submit a feature request or bug report
+* Open a PR — see [CONTRIBUTING.md](https://github.com/suitenumerique/drive-migrator/blob/CONTRIBUTING.md) for development setup
+* Submit a [feature request](https://github.com/suitenumerique/drive-migrator/issues/new?template=Feature_request.md) or [bug report](https://github.com/suitenumerique/drive-migrator/issues/new?template=Bug_report.md)
 
 This project is community-driven. Don't hesitate to get in touch if you have questions about implementation or design decisions.
 
