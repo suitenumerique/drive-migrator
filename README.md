@@ -1,7 +1,7 @@
 # Drive Migrator
 A tool to migrate files and folder structures between document storage solutions. Designed as a building block for cross-instance interoperability within [LaSuite](https://lasuite.numerique.gouv.fr) and the broader [OpenBuro](https://openburo.eu) ecosystem.
 
-This implementation currently focus on Resana → LaSuite Drive migrations, but the architecture supports other source/target configurations that will be added as the project grows.
+This implementation currently focuses on Resana → LaSuite Drive migrations, but the architecture supports other source/target configurations that will be added as the project grows.
 
 # Table of Contents
 
@@ -22,10 +22,11 @@ It is a concrete implementation of the cross-app data portability pillar defined
 
 ## Features
 * Migrate full folder hierarchy from the source document tree
-* Migrate all files, including duplicates (disambiguated by appending a suffix to the filename)
-* Member list exported as a CSV ready for bulk import into the target workspace
+* Migrate all files, including duplicates (with disambiguation)
+* Workspace members migration
 * Configurable permission mapping between source and target instances
 * Rate-limiting and retry logic for large datasets
+* Asynchronous (email notification)
 
 ### What is out of the migration scope
 
@@ -34,7 +35,7 @@ It is a concrete implementation of the cross-app data portability pillar defined
 * Other workspace content: wikis, calendars, discussion boards, project tasks
 
 
-## Get started
+## Get started (🚨 to be updated 🚨)
 
 ### Prerequisite
 
@@ -108,7 +109,9 @@ $ make superuser
 
 This tool is part of LaSuite's contribution to the [OpenBuro](https://openburo.eu) standard, an emerging European initiative that defines open standards for workplace app interoperability. One of its core pillars is **cross-app data portability**: business objects (documents, files) should flow between services with their context preserved. Users and organizations must be free to move between services without losing their files or being tied to a single provider.
 
-This migration tool is a direct implementation of that principle, and works between any two Drive instances given the appropriate configuration.
+The long-term ambition is a generic migration tool that works across any document storage solution. **We're not there yet** — currently supported platforms are Resana, LaSuite Fichiers, and Osmose. 
+
+Contributions to add new integrations are very welcome.
 
 
 ## Contributing
