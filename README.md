@@ -1,5 +1,7 @@
-# Drive Migrator
+# Drive migration tool
 A tool to migrate files and folder structures between document storage solutions. Designed as a building block for cross-instance interoperability within [LaSuite](https://lasuite.numerique.gouv.fr) and the broader [OpenBuro](https://openburo.eu) ecosystem.
+
+<img src="/docs/drive-migrator-schema.png" width="65%" align="center"/>
 
 This implementation currently focuses on Resana → LaSuite Drive migrations, but the architecture supports other source/target configurations that will be added as the project grows.
 
