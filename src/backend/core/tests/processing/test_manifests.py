@@ -1,9 +1,6 @@
 """Tests for core/processing/manifests.py."""
 
 import json
-import os
-
-import pytest
 
 from core.processing.manifests import (
     DRIVE_MANIFEST,
