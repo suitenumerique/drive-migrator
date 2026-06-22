@@ -116,7 +116,8 @@ class ResanaWebClient:
         self._ensure_csrf(slug)
         all_users = []
         offset = 0
-        while True:
+        more_pages = True
+        while more_pages:
             resp = self.session.post(
                 f"{self.base_url}/public/utilisateur/listerUtilisateurByPerimetreAndGroupe",
                 data={
@@ -131,11 +132,8 @@ class ResanaWebClient:
             )
             resp.raise_for_status()
             batch = resp.json()
-            if not batch:
-                break
             all_users.extend(batch)
-            if len(batch) < _PAGE_SIZE:
-                break
+            more_pages = len(batch) >= _PAGE_SIZE
             offset += _PAGE_SIZE
         return all_users
 
