@@ -23,7 +23,7 @@ jobs:
         run: |
           ! git log | grep 'fixup!'
       - name: Install gitlint
-        run: pip install --user requests gitlint
+        run: pip3 install --user requests gitlint
       - name: Lint commit messages added to main
         run: ~/.local/bin/gitlint --commits origin/${{ github.event.pull_request.base.ref }}..HEAD
 
@@ -198,7 +198,7 @@ jobs:
       - name: Install gettext (required to compile messages)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gettext
+          sudo apt-get install -y gettext libmagic1
 
       - name: Generate a MO file from strings extracted from the project
         run: python manage.py compilemessages
