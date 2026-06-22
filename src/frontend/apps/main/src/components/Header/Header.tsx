@@ -1,39 +1,29 @@
-import React from 'react';
-import styled from 'styled-components';
+'use client';
 
-import LogoGouv from '@/components/LogoGouv/LogoGouv';
+import Image from 'next/image';
+import Link from 'next/link';
 
-import { AccountDropdown } from './AccountDropdown';
 import './Header.scss';
 import { LaGaufre } from './LaGaufre';
-export const HEADER_HEIGHT = '100px';
 
-const RedStripe = styled.div`
-  position: absolute;
-  height: 5px;
-  width: 100%;
-  background: var(--c--theme--colors--danger-500);
-  top: 0;
-`;
+const LA_SUITE_LOGO_URL =
+  'https://lasuite.numerique.gouv.fr/assets/lasuite.svg';
 
-export const Header = () => {
-  return (
-    <header className="suite__header">
-      <RedStripe />
-      <div className="suite__header__inner">
-        <div className="suite__header__left">
-          <LogoGouv />
-          <a href="/">
-            <div className="suite__header__title">
-              <h2 className="clr-primary-text">Migration Osmose</h2>
-            </div>
-          </a>
-        </div>
-        <div className="suite__header__right">
-          <AccountDropdown />
-          <LaGaufre />
-        </div>
+export const Header = () => (
+  <header className="suite__header">
+    <div className="suite__header__inner">
+      <Link href="/" className="suite__header__logo" title="LaSuite">
+        <Image
+          src={LA_SUITE_LOGO_URL}
+          alt="LaSuite"
+          width={120}
+          height={32}
+          priority
+        />
+      </Link>
+      <div className="suite__header__actions">
+        <LaGaufre />
       </div>
-    </header>
-  );
-};
+    </div>
+  </header>
+);

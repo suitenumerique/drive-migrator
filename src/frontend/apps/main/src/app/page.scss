@@ -1,0 +1,135 @@
+.migration-landing {
+  max-width: 640px;
+  padding: 2rem 1rem 4rem;
+  text-align: left;
+  color: var(--c--contextuals--content--semantic--neutral--secondary);
+}
+
+.migration-landing__hero {
+  width: 100%;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.migration-landing__hero-img {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  margin: 0 auto;
+}
+
+.migration-landing__accent {
+  width: 2.5rem;
+  height: 3px;
+  margin: 0 auto 1.25rem;
+  background: var(--c--theme--colors--brand-400, #e1007a);
+  border-radius: 2px;
+
+  &--bottom {
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+  }
+}
+
+.migration-landing__title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+  margin-top: 1.5rem;
+  color: var(--c--contextuals--content--semantic--neutral--primary);
+}
+
+.migration-landing__description {
+  font-size: 1rem;
+  line-height: 1.5;
+  font-weight: 400;
+  margin-top: 8px;
+}
+
+.migration-landing__selectors {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  width: 100%;
+  font-weight: 400;
+  margin-bottom: 24px;
+  color: var(
+    --c--contextuals--content--semantic--neutral--secondary
+  ) !important;
+}
+
+.migration-landing__selectors .c__select__label {
+  color: var(
+    --c--contextuals--content--semantic--neutral--secondary
+  ) !important;
+}
+
+.migration-landing__field {
+  flex: 1;
+  max-width: 260px;
+  font-weight: 400;
+  min-width: 0;
+
+  .c__select__inner__actions__open .material-icons {
+    font-size: 0;
+    width: 8px;
+    height: 5px;
+    line-height: 0;
+    color: #555e74;
+    background-color: currentColor;
+    mask: url('../assets/icons/chevron-down.svg') center / contain no-repeat;
+    -webkit-mask: url('../assets/icons/chevron-down.svg') center / contain
+      no-repeat;
+  }
+}
+
+.migration-landing__select-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+
+  svg {
+    flex-shrink: 0;
+    display: block;
+  }
+}
+
+.migration-landing__arrow {
+  flex-shrink: 0;
+  margin: 0 12px;
+  display: block;
+  margin-top: 20px;
+  align-self: center;
+  width: 11px;
+  height: 11px;
+}
+
+.migration-landing__cta {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.migration-landing__doc-link {
+  margin-top: 1.5rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 520px) {
+  .migration-landing__selectors {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .migration-landing__field {
+    max-width: none;
+  }
+
+  .migration-landing__arrow {
+    align-self: baseline;
+    margin: 12px;
+    padding-bottom: 0;
+  }
+}

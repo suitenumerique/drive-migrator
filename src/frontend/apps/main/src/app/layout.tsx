@@ -3,8 +3,8 @@ import SubLayout from '@/app/sub-layout';
 import './global.scss';
 
 export const metadata = {
-  title: 'Migration Osmose',
-  description: 'Migrez vos données Osmose.',
+  title: 'Migration Resana',
+  description: 'Migrez vos données Resana.',
 };
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="fr">
       <body>
         <SubLayout>{children}</SubLayout>
       </body>

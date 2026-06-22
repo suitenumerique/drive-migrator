@@ -1,6 +1,6 @@
 'use client';
-import { Alert, Loader, VariantType } from '@openfun/cunningham-react';
-import { useEffect } from 'react';
+import { Alert, Loader, VariantType } from '@gouvfr-lasuite/cunningham-react';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { WorkspacesToMigrate } from '@/app/dashboard/_components/WorkspaceToMigrate';
@@ -15,12 +15,17 @@ export type WorkspaceByStatus = Record<WorkspaceStatus, Workspace[]>;
 
 export default function Dashboard() {
   const { workspacesByStatus, fetch, hasError } = useWorkspaces();
+  const hasFetched = useRef(false);
 
   useEffect(() => {
-    void fetch();
-  }, []);
+    if (hasFetched.current) {
+      return;
+    }
+    hasFetched.current = true;
+    void fetch({}, { syncIfEmpty: true });
+  }, [fetch]);
 
-  if (hasError) {
+  if (hasError && !workspacesByStatus) {
     return null;
   }
 
@@ -31,7 +36,6 @@ export default function Dashboard() {
           <FailureWorkspaces workspaces={workspacesByStatus} />
           <PendingWorkspaces workspaces={workspacesByStatus} />
           <WorkspacesToMigrate workspaces={workspacesByStatus} />
-          <SuccessWorkspaces workspaces={workspacesByStatus} />
         </>
       ) : (
         <div className="container__loader">
@@ -56,34 +60,6 @@ const PendingWorkspaces = ({
       <h2>{t('Communautés en cours de migration')}</h2>
       <div className="suite__workspaces">
         {workspaces[WorkspaceStatus.PENDING].map((workspace) => (
-          <WorkspaceExporting workspace={workspace} key={workspace.id} />
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const SuccessWorkspaces = ({
-  workspaces,
-}: {
-  workspaces: WorkspaceByStatus;
-}) => {
-  const { t } = useTranslation();
-  if (workspaces[WorkspaceStatus.SUCCESS].length === 0) {
-    return null;
-  }
-  return (
-    <div>
-      <h2>{t('Communautés migrées')}</h2>
-      <Alert type={VariantType.SUCCESS}>
-        <div>
-          {t(
-            'Les communautés suivantes ont été migrées vers les destinations sélectionnées. Vous avez reçu un mail de confirmation.',
-          )}
-        </div>
-      </Alert>
-      <div className="suite__workspaces mt-s">
-        {workspaces[WorkspaceStatus.SUCCESS].map((workspace) => (
           <WorkspaceExporting workspace={workspace} key={workspace.id} />
         ))}
       </div>

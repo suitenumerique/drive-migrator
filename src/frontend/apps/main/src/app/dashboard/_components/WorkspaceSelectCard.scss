@@ -1,0 +1,94 @@
+.workspace-select-card {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  padding: 8px;
+  text-align: left;
+  cursor: pointer;
+  background: var(--c--contextuals--background--surface--primary, #fff);
+  border: 1px solid var(--c--contextuals--border--surface--primary);
+  border-radius: 8px;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    border-color: var(--c--contextuals--border--semantic--brand--primary);
+  }
+
+  &--selected {
+    background: var(--c--contextuals--background--semantic--brand--tertiary);
+    border: 2px solid var(--c--contextuals--border--semantic--brand--primary);
+    box-shadow: 0 4px 15px 0 rgba(62, 93, 231, 0.15) !important;
+  }
+
+  &--migrated {
+    cursor: default;
+    background: var(--c--contextuals--background--surface--tertiary, #f5f5f6);
+    border-color: var(
+      --c--contextuals--border--semantic--neutral--tertiary,
+      #e3e6ed
+    );
+
+    .workspace-select-card__title {
+      color: var(
+        --c--contextuals--content--semantic--neutral--tertiary,
+        #929292
+      );
+    }
+  }
+
+  &__checkbox {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    color: #fff;
+    border: 1px solid
+      var(--c--contextuals--border--semantic--neutral--secondary, #929292);
+    border-radius: 2px;
+    background-color: var(
+      --c--contextuals--background--semantic--neutral--tertiary
+    );
+
+    &--checked {
+      background: var(--c--contextuals--content--semantic--brand--tertiary);
+      border-color: var(--c--contextuals--content--semantic--brand--tertiary);
+    }
+
+    &--migrated.workspace-select-card__checkbox--checked {
+      color: #fff;
+      background: var(
+        --c--contextuals--content--semantic--neutral--tertiary,
+        #929292
+      );
+      border-color: var(
+        --c--contextuals--content--semantic--neutral--tertiary,
+        #929292
+      );
+    }
+  }
+
+  &__title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--c--contextuals--content--semantic--neutral--primary, #161616);
+    white-space: nowrap;
+  }
+
+  &__badge {
+    flex-shrink: 0;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--c--contextuals--content--semantic--neutral--tertiary, #929292);
+  }
+}

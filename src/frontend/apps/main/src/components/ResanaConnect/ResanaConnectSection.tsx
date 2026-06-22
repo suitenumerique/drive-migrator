@@ -1,16 +1,22 @@
 'use client';
 
-import { Button, Input } from '@openfun/cunningham-react';
+import { Button, Input } from '@gouvfr-lasuite/cunningham-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { fetchAPI } from '@/api/fetchApi';
 
+import './ResanaConnectSection.scss';
+
 interface Props {
   onConnected: () => void;
+  onAuthRequired?: () => void;
 }
 
-export const ResanaConnectSection = ({ onConnected }: Props) => {
+export const ResanaConnectSection = ({
+  onConnected,
+  onAuthRequired,
+}: Props) => {
   const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -29,6 +35,8 @@ export const ResanaConnectSection = ({ onConnected }: Props) => {
       );
       if (response.ok) {
         onConnected();
+      } else if (response.status === 401 && onAuthRequired) {
+        onAuthRequired();
       } else {
         setError(t('Identifiants invalides, veuillez réessayer.'));
       }
@@ -40,23 +48,44 @@ export const ResanaConnectSection = ({ onConnected }: Props) => {
   };
 
   return (
-    <form onSubmit={(e) => void handleSubmit(e)}>
-      {error && <div role="alert">{error}</div>}
+    <form
+      className="resana-connect-form"
+      onSubmit={(e) => void handleSubmit(e)}
+    >
+      {error && (
+        <p className="resana-connect-form__error" role="alert">
+          {error}
+        </p>
+      )}
       <Input
-        label={t('Email')}
+        className="resana-connect-form__field"
+        variant="classic"
+        label={t('Adresse e-mail')}
         type="email"
+        placeholder={t('Votre e-mail')}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         fullWidth
+        required
       />
       <Input
+        className="resana-connect-form__field"
+        variant="classic"
         label={t('Mot de passe')}
         type="password"
+        placeholder={t('Votre mot de passe')}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         fullWidth
+        required
       />
-      <Button type="submit" disabled={isLoading}>
+      <Button
+        type="submit"
+        fullWidth
+        variant="primary"
+        color="brand"
+        disabled={isLoading}
+      >
         {t('Se connecter')}
       </Button>
     </form>

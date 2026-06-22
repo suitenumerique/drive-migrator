@@ -1,8 +1,7 @@
 import {
   ButtonProps,
   Button as CunninghamButton,
-} from '@openfun/cunningham-react';
-import Link from 'next/link';
+} from '@gouvfr-lasuite/cunningham-react';
 
 /**
  * This component is a wrapper around the Cunningham Button component.
@@ -14,13 +13,5 @@ import Link from 'next/link';
  * @constructor
  */
 export const Button = (props: ButtonProps) => {
-  if (props.href) {
-    // By setting href="#" we make sure Cunningham renders the button as an anchor tag making passHref work.
-    return (
-      <Link href={props.href} passHref legacyBehavior>
-        <CunninghamButton {...props} href="#" />
-      </Link>
-    );
-  }
   return <CunninghamButton {...props} />;
 };

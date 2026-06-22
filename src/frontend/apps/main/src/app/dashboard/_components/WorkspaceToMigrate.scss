@@ -1,0 +1,101 @@
+.workspaces-to-migrate {
+  width: 100%;
+  max-width: 1100px;
+  padding: 2rem 0 6rem;
+  text-align: left;
+  color: var(--c--contextuals--content--semantic--neutral--secondary);
+
+  &__header {
+    display: flex;
+    gap: 1.5rem;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    margin-top: 1.5rem;
+  }
+
+  &__intro {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--c--contextuals--content--semantic--neutral--primary);
+  }
+
+  &__description {
+    max-width: 42rem;
+    margin: 0.5rem 0 0;
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+  }
+
+  &__select-all {
+    flex-shrink: 0;
+    padding: 0.25rem 0 0;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--c--contextuals--content--semantic--brand--primary, #000091);
+    cursor: pointer;
+    background: none;
+    border: none;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+
+    &:hover {
+      color: var(
+        --c--contextuals--content--semantic--brand--secondary,
+        #1212ff
+      );
+    }
+  }
+
+  &__alert {
+    margin-bottom: 1rem;
+  }
+
+  &__form {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    padding-bottom: 15px;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    align-content: start;
+    align-items: start;
+    width: 100%;
+    min-height: 300px;
+    max-height: 400px;
+    padding-right: 0.25rem;
+    overflow-y: auto;
+
+    > * {
+      width: 100%;
+      min-width: 0;
+      height: auto;
+    }
+
+    @media (max-width: 900px) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    @media (max-width: 560px) {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  &__footer {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    padding-top: 0.5rem;
+  }
+}

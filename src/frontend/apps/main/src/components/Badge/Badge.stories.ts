@@ -1,4 +1,4 @@
-import { VariantType } from '@openfun/cunningham-react';
+import { VariantType } from '@gouvfr-lasuite/cunningham-react';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { Badge } from '@/components/Badge/Badge';

@@ -3,12 +3,29 @@
     "translation": {
       "api_errors.generic_api_error": "An error occurred, please try again later",
       "api_errors.WorkspaceNotFound": "Workspace not found",
-      "api_errors.ResanaTokenRequired": "You need to connect to Resana before starting the migration."
+      "api_errors.ResanaTokenRequired": "You need to connect to Resana before starting the migration.",
+      "Outil de migration": "Migration tool",
+      "Migrez vos données d’un outil vers un autre. D’autres outils seront ajoutés progressivement.": "Migrate your data from one tool to another. More tools will be added over time.",
+      "Depuis": "From",
+      "Vers": "To",
+      "Démarrer la migration": "Start migration",
+      "Chargement…": "Loading…",
+      "Voir la documentation": "View documentation",
+      "Archive zip": "Zip archive"
     }
   },
   "fr": {
     "translation": {
+      "Contact us": "Contactez nous",
       "My account": "Mon compte",
+      "Outil de migration": "Outil de migration",
+      "Migrez vos données d’un outil vers un autre. D’autres outils seront ajoutés progressivement.": "Migrez vos données d’un outil vers un autre. D’autres outils seront ajoutés progressivement.",
+      "Depuis": "Depuis",
+      "Vers": "Vers",
+      "Démarrer la migration": "Démarrer la migration",
+      "Chargement…": "Chargement…",
+      "Voir la documentation": "Voir la documentation",
+      "Archive zip": "Archive zip",
       "api_errors.WorkspaceAlreadyExporting": "Une communauté est déjà en cours d'export",
       "api_errors.generic_api_error": "Une erreur a eu lieu, réessayez dans quelques instants",
       "api_errors.WorkspaceNotFound": "Communauté non trouvée",

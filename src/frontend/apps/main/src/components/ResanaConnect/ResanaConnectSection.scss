@@ -1,0 +1,34 @@
+.resana-connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+
+  --c--components--forms-input--border-radius: 8px;
+
+  &__error {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    color: var(--c--contextuals--content--semantic--error--primary);
+  }
+
+  &__field {
+    width: 100%;
+
+    .c__input__label {
+      margin-bottom: 0.5rem;
+      font-size: 0.975rem;
+      font-weight: 500;
+      color: var(--c--contextuals--content--semantic--neutral--primary);
+    }
+
+    input::placeholder {
+      color: var(--c--contextuals--content--semantic--neutral--tertiary);
+    }
+  }
+
+  &__submit {
+    margin-top: 1rem !important;
+  }
+}

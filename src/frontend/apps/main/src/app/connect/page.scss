@@ -1,0 +1,76 @@
+.migration-connect {
+  max-width: 520px;
+  padding: 2rem 1rem 4rem;
+  margin: 0 auto;
+  text-align: left;
+  color: var(--c--contextuals--content--semantic--neutral--secondary);
+
+  &__title {
+    margin: 0 0 0.75rem;
+    margin-top: 1.5rem;
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--c--contextuals--content--semantic--neutral--primary, #161616);
+  }
+
+  &__description {
+    margin: 0 0 2.5rem;
+    font-size: 1rem;
+    line-height: 1.5;
+    font-weight: 400;
+    color: var(
+      --c--contextuals--content--semantic--neutral--secondary,
+      #555e74
+    );
+  }
+
+  &__tools {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  &__row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+  }
+
+  &__tool {
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-start;
+    border-radius: 12px;
+
+    &--done {
+      cursor: default;
+    }
+  }
+
+  &__tool-icon {
+    display: block;
+
+    path {
+      fill: #626a80;
+    }
+
+    &--active path {
+      fill: #fff;
+    }
+  }
+
+  &__status {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    box-sizing: border-box;
+    border: 2px solid
+      var(--c--contextuals--content--semantic--neutral--secondary);
+    border-radius: 50%;
+
+    &--done {
+      border: none;
+    }
+  }
+}

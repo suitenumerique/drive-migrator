@@ -1,4 +1,4 @@
-import { VariantType } from '@openfun/cunningham-react';
+import { VariantType } from '@gouvfr-lasuite/cunningham-react';
 import { PropsWithChildren } from 'react';
 
 import './Badge.scss';

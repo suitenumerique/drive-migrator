@@ -1,5 +1,6 @@
 import {
   Alert,
+  Button,
   Checkbox,
   Loader,
   Modal,
@@ -7,13 +8,12 @@ import {
   Switch,
   VariantType,
   useModal,
-} from '@openfun/cunningham-react';
+} from '@gouvfr-lasuite/cunningham-react';
 import React, { PropsWithChildren, ReactNode, useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/Badge/Badge';
-import { Button } from '@/components/Button/Button';
 import { DropButton } from '@/components/DropButton/DropButton';
 import { useApi } from '@/hooks/useApi';
 
@@ -116,7 +116,8 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
       aria-label={t('My account')}
       button={
         <Button
-          color="tertiary-text"
+          variant="tertiary"
+          color="neutral"
           icon={<span className="material-icons">more_horiz</span>}
         />
       }
@@ -125,7 +126,8 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
         {archiveStatus === WorkspaceStatus.SUCCESS && (
           <li>
             <Button
-              color="primary-text"
+              variant="tertiary"
+              color="brand"
               icon={<span className="material-icons">sync</span>}
               onClick={() => void downloadArchive()}
             >
@@ -136,7 +138,8 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
         {resanaStatus === WorkspaceStatus.FAILURE && (
           <li>
             <Button
-              color="primary-text"
+              variant="tertiary"
+              color="brand"
               icon={<span className="material-icons">question_mark</span>}
               onClick={() => void showResanaErrorDetails()}
             >

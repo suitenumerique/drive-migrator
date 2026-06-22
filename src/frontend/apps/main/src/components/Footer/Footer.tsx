@@ -1,8 +1,11 @@
+'use client';
+
 import Link from 'next/link';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 
+import { AppHelpMenu } from '@/components/AppHelpMenu/AppHelpMenu';
 import LogoGouv from '@/components/LogoGouv/LogoGouv';
 
 import './Footer.scss';
@@ -31,6 +34,9 @@ export const Footer = () => {
 
   return (
     <footer className="suite__footer">
+      <div className="suite__footer__help">
+        <AppHelpMenu />
+      </div>
       <BlueStripe />
       <div className="suite__footer__content">
         <div className="suite__footer__content__top">

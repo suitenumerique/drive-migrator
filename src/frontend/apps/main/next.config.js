@@ -1,11 +1,29 @@
 const path = require('path');
 
 /** @type {import('next').NextConfig} */
+const frontendRoot = path.join(__dirname, '../..');
+const reactPath = path.join(frontendRoot, 'node_modules/react');
+const reactDomPath = path.join(frontendRoot, 'node_modules/react-dom');
+
 const nextConfig = {
   output: 'export',
+  outputFileTracingRoot: frontendRoot,
   trailingSlash: true,
+  transpilePackages: [
+    '@gouvfr-lasuite/cunningham-react',
+    '@gouvfr-lasuite/integration',
+    '@gouvfr-lasuite/ui-kit',
+    '@tanstack/react-query',
+  ],
   images: {
     unoptimized: true,
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'lasuite.numerique.gouv.fr',
+        pathname: '/assets/**',
+      },
+    ],
   },
   compiler: {
     // Enables the styled-components SWC transform
@@ -14,7 +32,19 @@ const nextConfig = {
   sassOptions: {
     includePaths: [path.join(__dirname, 'styles')],
   },
-  webpack(config, { isServer, dev }) {
+  webpack(config, { dev }) {
+    // En dev : une seule instance React (Cunningham v4 + yarn workspaces).
+    // En prod/build : pas d'alias — Next résout React via outputFileTracingRoot.
+    if (dev) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        react: reactPath,
+        'react-dom': reactDomPath,
+        'react-dom/client': path.join(reactDomPath, 'client.js'),
+        'react/jsx-runtime': path.join(reactPath, 'jsx-runtime.js'),
+        'react/jsx-dev-runtime': path.join(reactPath, 'jsx-dev-runtime.js'),
+      };
+    }
     // Grab the existing rule that handles SVG imports
     const fileLoaderRule = config.module.rules.find((rule) =>
       rule.test?.test?.('.svg'),

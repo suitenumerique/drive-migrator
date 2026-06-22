@@ -10,22 +10,23 @@
   },
   "scripts": {
     "APP_MAIN": "yarn workspace app-main",
-    "APP_E2E": "yarn workspace app-e2e",
     "I18N": "yarn workspace packages-i18n",
     "app:dev": "yarn APP_MAIN run dev",
     "app:start": "yarn APP_MAIN run start",
     "app:build": "yarn APP_MAIN run build",
     "app:test": "yarn APP_MAIN run test",
     "ci:build": "yarn APP_MAIN run build:ci",
-    "e2e:test": "yarn APP_E2E run test",
-    "lint": "yarn APP_MAIN run lint && yarn APP_E2E run lint && yarn workspace eslint-config-main run lint"
+    "lint": "yarn APP_MAIN run lint && yarn workspace eslint-config-main run lint"
   },
   "resolutions": {
     "@types/node": "20.14.2",
-    "@types/react-dom": "18.3.0",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "@gouvfr-lasuite/cunningham-react": "4.3.0",
     "cross-env": "7.0.3",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
+    "react": "19.1.2",
+    "react-dom": "19.1.2",
+    "react-aria-components": "1.16.0",
     "typescript": "5.4.5",
     "yjs": "13.6.16"
   }
