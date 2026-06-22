@@ -10,7 +10,7 @@ and this project adheres to
 
 ### Added
 
-- add Resana permission reader to extract file-level access rights from the Resana PHP web API
+- add Resana permission reader for file-level access rights
 - setup Celery
 - setup Flower
 - setup S3 configuration
