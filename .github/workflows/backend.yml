@@ -22,8 +22,12 @@ jobs:
       - name: Check absence of fixup commits
         run: |
           ! git log | grep 'fixup!'
+      - name: Install Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: "3.10"
       - name: Install gitlint
-        run: pip3 install --user requests gitlint
+        run: pip install --user requests gitlint
       - name: Lint commit messages added to main
         run: ~/.local/bin/gitlint --commits origin/${{ github.event.pull_request.base.ref }}..HEAD
 
