@@ -5,5 +5,9 @@ module.exports = {
     'selector-class-pattern': null,
     'no-descending-specificity': null,
   },
-  ignoreFiles: ['out/**/*'],
+  ignoreFiles: [
+    'out/**/*',
+    'src/cunningham/cunningham-tokens.css',
+    'src/cunningham/cunningham-custom-tokens.css',
+  ],
 };

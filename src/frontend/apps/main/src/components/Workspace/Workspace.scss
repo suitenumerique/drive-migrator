@@ -1,7 +1,3 @@
-@import '../../cunningham/cunningham-tokens-sass';
-
-$md: map-get($themes, 'default', 'theme', 'breakpoints', 'md');
-
 .suite__workspaces {
   display: flex;
   flex-direction: column;
@@ -29,13 +25,13 @@ $md: map-get($themes, 'default', 'theme', 'breakpoints', 'md');
   &--pre-export {
     justify-content: space-between;
 
-    @media (max-width: $md) {
+    @media (max-width: var(--c--globals--breakpoints--md)) {
       flex-direction: column;
     }
   }
 
   &--exporting {
-    @media (max-width: $md) {
+    @media (max-width: var(--c--globals--breakpoints--md)) {
       flex-direction: column;
     }
   }
@@ -56,7 +52,7 @@ $md: map-get($themes, 'default', 'theme', 'breakpoints', 'md');
     justify-content: flex-end;
     gap: 2rem;
 
-    @media (max-width: $md) {
+    @media (max-width: var(--c--globals--breakpoints--md)) {
       flex-direction: column;
       gap: 0;
     }

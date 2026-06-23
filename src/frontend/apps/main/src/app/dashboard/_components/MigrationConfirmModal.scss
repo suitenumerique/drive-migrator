@@ -1,0 +1,50 @@
+.migration-confirm-modal {
+  &__content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 24px;
+  }
+
+  &__item {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 12px;
+    background: var(--c--contextuals--background--surface--tertiary);
+    border-radius: 0.35rem;
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    min-height: 1.5rem;
+
+    svg {
+      display: block;
+    }
+  }
+
+  &__text {
+    min-width: 0;
+  }
+
+  &__item-title {
+    margin: 0 0 0 0;
+    font-size: 0.9375rem;
+    font-weight: 700;
+    line-height: 1.4;
+    color: var(--c--contextuals--content--semantic--neutral--primary);
+  }
+
+  &__item-description {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--c--contextuals--content--semantic--neutral--secondary);
+  }
+}

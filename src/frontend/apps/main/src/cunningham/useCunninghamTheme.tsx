@@ -1,32 +1,15 @@
-import merge from 'lodash/merge';
-import { create } from 'zustand';
-
 import { tokens } from './cunningham-tokens';
 
-type Tokens = typeof tokens.themes.default & Partial<typeof tokens.themes.dsfr>;
-type ColorsTokens = Tokens['theme']['colors'];
-type ComponentTokens = Tokens['components'];
-type Theme = 'default' | 'dsfr';
+export type Theme = keyof typeof tokens.themes;
 
-interface AuthStore {
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-  colorsTokens: () => Partial<ColorsTokens>;
-  componentTokens: () => ComponentTokens;
-}
+const DEFAULT_THEME: Theme = 'default';
 
-const useCunninghamTheme = create<AuthStore>((set, get) => {
-  const currentTheme = () =>
-    merge(tokens.themes['default'], tokens.themes[get().theme]) as Tokens;
+const isTheme = (value: string): value is Theme =>
+  Object.prototype.hasOwnProperty.call(tokens.themes, value);
 
-  return {
-    theme: 'dsfr',
-    colorsTokens: () => currentTheme().theme.colors,
-    componentTokens: () => currentTheme().components,
-    setTheme: (theme: Theme) => {
-      set({ theme });
-    },
-  };
-});
+/** Thème Cunningham lu depuis la config d'environnement (NEXT_PUBLIC_FRONTEND_THEME). */
+export const getFrontendTheme = (): Theme => {
+  const configured = process.env.NEXT_PUBLIC_FRONTEND_THEME ?? DEFAULT_THEME;
 
-export default useCunninghamTheme;
+  return isTheme(configured) ? configured : DEFAULT_THEME;
+};

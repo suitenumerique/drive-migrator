@@ -1,23 +1,65 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { Button } from '@gouvfr-lasuite/cunningham-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import ResanaLogo from '@/assets/icons/resana-logo.svg';
 import { ResanaConnectSection } from '@/components/ResanaConnect/ResanaConnectSection';
+import { ArrowLeftIcon } from '@/components/icons/ArrowLeftIcon';
+import { login } from '@/core/auth/Auth';
+import {
+  MigrationTarget,
+  getConnectPath,
+  getResanaConnectPath,
+  isMigrationTarget,
+} from '@/core/migrationTarget';
 
-export default function ConnectResana() {
+import './page.scss';
+
+function ConnectResanaContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useTranslation();
 
+  const target = isMigrationTarget(searchParams.get('target'))
+    ? (searchParams.get('target') as MigrationTarget)
+    : 'lasuite-fichiers';
+
   return (
-    <div className="container container--center">
-      <h1>{t('Connexion à Resana requise')}</h1>
-      <p>
-        {t(
-          'Veuillez vous connecter à votre compte Resana pour accéder à vos espaces de travail.',
-        )}
+    <div className="resana-connect-page container">
+      <Button
+        variant="tertiary"
+        color="neutral"
+        icon={<ArrowLeftIcon width={16} height={16} aria-hidden />}
+        onClick={() => router.push(getConnectPath(target))}
+      >
+        {t('Retour')}
+      </Button>
+
+      <ResanaLogo className="resana-connect-page__logo" aria-hidden />
+
+      <h1 className="resana-connect-page__title">{t('Connexion à Resana')}</h1>
+
+      <p className="resana-connect-page__description">
+        {t('Connectez-vous aux outils pour commencer la migration.')}
       </p>
-      <ResanaConnectSection onConnected={() => router.replace('/')} />
+
+      <ResanaConnectSection
+        onAuthRequired={() => login(getResanaConnectPath(target))}
+        onConnected={() =>
+          router.replace(`${getConnectPath(target)}&resana_connected=1`)
+        }
+      />
     </div>
+  );
+}
+
+export default function ConnectResana() {
+  return (
+    <Suspense fallback={null}>
+      <ConnectResanaContent />
+    </Suspense>
   );
 }

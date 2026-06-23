@@ -1,5 +1,45 @@
 .page-finish {
-  &__logo {
-    text-align: center;
+  flex: 1;
+  padding-top: 3rem;
+  padding-bottom: 4rem;
+
+  &__content {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 25rem;
+    text-align: left;
+  }
+
+  &__illustration {
+    display: block;
+    width: 100%;
+    max-width: 25rem;
+    height: auto;
+    margin: auto;
+    margin-bottom: 2rem;
+  }
+
+  &__title {
+    margin: 0 0 0.75rem;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--c--contextuals--content--semantic--neutral--primary);
+  }
+
+  &__description {
+    margin: 0 0 2rem;
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--c--contextuals--content--semantic--neutral--secondary);
+  }
+
+  &__actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    max-width: 25rem;
   }
 }
