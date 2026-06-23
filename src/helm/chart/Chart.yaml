@@ -1,4 +1,4 @@
 apiVersion: v2
 type: application
-name: migration-osmose
+name: migrator
 version: 0.0.1

@@ -1,51 +1,49 @@
 commonEnvVars: &commonEnvVars
-  DJANGO_CSRF_TRUSTED_ORIGINS: https://osmose-migration-tool.127.0.0.1.nip.io,http://impress.127.0.0.1.nip.io
+  DJANGO_CSRF_TRUSTED_ORIGINS: https://migrator.127.0.0.1.nip.io
   DJANGO_CONFIGURATION: Production
   DJANGO_ALLOWED_HOSTS: "*"
-  DJANGO_SECRET_KEY: {{ .Values.djangoSecretKey }}
+  DJANGO_SECRET_KEY: "e$jwt22zxdq$(!c@s9mxs5&7+jgmki%s(&vu6*x_wv#78=*%u0"
   DJANGO_SETTINGS_MODULE: main.settings
   DJANGO_SUPERUSER_PASSWORD: admin
   DJANGO_EMAIL_HOST: "mailcatcher"
   DJANGO_EMAIL_PORT: 1025
   DJANGO_EMAIL_USE_SSL: False
-  OIDC_OP_JWKS_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/jwks
-  OIDC_OP_AUTHORIZATION_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/authorize
-  OIDC_OP_TOKEN_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/token
-  OIDC_OP_USER_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/userinfo
-  OIDC_OP_LOGOUT_ENDPOINT: https://fca.integ01.dev-agentconnect.fr/api/v2/session/end
-  OIDC_RP_CLIENT_ID:
-    secretKeyRef:
-      name: backend
-      key: OIDC_RP_CLIENT_ID
-  OIDC_RP_CLIENT_SECRET:
-    secretKeyRef:
-      name: backend
-      key: OIDC_RP_CLIENT_SECRET
+  OIDC_OP_JWKS_ENDPOINT: https://migrator-keycloak.127.0.0.1.nip.io/realms/docs/protocol/openid-connect/certs
+  OIDC_OP_AUTHORIZATION_ENDPOINT: https://migrator-keycloak.127.0.0.1.nip.io/realms/docs/protocol/openid-connect/auth
+  OIDC_OP_TOKEN_ENDPOINT: https://migrator-keycloak.127.0.0.1.nip.io/realms/docs/protocol/openid-connect/token
+  OIDC_OP_USER_ENDPOINT: https://migrator-keycloak.127.0.0.1.nip.io/realms/docs/protocol/openid-connect/userinfo
+  OIDC_OP_LOGOUT_ENDPOINT: https://migrator-keycloak.127.0.0.1.nip.io/realms/docs/protocol/openid-connect/logout
+  OIDC_REDIRECT_ALLOWED_HOSTS: "migrator.127.0.0.1.nip.io"
+  OIDC_AUTH_REQUEST_EXTRA_PARAMS: "{'acr_values': 'eidas1'}"
+  OIDC_RP_CLIENT_ID: migrator
+  OIDC_RP_CLIENT_SECRET: ThisIsAnExampleKeyForDevPurposeOnly
   OIDC_RP_SIGN_ALGO: RS256
   OIDC_RP_SCOPES: "openid email"
-  OIDC_REDIRECT_ALLOWED_HOSTS: https://osmose-migration-tool.127.0.0.1.nip.io
-  OIDC_AUTH_REQUEST_EXTRA_PARAMS: "{'acr_values': 'eidas1'}"
-  LOGIN_REDIRECT_URL: https://osmose-migration-tool.127.0.0.1.nip.io
-  LOGIN_REDIRECT_URL_FAILURE: https://osmose-migration-tool.127.0.0.1.nip.io
-  LOGOUT_REDIRECT_URL: https://osmose-migration-tool.127.0.0.1.nip.io
-  DB_HOST: postgres-postgresql
-  DB_NAME: migration
-  DB_USER: dinum
-  DB_PASSWORD: pass
-  DB_PORT: 5432
-  POSTGRES_DB: migration
-  POSTGRES_USER: dinum
-  POSTGRES_PASSWORD: pass
-  REDIS_URL: redis://default:pass@redis-master:6379/1
-  AWS_S3_ENDPOINT_URL: http://minio.migration.svc.cluster.local:9000
-  AWS_S3_ACCESS_KEY_ID: migration
-  AWS_S3_SECRET_ACCESS_KEY: password
-  AWS_STORAGE_BUCKET_NAME: migration-media-storage
-  STORAGES_STATICFILES_BACKEND: django.contrib.staticfiles.storage.StaticFilesStorage
-  APP_EMAIL_FORCE_TO:
+  LOGIN_REDIRECT_URL: https://migrator.127.0.0.1.nip.io
+  LOGIN_REDIRECT_URL_FAILURE: https://migrator.127.0.0.1.nip.io
+  LOGOUT_REDIRECT_URL: https://migrator.127.0.0.1.nip.io
+  DB_HOST: dev-backend-postgres
+  DB_NAME:
     secretKeyRef:
-      name: backend
-      key: APP_EMAIL_FORCE_TO
+      name: dev-backend-postgres
+      key: database
+  DB_USER:
+    secretKeyRef:
+      name: dev-backend-postgres
+      key: username
+  DB_PASSWORD:
+    secretKeyRef:
+      name: dev-backend-postgres
+      key: password
+  DB_PORT: 5432
+  REDIS_URL: redis://user:pass@dev-backend-redis:6379/1
+  DJANGO_CELERY_BROKER_URL: redis://user:pass@dev-backend-redis:6379/1
+  AWS_S3_ENDPOINT_URL: http://dev-backend-minio.migrator.svc.cluster.local:9000
+  AWS_S3_ACCESS_KEY_ID: dinum
+  AWS_S3_SECRET_ACCESS_KEY: password
+  AWS_STORAGE_BUCKET_NAME: migrator-media-storage
+  STORAGES_STATICFILES_BACKEND: django.contrib.staticfiles.storage.StaticFilesStorage
+  APP_EMAIL_FORCE_TO: ToBeDefined
 
 image:
   repository: localhost:5001/backend
@@ -77,14 +75,14 @@ backend:
       - "/bin/sh"
       - "-c"
       - |
-        python manage.py createsuperuser --emai l admin@example.com --password admin
+        python manage.py createsuperuser --email admin@example.com --password admin
     restartPolicy: Never
 
 frontend:
   envVars:
     PORT: 8080
-    NEXT_PUBLIC_API_ORIGIN: https://osmose-migration-tool.127.0.0.1.nip.io
-    NEXT_PUBLIC_SIGNALING_URL: wss://osmose-migration-tool.127.0.0.1.nip.io/ws
+    NEXT_PUBLIC_API_ORIGIN: https://migrator.127.0.0.1.nip.io
+    NEXT_PUBLIC_SIGNALING_URL: wss://migrator.127.0.0.1.nip.io/ws
 
   replicas: 1
 
@@ -95,11 +93,11 @@ frontend:
 
 ingress:
   enabled: true
-  host: osmose-migration-tool.127.0.0.1.nip.io
+  host: migrator.127.0.0.1.nip.io
 
 ingressAdmin:
   enabled: true
-  host: osmose-migration-tool.127.0.0.1.nip.io
+  host: migrator.127.0.0.1.nip.io
 
 celery:
   replicas: 1

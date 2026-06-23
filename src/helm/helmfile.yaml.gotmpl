@@ -1,0 +1,24 @@
+environments:
+  dev:
+    values:
+      - version: 0.0.1
+---
+repositories:
+- name: dev-backends
+  url: https://suitenumerique.github.io/helm-dev-backend
+---
+
+releases:
+  - name: dev-backend
+    namespace: {{ .Namespace }}
+    chart: dev-backends/dev-backend
+    version: 0.0.4
+    values:
+      - env.d/{{ .Environment.Name }}/values.dev-backend.yaml.gotmpl
+
+  - name: drive-migrator
+    version: {{ .Values.version }}
+    namespace: {{ .Namespace }}
+    chart: ./chart
+    values:
+      - env.d/{{ .Environment.Name }}/values.yaml.gotmpl
