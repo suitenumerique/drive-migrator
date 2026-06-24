@@ -77,7 +77,8 @@ jobs:
           context: ${{ inputs.context }}
           file: ${{ inputs.file }}
           target: ${{ inputs.target }}
-          platforms: linux/amd64,linux/arm64
+          #platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           build-args: |
             DOCKER_USER=${{ inputs.docker_user }}
             PUBLISH_AS_MIT=false
