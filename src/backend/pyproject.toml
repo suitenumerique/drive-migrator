@@ -14,13 +14,13 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.14",
 ]
 description = "An application to print markdown to pdf from a set of managed templates."
 keywords = ["Django", "Contacts", "Templates", "RBAC"]
 license = { file = "LICENSE" }
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 dependencies = [
     "Brotli==1.2.0",
     "PyJWT==2.13.0",
@@ -50,7 +50,7 @@ dependencies = [
     "markdown==3.10.2",
     "mozilla-django-oidc==4.0.0",
     "nested-multipart-parser==1.5.0",
-    "psycopg[binary]==3.1.14",
+    "psycopg[binary]==3.3.4",
     "python-frontmatter==1.0.1",
     "python-magic==0.4.27",
     "redis==5.0.3",

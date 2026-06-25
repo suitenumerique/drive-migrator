@@ -1,7 +1,7 @@
 # Django impress
 
 # ---- base image to inherit from ----
-FROM python:3.11.12-slim-bookworm AS base
+FROM python:3.14.6-slim-bookworm AS base
 
 # Upgrade pip to its latest release to speed up dependencies installation
 RUN python -m pip install --upgrade pip
