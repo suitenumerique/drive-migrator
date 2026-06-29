@@ -147,7 +147,9 @@ def test_get_workspace_structure_flat_folder(settings):
             return [
                 {
                     "folders": [{"uuid": "folder-1", "name": "Documents"}],
-                    "files": [{"uuid": "file-1", "name": "readme", "extension": ".txt"}],
+                    "files": [
+                        {"uuid": "file-1", "name": "readme", "extension": ".txt"}
+                    ],
                 }
             ]
         return []
@@ -189,7 +191,12 @@ def test_get_workspace_structure_normalises_extension_without_dot(settings):
 
     def explore_side_effect(uuid):
         if uuid == workspace.source_id:
-            return [{"folders": [], "files": [{"uuid": "f1", "name": "photo", "extension": "jpg"}]}]
+            return [
+                {
+                    "folders": [],
+                    "files": [{"uuid": "f1", "name": "photo", "extension": "jpg"}],
+                }
+            ]
         return []
 
     with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
@@ -208,9 +215,16 @@ def test_get_workspace_structure_recurses_into_subfolders(settings):
 
     def explore_side_effect(uuid):
         if uuid == workspace.source_id:
-            return [{"folders": [{"uuid": "folder-1", "name": "Documents"}], "files": []}]
+            return [
+                {"folders": [{"uuid": "folder-1", "name": "Documents"}], "files": []}
+            ]
         if uuid == "folder-1":
-            return [{"folders": [], "files": [{"uuid": "file-2", "name": "report", "extension": "pdf"}]}]
+            return [
+                {
+                    "folders": [],
+                    "files": [{"uuid": "file-2", "name": "report", "extension": "pdf"}],
+                }
+            ]
         return []
 
     with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
@@ -239,7 +253,12 @@ def test_get_workspace_structure_deep_nesting(settings):
         if uuid == "lvl1":
             return [{"folders": [{"uuid": "lvl2", "name": "Level2"}], "files": []}]
         if uuid == "lvl2":
-            return [{"folders": [], "files": [{"uuid": "f1", "name": "deep", "extension": "txt"}]}]
+            return [
+                {
+                    "folders": [],
+                    "files": [{"uuid": "f1", "name": "deep", "extension": "txt"}],
+                }
+            ]
         return []
 
     with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:

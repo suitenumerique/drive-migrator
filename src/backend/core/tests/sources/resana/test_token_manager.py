@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from django.utils import timezone
 
 import pytest
+from cryptography.fernet import Fernet
 
 from core.encryption import decrypt_token, encrypt_token
 from core.factories import UserFactory
@@ -200,7 +201,7 @@ def test_refresh_calls_authservice_endpoint(settings):
     with patch(
         "core.sources.resana.token_manager.requests.post", return_value=mock_response
     ) as mock_post:
-        ResanaTokenManager(user)._refresh()
+        ResanaTokenManager(user)._refresh()  # pylint: disable=protected-access
 
     mock_post.assert_called_once_with(
         "https://resana.example.com/auth-service/public/api/public/token/access",
@@ -230,11 +231,37 @@ def test_refresh_stores_new_access_token(settings):
     with patch(
         "core.sources.resana.token_manager.requests.post", return_value=mock_response
     ):
-        ResanaTokenManager(user)._refresh()
+        ResanaTokenManager(user)._refresh()  # pylint: disable=protected-access
 
     user.refresh_from_db()
     assert decrypt_token(user.resana_access_token) == "brand-new-access"
     assert user.resana_token_expires_at is not None
+
+
+def test_refresh_raises_token_expired_on_401(settings):
+    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
+    settings.RESANA_AUTHSERVICE_ENDPOINT = (
+        "https://resana.example.com/auth-service/public/api"
+    )
+    user = _make_user(
+        access="old-access",
+        refresh="expired-refresh",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+
+    with patch(
+        "core.sources.resana.token_manager.requests.post", return_value=mock_response
+    ):
+        with pytest.raises(ResanaTokenExpired):
+            ResanaTokenManager(user)._refresh()  # pylint: disable=protected-access
+
+    user.refresh_from_db()
+    assert user.resana_access_token == ""
+    assert user.resana_refresh_token == ""
+    assert user.resana_token_expires_at is None
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +271,4 @@ def test_refresh_stores_new_access_token(settings):
 
 def _fernet_key() -> str:
     """Return a valid Fernet key for test settings."""
-    from cryptography.fernet import Fernet
-
     return Fernet.generate_key().decode()

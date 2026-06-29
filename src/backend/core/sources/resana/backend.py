@@ -59,7 +59,9 @@ class ResanaSourceBackend(AbstractSourceBackend):
         raw = members[0]
         for raw_child in raw.get("folders", []):
             folder.children.append(
-                self._explore_folder(raw_child["uuid"], raw_child.get("name", ""), client)
+                self._explore_folder(
+                    raw_child["uuid"], raw_child.get("name", ""), client
+                )
             )
         for raw_file in raw.get("files", []):
             extension = raw_file.get("extension", "")
