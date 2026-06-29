@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.drive.backend import DriveDestinationBackend
 from core.models import Workspace
@@ -331,6 +329,25 @@ def test_user_token_mode_shares_with_members_even_without_migration_user(
 
     emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
     assert "bob@example.com" in emails_queried
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_sharing_disabled_skips_share_members(mock_cls, tmp_path, settings):
+    """When DRIVE_SHARE_MEMBERS is False, no sharing or invitation calls are made."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    settings.DRIVE_SHARE_MEMBERS = False
+    mock_backend = mock_cls.return_value
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    workspace = _make_workspace(
+        migration_user=_make_migration_user("alice@example.com"),
+        members=[{"email": "bob@example.com"}],
+    )
+
+    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    mock_backend.find_user_by_email.assert_not_called()
+    mock_backend.share_with_user.assert_not_called()
+    mock_backend.invite_by_email.assert_not_called()
 
 
 @patch("core.destinations.drive.backend.DriveUserTokenBackend")

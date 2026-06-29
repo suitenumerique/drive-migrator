@@ -42,7 +42,8 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
         self._upload_tree(backend, local_folder_path, root_id)
 
-        self._share_members(backend, workspace, root_id)
+        if getattr(settings, "DRIVE_SHARE_MEMBERS", True):
+            self._share_members(backend, workspace, root_id)
 
         workspace.set_destination_status("drive", Workspace.Status.SUCCESS)
         workspace.save()

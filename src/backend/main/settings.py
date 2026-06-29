@@ -232,6 +232,11 @@ class Base(Configuration):
     DRIVE_AUTH_MODE = values.Value(
         "service_account", environ_name="DRIVE_AUTH_MODE", environ_prefix=None
     )
+    # Set to False to skip sharing migrated files with workspace members.
+    # Members will then manage permissions manually in Drive.
+    DRIVE_SHARE_MEMBERS = values.BooleanValue(
+        True, environ_name="DRIVE_SHARE_MEMBERS", environ_prefix=None
+    )
     # Fernet key (URL-safe base64, 32 bytes) used to encrypt OIDC tokens at rest.
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     OIDC_TOKENS_ENCRYPTION_KEY = values.Value(
