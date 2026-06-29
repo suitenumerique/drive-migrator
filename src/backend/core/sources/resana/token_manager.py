@@ -25,6 +25,13 @@ class ResanaTokenManager:
         """Return True if an access token is stored (regardless of validity)."""
         return bool(self.user.resana_access_token)
 
+    def clear_tokens(self) -> None:
+        """Remove all stored Resana tokens, marking the user as disconnected."""
+        self.user.resana_access_token = ""
+        self.user.resana_refresh_token = ""
+        self.user.resana_token_expires_at = None
+        self.user.save()
+
     def store_tokens(self, access: str, refresh: str) -> None:
         """Encrypt and persist both tokens. Sets expires_at = now + 3h."""
         self.user.resana_access_token = encrypt_token(access)
@@ -63,6 +70,9 @@ class ResanaTokenManager:
             },
             timeout=30,
         )
+        if response.status_code == 401:
+            self.clear_tokens()
+            raise ResanaTokenExpired("Resana refresh token is no longer valid.")
         response.raise_for_status()
         new_access = response.json()["access_token"]
         self.user.resana_access_token = encrypt_token(new_access)
