@@ -8,12 +8,10 @@ import { fetchAPI } from '@/api/fetchApi';
 import { User } from '@/core/auth/types';
 import { baseApiUrl } from '@/core/conf';
 import { MIGRATION_RETURN_STORAGE_KEY } from '@/core/migrationTarget';
-import { terminateSupportSession } from '@/hooks/useSupport';
 
 import { isPublicPath } from './publicRoutes';
 
 export const logout = () => {
-  terminateSupportSession();
   window.location.replace(new URL('logout/', baseApiUrl()).href);
 };
 
