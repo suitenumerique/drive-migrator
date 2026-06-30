@@ -287,15 +287,17 @@ export const WorkspacesToMigrate = ({
             </div>
 
             <div className="workspaces-to-migrate__footer">
-              <Button
-                type="button"
-                variant={isArchiveZipTarget ? 'primary' : 'bordered'}
-                color="brand"
-                disabled={!isSomethingSelected || isDownloading}
-                onClick={() => void downloadSelection()}
-              >
-                {t('Télécharger la sélection')}
-              </Button>
+              {isArchiveZipTarget && (
+                <Button
+                  type="button"
+                  variant={isArchiveZipTarget ? 'primary' : 'bordered'}
+                  color="brand"
+                  disabled={!isSomethingSelected || isDownloading}
+                  onClick={() => void downloadSelection()}
+                >
+                  {t('Télécharger la sélection')}
+                </Button>
+              )}
               {!isArchiveZipTarget && (
                 <Button
                   type="submit"

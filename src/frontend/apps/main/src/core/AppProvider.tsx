@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import { useState } from 'react';
 
-import { Support } from '@/components/Support/Support';
 import { getFrontendTheme } from '@/cunningham';
 import '@/i18n/initI18n';
 
@@ -38,9 +37,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <CunninghamProvider theme={theme}>
-        <Auth>
-          <Support>{children}</Support>
-        </Auth>
+        <Auth>{children}</Auth>
       </CunninghamProvider>
       <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-right" />
     </QueryClientProvider>
