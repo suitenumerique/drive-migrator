@@ -1,11 +1,25 @@
+const fs = require('fs');
 const path = require('path');
+
+const dotenv = require('dotenv');
 
 /** @type {import('next').NextConfig} */
 const frontendRoot = path.join(__dirname, '../..');
+const repoRoot = path.join(__dirname, '../../../../');
 const reactPath = path.join(frontendRoot, 'node_modules/react');
 const reactDomPath = path.join(frontendRoot, 'node_modules/react-dom');
 
+const commonEnvPath = path.join(repoRoot, 'env.d/development/common');
+if (fs.existsSync(commonEnvPath)) {
+  dotenv.config({ path: commonEnvPath });
+}
+
+const frontendTheme = process.env.FRONTEND_THEME || 'default';
+
 const nextConfig = {
+  env: {
+    FRONTEND_THEME: frontendTheme,
+  },
   output: 'export',
   outputFileTracingRoot: frontendRoot,
   trailingSlash: true,
