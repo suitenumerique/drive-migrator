@@ -21,6 +21,6 @@ namespace NodeJS {
   interface ProcessEnv {
     NEXT_PUBLIC_API_ORIGIN?: string;
     NEXT_PUBLIC_SIGNALING_URL?: string;
-    NEXT_PUBLIC_FRONTEND_THEME?: string;
+    FRONTEND_THEME?: string;
   }
 }

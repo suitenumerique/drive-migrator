@@ -22,9 +22,9 @@ export default function Finish() {
       <Button
         variant="tertiary"
         color="neutral"
+        icon={<ArrowLeftIcon width={16} height={16} aria-hidden />}
         onClick={() => router.push('/dashboard')}
       >
-        <ArrowLeftIcon width={16} height={16} aria-hidden />
         {t('Retour')}
       </Button>
       <div className="container--center page-finish">

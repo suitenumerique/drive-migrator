@@ -1,9 +1,16 @@
 'use client';
+
+import dynamic from 'next/dynamic';
 import { PropsWithChildren } from 'react';
 
 import { AppHelpMenu } from '@/components/AppHelpMenu/AppHelpMenu';
 import { Header } from '@/components/Header/Header';
-import { AppProvider } from '@/core/AppProvider';
+
+const AppProvider = dynamic(
+  () =>
+    import('@/core/AppProvider').then((mod) => ({ default: mod.AppProvider })),
+  { ssr: false },
+);
 
 export default function SubLayout({ children }: PropsWithChildren) {
   return (
