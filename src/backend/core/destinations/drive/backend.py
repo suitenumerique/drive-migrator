@@ -1,5 +1,6 @@
 """DriveDestinationBackend — uploads a workspace to La Suite Drive."""
 
+import csv
 import os
 
 from django.conf import settings
@@ -40,13 +41,31 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         root_id = root["id"]
         workspace.set_destination_metadata("drive", {"workspace_id": root_id})
 
-        self._upload_tree(backend, local_folder_path, root_id)
+        csv_path = self._write_users_csv(workspace, local_folder_path)
+        try:
+            self._upload_tree(backend, local_folder_path, root_id)
+        finally:
+            if csv_path:
+                os.remove(csv_path)
 
         if getattr(settings, "DRIVE_SHARE_MEMBERS", True):
             self._share_members(backend, workspace, root_id)
 
         workspace.set_destination_status("drive", Workspace.Status.SUCCESS)
         workspace.save()
+
+    def _write_users_csv(self, workspace, local_folder_path: str) -> str | None:
+        """Write the shared-users listing into the local folder, like the archive export."""
+        if not workspace.members:
+            return None
+        csv_path = os.path.join(local_folder_path, "users.csv")
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerows(
+                [m.get("name", ""), m.get("firstName", ""), m.get("email", "")]
+                for m in workspace.members
+            )
+        return csv_path
 
     def _share_members(self, backend, workspace, root_id: str) -> None:
         """Share root_id with all relevant emails, respecting the auth mode."""
