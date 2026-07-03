@@ -55,14 +55,17 @@ class AbstractSourceBackend(ABC):
     """
 
     source_type: str  # e.g. "osmose", "filesystem", "resana" — persisted in Workspace.source_type
+    label: str  # Human-readable label, e.g. "Osmose" — used in migration mail content
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         # Skip check for abstract intermediate classes
-        if not getattr(cls, "__abstractmethods__", None) and not hasattr(
-            cls, "source_type"
-        ):
-            raise TypeError(f"{cls.__name__} must define class attribute 'source_type'")
+        if not getattr(cls, "__abstractmethods__", None):
+            for attr in ("source_type", "label"):
+                if not hasattr(cls, attr):
+                    raise TypeError(
+                        f"{cls.__name__} must define class attribute '{attr}'"
+                    )
 
     @abstractmethod
     def get_workspaces(self, user) -> list[SourceWorkspace]:

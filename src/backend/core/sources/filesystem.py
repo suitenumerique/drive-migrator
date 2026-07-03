@@ -37,6 +37,7 @@ class FileSystemSourceBackend(AbstractSourceBackend):
     """
 
     source_type = "filesystem"
+    label = "Système de fichiers"
 
     def get_workspaces(self, user) -> list[SourceWorkspace]:
         root = settings.FILESYSTEM_SOURCE_ROOT
