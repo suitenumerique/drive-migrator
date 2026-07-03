@@ -13,12 +13,13 @@ from core.models import Workspace
 def _patch_mails_manager():
     """Prevent real MailsManager calls (DB access) across all tests in this module."""
     with patch("core.destinations.archive.backend.MailsManager") as mock_cls:
-        mock_cls.return_value.send_archive_download_mail = MagicMock()
+        mock_cls.return_value.send_migration_mail = MagicMock()
         yield mock_cls
 
 
 def test_export_sends_download_mail(_patch_mails_manager):
-    """export() sends the archive download email to the user after uploading."""
+    """export() sends the archive download email to the user after uploading,
+    via the generic MailsManager.send_migration_mail()."""
     workspace = MagicMock(spec=Workspace)
     workspace.members = []
     user = MagicMock()
@@ -30,9 +31,13 @@ def test_export_sends_download_mail(_patch_mails_manager):
         backend = ArchiveDestinationBackend()
         backend.export(workspace, user, "/tmp/workspace")
 
-    _patch_mails_manager.return_value.send_archive_download_mail.assert_called_once_with(
-        user, workspace, "http://s3.example.com/ws.zip"
-    )
+    mock_send = _patch_mails_manager.return_value.send_migration_mail
+    mock_send.assert_called_once()
+    args, kwargs = mock_send.call_args
+    assert args[:3] == (user, workspace, "archive_download")
+    assert str(args[3]["title"])
+    assert args[3]["download_url"] == "http://s3.example.com/ws.zip"
+    assert kwargs == {}
 
 
 def test_implements_abstract_destination():
@@ -133,7 +138,7 @@ def test_export_writes_users_csv_then_removes_it(tmp_path):
     user = MagicMock()
     csv_path = tmp_path / "users.csv"
 
-    def assert_csv_exists_during_zip(ws):
+    def assert_csv_exists_during_zip(_ws):
         assert csv_path.exists()
         assert csv_path.read_text().strip() == "Dupont,Jean,jean@example.com"
 

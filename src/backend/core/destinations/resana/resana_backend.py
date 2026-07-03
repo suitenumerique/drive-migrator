@@ -2,6 +2,7 @@ import json
 import logging
 
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 
 import requests
 from celery.utils.log import get_task_logger
@@ -119,7 +120,6 @@ class ResanaBackend:
         # Fetch resana user to make sure it exists before proceeding to upload.
         resana_user = self.fetch_user(user)
         if not resana_user:
-            # TODO: Add specific logic here.
             raise ValueError(f"User {user.email} not found in Resana")
 
         # Make sure folder and file name are not too long.
@@ -220,18 +220,25 @@ class ResanaBackend:
             workspace.set_destination_status("resana", Workspace.Status.SUCCESS)
             workspace.save()
 
-            if workspace.job_status == "completed":
-                get_logger().info("Sending send_resana_ready_mail ...")
-                mails_manager = MailsManager()
-                mails_manager.send_resana_ready_mail(
-                    workspace.migration_user, workspace
+            resana_url = "https://resana.numerique.gouv.fr/public/"
+            if job_status == "completed":
+                get_logger().info("Sending resana_ready mail ...")
+                title = _(f"Votre espace {workspace.title} est prêt sur Resana !")
+                MailsManager().send_migration_mail(
+                    workspace.migration_user,
+                    workspace,
+                    "resana_ready",
+                    {"title": title, "url": resana_url},
                 )
 
-            elif workspace.job_status == "failed":
-                get_logger().info("Sending send_resana_ready_errors_mail ...")
-                mails_manager = MailsManager()
-                mails_manager.send_resana_ready_errors_mail(
-                    workspace.migration_user, workspace
+            elif job_status == "failed":
+                get_logger().info("Sending resana_ready_errors mail ...")
+                title = _(f"Votre espace {workspace.title} est prêt sur Resana !")
+                MailsManager().send_migration_mail(
+                    workspace.migration_user,
+                    workspace,
+                    "resana_ready_errors",
+                    {"title": title, "url": resana_url},
                 )
 
     def request(self, method, url, **kwargs) -> requests.Response:
