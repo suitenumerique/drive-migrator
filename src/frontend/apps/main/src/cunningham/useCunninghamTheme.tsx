@@ -2,7 +2,7 @@ import { tokens } from './cunningham-tokens';
 
 export type Theme = keyof typeof tokens.themes;
 
-const DEFAULT_THEME: Theme = 'default';
+const DEFAULT_THEME: Theme = 'dsfr';
 
 const isTheme = (value: string): value is Theme =>
   Object.prototype.hasOwnProperty.call(tokens.themes, value);
