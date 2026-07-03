@@ -7,6 +7,14 @@ from core.destinations.drive.backend import DriveDestinationBackend
 from core.models import Workspace
 
 
+@pytest.fixture(autouse=True)
+def _patch_mails_manager():
+    """Prevent real MailsManager calls (DB access) across all tests in this module."""
+    with patch("core.destinations.drive.backend.MailsManager") as mock_cls:
+        mock_cls.return_value.send_migration_mail = MagicMock()
+        yield mock_cls
+
+
 def test_implements_abstract_destination():
     assert issubclass(DriveDestinationBackend, AbstractDestinationBackend)
 
@@ -425,3 +433,29 @@ def test_user_token_mode_sets_status_success(mock_cls, tmp_path, settings):
     workspace.set_destination_status.assert_called_once_with(
         "drive", Workspace.Status.SUCCESS
     )
+
+
+# ---------------------------------------------------------------------------
+# Completion mail
+# ---------------------------------------------------------------------------
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_export_sends_drive_ready_mail(
+    mock_backend_cls, tmp_path, settings, _patch_mails_manager
+):
+    """export() sends a 'drive_ready' migration mail to the user after upload."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = mock_backend_cls.return_value
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    workspace = _make_workspace()
+    user = MagicMock()
+
+    DriveDestinationBackend().export(workspace, user, str(tmp_path))
+
+    mock_send = _patch_mails_manager.return_value.send_migration_mail
+    mock_send.assert_called_once()
+    args, kwargs = mock_send.call_args
+    assert args[:3] == (user, workspace, "drive_ready")
+    assert str(args[3]["title"])
+    assert kwargs == {}

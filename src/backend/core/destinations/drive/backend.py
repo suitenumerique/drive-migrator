@@ -4,12 +4,14 @@ import csv
 import os
 
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.drive.drive_backend import (
     DriveServiceAccountBackend,
     DriveUserTokenBackend,
 )
+from core.mails_manager import MailsManager
 from core.models import Workspace
 
 
@@ -50,6 +52,11 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
         if getattr(settings, "DRIVE_SHARE_MEMBERS", True):
             self._share_members(backend, workspace, root_id)
+
+        title = _(f"Votre espace {workspace.title} est prêt sur La Suite Drive !")
+        MailsManager().send_migration_mail(
+            user, workspace, "drive_ready", {"title": title}
+        )
 
         workspace.set_destination_status("drive", Workspace.Status.SUCCESS)
         workspace.save()
