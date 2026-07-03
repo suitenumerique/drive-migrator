@@ -13,7 +13,7 @@
           <mj-divider border-width="1px" border-style="solid" border-color="#DDDDDD" width="30%" align="left"/>
 
           <!-- Main Message -->
-          <mj-text>{% blocktrans %}Suite à votre demande, la migration de votre espace Osmose {{workspace_name}} vers Resana est finalisée.{% endblocktrans %}</mj-text>
+          <mj-text>{% blocktrans %}Suite à votre demande, la migration de votre espace {{source_label}} <strong>{{workspace_name}}</strong> vers Resana est finalisée.{% endblocktrans %}</mj-text>
           <mj-text>{% blocktrans %}Connectez vous à votre compte Resana afin de retrouver votre nouvel espace de travail.{% endblocktrans %}</mj-text>
 
           <mj-button href="{{url}}" background-color="#000091" color="white">

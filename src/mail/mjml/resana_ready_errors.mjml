@@ -13,7 +13,7 @@
                     <mj-divider border-width="1px" border-style="solid" border-color="#DDDDDD" width="30%" align="left"/>
 
                     <!-- Main Message -->
-                    <mj-text>{% blocktrans %}Suite à votre demande, la migration de votre espace Osmose {{workspace_name}} vers Resana est finalisée.{% endblocktrans %}</mj-text>
+                    <mj-text>{% blocktrans %}Suite à votre demande, la migration de votre espace {{source_label}} <strong>{{workspace_name}}</strong> vers Resana est finalisée.{% endblocktrans %}</mj-text>
 
                     <mj-text font-weight="900">{% blocktrans %}⚠️ Important ⚠️{% endblocktrans %}</mj-text>
                     <mj-text font-weight="900">{% blocktrans %}Nous attirons votre attention sur le fait que certains fichiers n'ont pas pu être importés sur Resana, ceci peut être dû à de multiples causes telles qu'un refus de la part de l'anti virus Resana. {% endblocktrans %}</mj-text>
