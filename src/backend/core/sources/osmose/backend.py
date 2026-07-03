@@ -22,6 +22,7 @@ class OsmoseSourceBackend(AbstractSourceBackend):
     """
 
     source_type = "osmose"
+    label = "Osmose"
 
     def get_workspaces(self, user) -> list[SourceWorkspace]:
         backend = OsmoseRealBackend()

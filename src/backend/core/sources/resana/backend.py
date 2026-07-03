@@ -15,6 +15,7 @@ from core.sources.resana.token_manager import ResanaTokenManager
 
 class ResanaSourceBackend(AbstractSourceBackend):
     source_type = "resana"
+    label = "Resana"
 
     def __init__(self):
         self._user = None

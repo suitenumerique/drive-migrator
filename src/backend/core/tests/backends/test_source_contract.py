@@ -14,7 +14,7 @@ from core.sources.resana.backend import ResanaSourceBackend
 def test_abstract_source_cannot_be_instantiated():
     """AbstractSourceBackend must not be directly instantiable."""
     with pytest.raises(TypeError):
-        AbstractSourceBackend()
+        AbstractSourceBackend()  # pylint: disable=abstract-class-instantiated
 
 
 def test_source_workspace_dataclass():
@@ -22,7 +22,7 @@ def test_source_workspace_dataclass():
     ws = SourceWorkspace(id="abc", title="My Workspace")
     assert ws.id == "abc"
     assert ws.title == "My Workspace"
-    assert ws.raw_data == {}
+    assert not ws.raw_data
 
 
 def test_source_folder_dataclass():
@@ -50,6 +50,7 @@ def test_prepare_export_default_is_noop():
 
     class MinimalSource(AbstractSourceBackend):
         source_type = "minimal"
+        label = "Minimal"
 
         def get_workspaces(self, user):
             return []
@@ -83,6 +84,25 @@ def test_subclass_without_source_type_raises():
     with pytest.raises(TypeError):
 
         class BadSource(AbstractSourceBackend):  # pylint: disable=unused-variable
+            label = "Bad"
+
+            def get_workspaces(self, user):
+                return []
+
+            def get_workspace_structure(self, workspace):
+                return SourceFolder(name="root")
+
+            def download_file(self, file, destination_path):
+                pass
+
+
+def test_subclass_without_label_raises():
+    """Concrete subclass missing label must raise TypeError at definition time."""
+    with pytest.raises(TypeError):
+
+        class BadSource(AbstractSourceBackend):  # pylint: disable=unused-variable
+            source_type = "bad"
+
             def get_workspaces(self, user):
                 return []
 

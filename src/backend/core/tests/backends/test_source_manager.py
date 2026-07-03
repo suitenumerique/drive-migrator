@@ -16,6 +16,7 @@ from core.models import Workspace
 
 class _FakeSource(AbstractSourceBackend):
     source_type = "fake"
+    label = "Fake"
 
     def get_workspaces(self, user):
         return [
