@@ -508,6 +508,15 @@ class Base(Configuration):
     LOGIN_REDIRECT_URL_FAILURE = values.Value(
         None, environ_name="LOGIN_REDIRECT_URL_FAILURE", environ_prefix=None
     )
+    # Frontend path users with an account pending admin validation (restricted
+    # mode, is_active=False) are redirected to, appended to LOGIN_REDIRECT_URL_FAILURE's
+    # domain instead of redirecting to its path (the logged-out homepage).
+    LOGIN_REDIRECT_PENDING_VALIDATION_PATH = values.Value(
+        "/account-pending",
+        environ_name="LOGIN_REDIRECT_PENDING_VALIDATION_PATH",
+        environ_prefix=None,
+    )
+    OIDC_CALLBACK_CLASS = "core.authentication.views.OIDCAuthenticationCallbackView"
     LOGOUT_REDIRECT_URL = values.Value(
         None, environ_name="LOGOUT_REDIRECT_URL", environ_prefix=None
     )

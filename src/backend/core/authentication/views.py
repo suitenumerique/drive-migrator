@@ -12,8 +12,35 @@ from mozilla_django_oidc.utils import (
     absolutify,
 )
 from mozilla_django_oidc.views import (
+    OIDCAuthenticationCallbackView as MozillaOIDCAuthenticationCallbackView,
+)
+from mozilla_django_oidc.views import (
     OIDCLogoutView as MozillaOIDCOIDCLogoutView,
 )
+
+
+class OIDCAuthenticationCallbackView(MozillaOIDCAuthenticationCallbackView):
+    """Custom OIDC authentication callback view.
+
+    In restricted mode (see FeatureFlag.Name.AUTO_VALIDATE_NEW_USERS), a newly
+    created user is inactive until an admin validates their account, so login
+    fails (mozilla-django-oidc only calls login_success() for active users).
+    Redirect that specific case to a dedicated "pending validation" page instead
+    of the generic failure URL: the generic failure URL is also the frontend's
+    logged-out homepage, which would immediately retry the OIDC login and loop.
+    """
+
+    @property
+    def failure_url(self):
+        default_failure_url = super().failure_url
+        user = getattr(self, "user", None)
+        if user is None or user.is_active:
+            return default_failure_url
+
+        path = self.get_settings(
+            "LOGIN_REDIRECT_PENDING_VALIDATION_PATH", "/account-pending"
+        )
+        return default_failure_url.rstrip("/") + path
 
 
 class OIDCLogoutView(MozillaOIDCOIDCLogoutView):
