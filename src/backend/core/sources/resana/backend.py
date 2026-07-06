@@ -1,5 +1,7 @@
 """ResanaSourceBackend — reads workspaces from the Interstis GED API."""
 
+from django.conf import settings
+
 from core.backends.source import (
     AbstractSourceBackend,
     SourceFile,
@@ -7,6 +9,7 @@ from core.backends.source import (
     SourceWorkspace,
 )
 from core.sources.resana.interstis_client import InterstisClient
+from core.sources.resana.resana_members_client import ResanaMembersClient
 from core.sources.resana.token_manager import ResanaTokenManager
 
 
@@ -45,6 +48,15 @@ class ResanaSourceBackend(AbstractSourceBackend):
     def download_file(self, file: SourceFile, destination_path: str) -> None:
         client = self._get_client()
         client.download_file(file.download_url, destination_path)
+
+    def prepare_export(self, workspace, local_folder_path: str) -> None:
+        token = ResanaTokenManager(workspace.migration_user).get_valid_token()
+        client = ResanaMembersClient(token, settings.RESANA_WEB_ENDPOINT)
+        slug = client.find_slug_by_workspace_name(workspace.title)
+        if slug is None:
+            return
+        workspace.members = client.list_workspace_members(slug)
+        workspace.save()
 
     def _explore_folder(self, uuid: str, name: str, client) -> SourceFolder:
         """Recursively fetch a folder's contents via the Interstis explore endpoint.
