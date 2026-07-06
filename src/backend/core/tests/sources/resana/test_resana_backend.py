@@ -1,5 +1,6 @@
 """Tests for ResanaSourceBackend."""
 
+# pylint: disable=protected-access
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,7 +11,6 @@ from core.backends.source import (
     SourceFolder,
     SourceWorkspace,
 )
-from core.factories import UserFactory
 from core.sources.resana.backend import ResanaSourceBackend
 from core.sources.resana.token_manager import ResanaTokenExpired
 
@@ -48,13 +48,13 @@ def test_get_client_uses_token_manager(settings):
     backend = ResanaSourceBackend()
     backend._user = user
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
             backend._get_client()
 
-    MockTM.assert_called_once_with(user)
-    MockClient.assert_called_once_with("tok")
+    mock_tm.assert_called_once_with(user)
+    mock_client.assert_called_once_with("tok")
 
 
 def test_get_client_raises_when_no_user_set(settings):
@@ -71,8 +71,8 @@ def test_get_client_propagates_token_expired(settings):
     backend = ResanaSourceBackend()
     backend._user = user
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.side_effect = ResanaTokenExpired("expired")
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.side_effect = ResanaTokenExpired("expired")
 
         with pytest.raises(ResanaTokenExpired):
             backend._get_client()
@@ -91,10 +91,10 @@ def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
     ]
     user = MagicMock()
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.get_workspaces.return_value = raw_workspaces
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.get_workspaces.return_value = raw_workspaces
             result = ResanaSourceBackend().get_workspaces(user)
 
     assert len(result) == 2
@@ -109,10 +109,10 @@ def test_get_workspaces_stores_user_on_backend(settings):
     user = MagicMock()
     backend = ResanaSourceBackend()
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.get_workspaces.return_value = []
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.get_workspaces.return_value = []
             backend.get_workspaces(user)
 
     assert backend._user is user
@@ -129,10 +129,10 @@ def test_get_workspace_structure_stores_migration_user(settings):
     workspace = _make_workspace(user)
     backend = ResanaSourceBackend()
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.explore.return_value = []
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.explore.return_value = []
             backend.get_workspace_structure(workspace)
 
     assert backend._user is user
@@ -154,10 +154,10 @@ def test_get_workspace_structure_flat_folder(settings):
             ]
         return []
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.explore.side_effect = explore_side_effect
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.explore.side_effect = explore_side_effect
             result = ResanaSourceBackend().get_workspace_structure(workspace)
 
     assert isinstance(result, SourceFolder)
@@ -175,10 +175,10 @@ def test_get_workspace_structure_empty_workspace(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     workspace = _make_workspace()
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.explore.return_value = []
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.explore.return_value = []
             result = ResanaSourceBackend().get_workspace_structure(workspace)
 
     assert isinstance(result, SourceFolder)
@@ -199,10 +199,10 @@ def test_get_workspace_structure_normalises_extension_without_dot(settings):
             ]
         return []
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.explore.side_effect = explore_side_effect
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.explore.side_effect = explore_side_effect
             result = ResanaSourceBackend().get_workspace_structure(workspace)
 
     assert result.files[0].extension == ".jpg"
@@ -227,10 +227,10 @@ def test_get_workspace_structure_recurses_into_subfolders(settings):
             ]
         return []
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.explore.side_effect = explore_side_effect
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.explore.side_effect = explore_side_effect
             result = ResanaSourceBackend().get_workspace_structure(workspace)
 
     assert len(result.children) == 1
@@ -239,7 +239,7 @@ def test_get_workspace_structure_recurses_into_subfolders(settings):
     assert len(subfolder.files) == 1
     assert subfolder.files[0].name == "report"
     assert subfolder.files[0].extension == ".pdf"
-    MockClient.return_value.explore.assert_any_call("folder-1")
+    mock_client.return_value.explore.assert_any_call("folder-1")
 
 
 def test_get_workspace_structure_deep_nesting(settings):
@@ -261,10 +261,10 @@ def test_get_workspace_structure_deep_nesting(settings):
             ]
         return []
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.explore.side_effect = explore_side_effect
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.explore.side_effect = explore_side_effect
             result = ResanaSourceBackend().get_workspace_structure(workspace)
 
     lvl1 = result.children[0]
@@ -285,10 +285,10 @@ def test_get_workspace_structure_empty_subfolder_does_not_crash(settings):
             return [{"folders": [{"uuid": "empty-f", "name": "Empty"}], "files": []}]
         return []
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
-            MockClient.return_value.explore.side_effect = explore_side_effect
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.explore.side_effect = explore_side_effect
             result = ResanaSourceBackend().get_workspace_structure(workspace)
 
     assert len(result.children) == 1
@@ -311,13 +311,13 @@ def test_download_file_uses_stored_user(settings):
         id="file-uuid", name="doc", extension=".pdf", download_url="file-uuid"
     )
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as MockTM:
-        MockTM.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.InterstisClient") as MockClient:
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
             backend.download_file(source_file, "/tmp/doc.pdf")
 
-    MockTM.assert_called_once_with(user)
-    MockClient.return_value.download_file.assert_called_once_with(
+    mock_tm.assert_called_once_with(user)
+    mock_client.return_value.download_file.assert_called_once_with(
         "file-uuid", "/tmp/doc.pdf"
     )
 
@@ -331,3 +331,82 @@ def test_download_file_raises_when_no_user_set(settings):
 
     with pytest.raises(RuntimeError, match="No user context"):
         backend.download_file(source_file, "/tmp/doc.pdf")
+
+
+# ---------------------------------------------------------------------------
+# prepare_export()
+# ---------------------------------------------------------------------------
+
+
+def _patch_members_client(mock_cls, slug="2137419", members=None):
+    mock_cls.return_value.find_slug_by_workspace_name.return_value = slug
+    mock_cls.return_value.list_workspace_members.return_value = members or []
+
+
+def test_prepare_export_populates_members_when_workspace_found(settings):
+    """prepare_export() sets workspace.members from the resolved slug's member list."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = _make_workspace()
+    workspace.title = "TEST Worskspace"
+    members = [
+        {"name": "Dupont", "firstName": "Jean", "email": "jean.dupont@example.test"}
+    ]
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_client:
+            _patch_members_client(mock_client, members=members)
+            ResanaSourceBackend().prepare_export(workspace, "/tmp/workdir")
+
+    assert workspace.members == members
+    workspace.save.assert_called_once()
+
+
+def test_prepare_export_resolves_slug_by_workspace_title(settings):
+    """prepare_export() looks up the PHP slug using workspace.title."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = _make_workspace()
+    workspace.title = "TEST Worskspace"
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_client:
+            _patch_members_client(mock_client)
+            ResanaSourceBackend().prepare_export(workspace, "/tmp/workdir")
+
+    mock_client.return_value.find_slug_by_workspace_name.assert_called_once_with(
+        "TEST Worskspace"
+    )
+
+
+def test_prepare_export_does_nothing_when_slug_not_found(settings):
+    """prepare_export() leaves workspace.members untouched when no matching slug is found."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = _make_workspace()
+    workspace.title = "Unknown workspace"
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_client:
+            _patch_members_client(mock_client, slug=None)
+            ResanaSourceBackend().prepare_export(workspace, "/tmp/workdir")
+
+    mock_client.return_value.list_workspace_members.assert_not_called()
+    workspace.save.assert_not_called()
+
+
+def test_prepare_export_uses_migration_user_token(settings):
+    """prepare_export() authenticates via the workspace's migration_user."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    user = MagicMock()
+    workspace = _make_workspace(user)
+    workspace.title = "TEST Worskspace"
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_client:
+            _patch_members_client(mock_client)
+            ResanaSourceBackend().prepare_export(workspace, "/tmp/workdir")
+
+    mock_tm.assert_called_once_with(user)
+    mock_client.assert_called_once_with("tok", "https://resana-web.example.test")

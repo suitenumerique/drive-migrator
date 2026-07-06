@@ -167,6 +167,9 @@ class Base(Configuration):
     RESANA_API_ENDPOINT = values.Value(
         environ_name="RESANA_API_ENDPOINT", environ_prefix=None
     )
+    RESANA_WEB_ENDPOINT = values.Value(
+        environ_name="RESANA_WEB_ENDPOINT", environ_prefix=None
+    )
     RESANA_ALT_API_ENDPOINT = values.Value(
         environ_name="RESANA_ALT_API_ENDPOINT", environ_prefix=None
     )
