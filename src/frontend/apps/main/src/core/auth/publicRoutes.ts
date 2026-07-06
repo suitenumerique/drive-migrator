@@ -10,6 +10,7 @@ const PUBLIC_PATHS = new Set([
   '/legal-notice',
   '/accessibility',
   '/personal-data-cookies',
+  '/account-pending',
 ]);
 
 export const isPublicPath = (pathname: string) =>
