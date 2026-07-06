@@ -11,7 +11,9 @@
       "Démarrer la migration": "Start migration",
       "Chargement…": "Loading…",
       "Voir la documentation": "View documentation",
-      "Archive zip": "Zip archive"
+      "Archive zip": "Zip archive",
+      "Votre compte est en attente de validation": "Your account is pending validation",
+      "Votre compte a bien été créé. Un administrateur doit valider votre accès avant que vous puissiez utiliser cet outil.": "Your account has been created. An administrator must validate your access before you can use this tool."
     }
   },
   "fr": {
@@ -31,7 +33,9 @@
       "api_errors.WorkspaceNotFound": "Communauté non trouvée",
       "api_errors.ResanaUserNotFound": "Vous semblez ne pas avoir de compte Resana avec cette addresse email, veuillez vous créer un compte au préalable.",
       "api_errors.DriveTokenRequired": "Votre session Drive LaSuite a expiré, veuillez vous reconnecter.",
-      "api_errors.ResanaTokenRequired": "Vous devez vous connecter à Resana avant de lancer la migration."
+      "api_errors.ResanaTokenRequired": "Vous devez vous connecter à Resana avant de lancer la migration.",
+      "Votre compte est en attente de validation": "Votre compte est en attente de validation",
+      "Votre compte a bien été créé. Un administrateur doit valider votre accès avant que vous puissiez utiliser cet outil.": "Votre compte a bien été créé. Un administrateur doit valider votre accès avant que vous puissiez utiliser cet outil."
     }
   }
 }
