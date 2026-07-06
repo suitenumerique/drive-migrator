@@ -313,3 +313,65 @@ def test_empty_refresh_token_stored_as_empty_without_encryption(monkeypatch):
 
     db_user.refresh_from_db()
     assert db_user.oidc_refresh_token == ""
+
+
+# ---------------------------------------------------------------------------
+# Restricted mode (issue #111): new users must be validated by an admin
+# ---------------------------------------------------------------------------
+
+
+def test_create_user_is_active_by_default_when_no_feature_flag_set():
+    """With no FeatureFlag row, new users are active (current, non-restricted behavior)."""
+    klass = OIDCAuthenticationBackend()
+
+    user = klass.create_user({"sub": "123"})
+
+    assert user.is_active is True
+
+
+def test_create_user_is_active_when_auto_validate_flag_active():
+    """Auto-validate flag active (explicit) -> new users are active."""
+    models.FeatureFlag.objects.create(
+        name=models.FeatureFlag.Name.AUTO_VALIDATE_NEW_USERS, is_active=True
+    )
+    klass = OIDCAuthenticationBackend()
+
+    user = klass.create_user({"sub": "123"})
+
+    assert user.is_active is True
+
+
+def test_create_user_is_not_active_when_restricted_mode_enabled():
+    """Auto-validate flag disabled (restricted mode) -> new users are inactive."""
+    models.FeatureFlag.objects.create(
+        name=models.FeatureFlag.Name.AUTO_VALIDATE_NEW_USERS, is_active=False
+    )
+    klass = OIDCAuthenticationBackend()
+
+    user = klass.create_user({"sub": "123"})
+
+    assert user.is_active is False
+
+
+def test_get_or_create_user_returns_inactive_user_unchanged(monkeypatch):
+    """get_or_create_user() still returns an inactive (not-yet-validated) user.
+
+    Blocking the actual login is the OIDC callback view's responsibility
+    (see OIDCAuthenticationCallbackView.failure_url), which checks `user.is_active`
+    before calling login_success().
+    """
+    backend = OIDCAuthenticationBackend()
+    db_user = UserFactory(is_active=False)
+
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda self, *a: {"sub": db_user.sub},
+    )
+
+    user = backend.get_or_create_user(
+        access_token="test-token", id_token=None, payload=None
+    )
+
+    assert user == db_user
+    assert user.is_active is False

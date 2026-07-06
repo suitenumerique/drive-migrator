@@ -12,7 +12,8 @@ from mozilla_django_oidc.auth import (
 )
 
 from core.encryption import encrypt_token
-from core.models import User
+from core.models import FeatureFlag, User
+from core.utils import is_feature
 
 
 class OIDCAuthenticationBackend(MozillaOIDCAuthenticationBackend):
@@ -138,6 +139,7 @@ class OIDCAuthenticationBackend(MozillaOIDCAuthenticationBackend):
             sub=sub,
             email=claims.get("email"),
             password="!",  # noqa: S106
+            is_active=is_feature(FeatureFlag.Name.AUTO_VALIDATE_NEW_USERS),
         )
 
         return user

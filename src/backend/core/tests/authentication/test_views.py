@@ -15,7 +15,11 @@ import pytest
 from rest_framework.test import APIClient
 
 from core import factories
-from core.authentication.views import OIDCLogoutCallbackView, OIDCLogoutView
+from core.authentication.views import (
+    OIDCAuthenticationCallbackView,
+    OIDCLogoutCallbackView,
+    OIDCLogoutView,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -229,3 +233,51 @@ def test_view_logout_callback():
 
     assert response.status_code == 302
     assert response.url == "/example-logout"
+
+
+# ---------------------------------------------------------------------------
+# Restricted mode (issue #111): redirect pending-validation accounts
+# ---------------------------------------------------------------------------
+
+
+@override_settings(LOGIN_REDIRECT_URL_FAILURE="/default-failure")
+def test_callback_failure_url_default_when_no_user():
+    """With no user (e.g. auth failed before user resolution), use the default failure URL."""
+    view = OIDCAuthenticationCallbackView()
+    view.user = None
+
+    assert view.failure_url == "/default-failure"
+
+
+@override_settings(LOGIN_REDIRECT_URL_FAILURE="/default-failure")
+def test_callback_failure_url_default_when_user_active():
+    """An active user hitting login_failure (e.g. bad claims) uses the default failure URL."""
+    view = OIDCAuthenticationCallbackView()
+    view.user = factories.UserFactory(is_active=True)
+
+    assert view.failure_url == "/default-failure"
+
+
+@override_settings(
+    LOGIN_REDIRECT_URL_FAILURE="https://example.com",
+    LOGIN_REDIRECT_PENDING_VALIDATION_PATH="/account-pending",
+)
+def test_callback_failure_url_pending_validation_when_user_inactive():
+    """An inactive (not-yet-validated) user is redirected to the pending-validation path,
+    appended to the same domain as LOGIN_REDIRECT_URL_FAILURE."""
+    view = OIDCAuthenticationCallbackView()
+    view.user = factories.UserFactory(is_active=False)
+
+    assert view.failure_url == "https://example.com/account-pending"
+
+
+@override_settings(
+    LOGIN_REDIRECT_URL_FAILURE="https://example.com/",
+    LOGIN_REDIRECT_PENDING_VALIDATION_PATH="/account-pending",
+)
+def test_callback_failure_url_pending_validation_strips_trailing_slash():
+    """A trailing slash on LOGIN_REDIRECT_URL_FAILURE doesn't produce a double slash."""
+    view = OIDCAuthenticationCallbackView()
+    view.user = factories.UserFactory(is_active=False)
+
+    assert view.failure_url == "https://example.com/account-pending"
