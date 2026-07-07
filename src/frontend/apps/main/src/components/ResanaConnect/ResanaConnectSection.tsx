@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { fetchAPI } from '@/api/fetchApi';
+import { useAuth } from '@/core/auth/Auth';
 
 import './ResanaConnectSection.scss';
 
@@ -18,7 +19,7 @@ export const ResanaConnectSection = ({
   onAuthRequired,
 }: Props) => {
   const { t } = useTranslation();
-  const [email, setEmail] = useState('');
+  const { user } = useAuth();
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -30,7 +31,7 @@ export const ResanaConnectSection = ({
     try {
       const response = await fetchAPI(
         'resana/auth/connect',
-        { method: 'POST', body: JSON.stringify({ email, password }) },
+        { method: 'POST', body: JSON.stringify({ password }) },
         { logoutOn401: false },
       );
       if (response.ok) {
@@ -62,11 +63,9 @@ export const ResanaConnectSection = ({
         variant="classic"
         label={t('Adresse e-mail')}
         type="email"
-        placeholder={t('Votre e-mail')}
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
+        value={user?.email ?? ''}
         fullWidth
-        required
+        disabled
       />
       <Input
         className="resana-connect-form__field"
