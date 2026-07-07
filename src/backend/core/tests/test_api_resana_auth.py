@@ -29,9 +29,7 @@ def _auth_client(user):
 
 
 def test_connect_requires_authentication():
-    response = APIClient().post(
-        CONNECT_URL, {"email": "u@example.com", "password": "pw"}
-    )
+    response = APIClient().post(CONNECT_URL, {"password": "pw"})
     assert response.status_code == 401
 
 
@@ -70,15 +68,9 @@ def test_status_returns_connected_when_token_present():
 # ---------------------------------------------------------------------------
 
 
-def test_connect_returns_400_when_email_missing():
-    user = UserFactory()
-    response = _auth_client(user).post(CONNECT_URL, {"password": "pw"})
-    assert response.status_code == 400
-
-
 def test_connect_returns_400_when_password_missing():
     user = UserFactory()
-    response = _auth_client(user).post(CONNECT_URL, {"email": "u@example.com"})
+    response = _auth_client(user).post(CONNECT_URL, {})
     assert response.status_code == 400
 
 
@@ -92,13 +84,11 @@ def test_connect_stores_tokens_on_success(settings):
     settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/public/auth/login"
     settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
 
-    user = UserFactory()
+    user = UserFactory(email="u@example.com")
 
     with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
         mock_login.return_value = ("fresh-access", "fresh-refresh")
-        response = _auth_client(user).post(
-            CONNECT_URL, {"email": "u@example.com", "password": "s3cr3t"}
-        )
+        response = _auth_client(user).post(CONNECT_URL, {"password": "s3cr3t"})
 
     assert response.status_code == 200
     mock_login.assert_called_once_with(
@@ -113,6 +103,31 @@ def test_connect_stores_tokens_on_success(settings):
     assert user.resana_token_expires_at is not None
 
 
+def test_connect_ignores_email_from_request_body(settings):
+    """The Resana login always uses the authenticated user's app email,
+    never a value supplied in the request body."""
+    settings.RESANA_KEYCLOAK_ENDPOINT = "https://kc.example.com/realms/TEST"
+    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/public/auth/login"
+    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
+
+    user = UserFactory(email="real-user@example.com")
+
+    with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
+        mock_login.return_value = ("acc", "ref")
+        response = _auth_client(user).post(
+            CONNECT_URL,
+            {"email": "spoofed@example.com", "password": "s3cr3t"},
+        )
+
+    assert response.status_code == 200
+    mock_login.assert_called_once_with(
+        "real-user@example.com",
+        "s3cr3t",
+        keycloak_endpoint="https://kc.example.com/realms/TEST",
+        resana_auth_endpoint="https://resana.example.com/public/auth/login",
+    )
+
+
 def test_connect_returns_401_on_bad_credentials(settings):
     settings.RESANA_KEYCLOAK_ENDPOINT = "https://kc.example.com/realms/TEST"
     settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/public/auth/login"
@@ -121,9 +136,7 @@ def test_connect_returns_401_on_bad_credentials(settings):
 
     with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
         mock_login.side_effect = ValueError("Auth failed")
-        response = _auth_client(user).post(
-            CONNECT_URL, {"email": "u@example.com", "password": "wrong"}
-        )
+        response = _auth_client(user).post(CONNECT_URL, {"password": "wrong"})
 
     assert response.status_code == 401
 
@@ -138,7 +151,7 @@ def test_connect_returns_status_connected_after_success(settings):
 
     with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
         mock_login.return_value = ("acc", "ref")
-        client.post(CONNECT_URL, {"email": "u@example.com", "password": "pw"})
+        client.post(CONNECT_URL, {"password": "pw"})
 
     response = client.get(STATUS_URL)
     assert response.data["connected"] is True
