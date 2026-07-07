@@ -60,12 +60,13 @@ class AbstractSourceBackend(ABC):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         # Skip check for abstract intermediate classes
-        if not getattr(cls, "__abstractmethods__", None):
-            for attr in ("source_type", "label"):
-                if not hasattr(cls, attr):
-                    raise TypeError(
-                        f"{cls.__name__} must define class attribute '{attr}'"
-                    )
+        if getattr(cls, "__abstractmethods__", None):
+            return
+            
+        if missing := [attr for attr in ("source_type", "label") if not hasattr(cls, attr)]:
+            raise TypeError(
+                f"{cls.__name__} must define class attribute(s): {', '.join(missing)}"
+            )
 
     @abstractmethod
     def get_workspaces(self, user) -> list[SourceWorkspace]:
