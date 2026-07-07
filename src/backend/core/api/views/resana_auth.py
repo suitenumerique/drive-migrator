@@ -14,7 +14,6 @@ from core.sources.resana.token_manager import ResanaTokenManager
 
 
 class _ConnectSerializer(serializers.Serializer):
-    email = serializers.EmailField()
     password = serializers.CharField()
 
 
@@ -27,7 +26,7 @@ class ResanaAuthConnectView(APIView):
 
         try:
             access, refresh = _keycloak_login(
-                serializer.validated_data["email"],
+                request.user.email,
                 serializer.validated_data["password"],
                 keycloak_endpoint=settings.RESANA_KEYCLOAK_ENDPOINT,
                 resana_auth_endpoint=settings.RESANA_AUTH_ENDPOINT,
