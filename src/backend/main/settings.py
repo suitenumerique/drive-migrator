@@ -211,6 +211,13 @@ class Base(Configuration):
         environ_name="EXTRA_API_URL_MODULES",
         environ_prefix=None,
     )
+    # 0 = unlimited. When > 0, migrations only download the first N files per
+    # workspace (source structure fetch is unaffected, only file downloads are capped).
+    MIGRATION_FILE_LIMIT_PER_WORKSPACE = values.IntegerValue(
+        0,
+        environ_name="MIGRATION_FILE_LIMIT_PER_WORKSPACE",
+        environ_prefix=None,
+    )
 
     # Filesystem source backend
     FILESYSTEM_SOURCE_ROOT = values.Value(

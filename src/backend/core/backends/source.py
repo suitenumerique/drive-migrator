@@ -42,6 +42,30 @@ class SourceWorkspace:
     raw_data: dict = field(default_factory=dict)
 
 
+def truncate_folder_files(folder: SourceFolder, limit: int) -> bool:
+    """
+    Keep only the first `limit` files in the tree, in pre-order (a folder's own
+    files first, then its children in list order). Mutates `folder` in place.
+
+    Returns True if any file was removed, i.e. the tree had more than `limit`
+    files.
+    """
+    remaining = limit
+    truncated = False
+
+    def visit(node: SourceFolder) -> None:
+        nonlocal remaining, truncated
+        if len(node.files) > remaining:
+            truncated = True
+        node.files = node.files[:remaining]
+        remaining -= len(node.files)
+        for child in node.children:
+            visit(child)
+
+    visit(folder)
+    return truncated
+
+
 class AbstractSourceBackend(ABC):
     """
     Contract for any platform that can serve as a migration source.
