@@ -33,6 +33,7 @@ export interface Workspace {
   source_type?: string;
   destination_statuses: Record<string, WorkspaceStatus>;
   destination_metadata: Record<string, Record<string, unknown>>;
+  files_limited: boolean;
 }
 
 const WorkspaceStatusBadge = ({
@@ -165,6 +166,13 @@ export const WorkspaceExporting = ({ workspace }: { workspace: Workspace }) => {
           ),
         )}
       </div>
+      {workspace.files_limited && (
+        <Alert type={VariantType.WARNING}>
+          {t(
+            "Migration partielle : l'espace contenait plus de fichiers que la limite autorisée pendant cette phase de test, seule une partie a été migrée.",
+          )}
+        </Alert>
+      )}
       {showDetails() && options}
       <Modal
         title={t('Détails erreurs Resana')}
