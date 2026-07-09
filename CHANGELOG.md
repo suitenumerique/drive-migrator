@@ -41,6 +41,7 @@ and this project adheres to
 - add optional osmose backend debug files
 - add helm files for local and staging envs
 - implement basic Resana API
+- add optional setting to cap migrated files per workspace.
 
 ### Changed
 
