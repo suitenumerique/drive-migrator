@@ -16,7 +16,7 @@ from core.api.permissions import IsAuthenticated
 from core.encryption import decrypt_token, encrypt_token
 from core.sources.resana.token_manager import ResanaTokenManager
 
-ITS_PORTAIL_ATTR_RE = re.compile(
+INTERSTIS_PORTAL_ATTRIBUTE_REGEX = re.compile(
     r'login_action="([^"]+)"[\s\S]*?'
     r'otp_input_only="([^"]*)"[\s\S]*?'
     r'selected_credentials="([^"]*)"'
@@ -188,7 +188,7 @@ def _keycloak_login(
     refresh = session.cookies.get("interstis_refresh")
 
     if not access:
-        otp_match = ITS_PORTAIL_ATTR_RE.search(r2.text)
+        otp_match = INTERSTIS_PORTAL_ATTRIBUTE_REGEX.search(r2.text)
         if otp_match:
             login_action, otp_input_only, selected_credentials = otp_match.groups()
             raise KeycloakOtpRequired(
