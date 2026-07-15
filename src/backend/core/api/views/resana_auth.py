@@ -1,5 +1,6 @@
 """Resana authentication endpoints."""
 
+import html
 import json
 import re
 from dataclasses import asdict, dataclass
@@ -173,7 +174,7 @@ def _keycloak_login(
     match = re.search(r'action="([^"]+)"', r.text)
     if not match:
         raise ValueError("Keycloak login form not found")
-    form_action = match.group(1).replace("&amp;", "&")
+    form_action = html.unescape(match.group(1))
 
     # Step 2 — submit credentials
     r2 = session.post(
@@ -193,7 +194,7 @@ def _keycloak_login(
             login_action, otp_input_only, selected_credentials = otp_match.groups()
             raise KeycloakOtpRequired(
                 OtpChallenge(
-                    login_action=login_action.replace("&amp;", "&"),
+                    login_action=html.unescape(login_action),
                     otp_field_name="otp" if otp_input_only == "true" else "totp",
                     selected_credential_id=selected_credentials,
                     cookies=session.cookies.get_dict(),
