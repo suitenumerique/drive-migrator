@@ -61,7 +61,7 @@ const MigrationLimitNotice = ({
   return (
     <Alert type={VariantType.INFO} className="mb-s">
       {t(
-        'Phase de test : la migration est actuellement limitée à {{limit}} fichiers par communauté.',
+        'Phase de test : la migration est actuellement limitée à {{limit}} fichiers par espace.',
         { limit: fileLimitPerWorkspace },
       )}
     </Alert>
