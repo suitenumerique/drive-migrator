@@ -53,7 +53,9 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         if getattr(settings, "DRIVE_SHARE_MEMBERS", True):
             self._share_members(backend, workspace, root_id)
 
-        title = _("Votre espace {title} est prêt sur La Suite Drive !").format(title=workspace.title)
+        title = _("Votre espace {title} est prêt sur La Suite Drive !").format(
+            title=workspace.title
+        )
         MailsManager().send_migration_mail(
             user, workspace, "drive_ready", {"title": title}
         )

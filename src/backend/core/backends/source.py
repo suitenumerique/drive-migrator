@@ -62,8 +62,10 @@ class AbstractSourceBackend(ABC):
         # Skip check for abstract intermediate classes
         if getattr(cls, "__abstractmethods__", None):
             return
-            
-        if missing := [attr for attr in ("source_type", "label") if not hasattr(cls, attr)]:
+
+        if missing := [
+            attr for attr in ("source_type", "label") if not hasattr(cls, attr)
+        ]:
             raise TypeError(
                 f"{cls.__name__} must define class attribute(s): {', '.join(missing)}"
             )
