@@ -73,7 +73,7 @@ export const WorkspaceSelectCard = ({
         )}
       </span>
       <span className="workspace-select-card__title">{workspace.title}</span>
-      {migrated && workspace.files_limited && (
+      {migrated && workspace.is_truncated && (
         <Badge variant={VariantType.WARNING}>{t('Migration partielle')}</Badge>
       )}
       {migrated && (

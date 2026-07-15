@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name='workspace',
-            name='files_limited',
+            name='is_truncated',
             field=models.BooleanField(default=False),
         ),
         migrations.AlterField(

@@ -96,7 +96,7 @@ class Workspace(BaseModel):
 
     # Set by the export task when MIGRATION_FILE_LIMIT_PER_WORKSPACE truncated
     # this workspace's file tree (i.e. it had more files than the configured limit).
-    files_limited = models.BooleanField(default=False)
+    is_truncated = models.BooleanField(default=False)
 
     def get_destination_status(self, destination_name: str) -> str:
         return self.destination_statuses.get(destination_name, Workspace.Status.NONE)
