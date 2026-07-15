@@ -46,6 +46,10 @@ and this project adheres to
 
 - update cunningham tokens
 
+### Fixed
+
+- fix CI checks (self-hosted runner deps, gitlint job, test-back env vars)
+
 ### Removed
 
 - delete unused var in Makefile
