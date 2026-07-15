@@ -1,5 +1,5 @@
 .migration-landing {
-  max-width: 640px;
+  max-width: 540px;
   padding: 2rem 1rem 4rem;
   text-align: left;
   color: var(--c--contextuals--content--semantic--neutral--secondary);
@@ -14,7 +14,7 @@
 .migration-landing__hero-img {
   display: block;
   width: 100%;
-  max-width: 420px;
+  max-width: 300px;
   height: auto;
   margin: 0 auto;
 }
@@ -33,18 +33,24 @@
 }
 
 .migration-landing__title {
-  font-size: 1.75rem;
-  font-weight: 700;
   margin-bottom: 8px;
   margin-top: 1.5rem;
-  color: var(--c--contextuals--content--semantic--neutral--primary);
+}
+
+.migration-landing__title-logo {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  margin: auto;
 }
 
 .migration-landing__description {
   font-size: 1rem;
   line-height: 1.5;
   font-weight: 400;
+  text-align: center;
   margin-top: 8px;
+  color: var(--c--contextuals--content--semantic--neutral--tertiary);
 }
 
 .migration-landing__selectors {

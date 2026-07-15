@@ -36,11 +36,32 @@ export const ResanaConnectSection = ({
       );
       if (response.ok) {
         onConnected();
-      } else if (response.status === 401 && onAuthRequired) {
-        onAuthRequired();
-      } else {
-        setError(t('Identifiants invalides, veuillez réessayer.'));
+        return;
       }
+
+      if (response.status === 401) {
+        let payload: { error?: string; detail?: string } = {};
+        try {
+          payload = (await response.json()) as {
+            error?: string;
+            detail?: string;
+          };
+        } catch {
+          // ignore JSON parse errors
+        }
+
+        if (payload.error === 'Authentication failed') {
+          setError(t('Identifiants invalides, veuillez réessayer.'));
+          return;
+        }
+
+        if (onAuthRequired) {
+          onAuthRequired();
+          return;
+        }
+      }
+
+      setError(t('Identifiants invalides, veuillez réessayer.'));
     } catch {
       setError(t('Une erreur est survenue, veuillez réessayer.'));
     } finally {

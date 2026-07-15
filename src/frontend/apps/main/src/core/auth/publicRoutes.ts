@@ -1,4 +1,4 @@
-const normalizePath = (pathname: string) => {
+export const normalizePath = (pathname: string) => {
   const trimmed = pathname.replace(/\/$/, '');
   return trimmed || '/';
 };

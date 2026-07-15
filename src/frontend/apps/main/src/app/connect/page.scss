@@ -6,8 +6,7 @@
   color: var(--c--contextuals--content--semantic--neutral--secondary);
 
   &__title {
-    margin: 0 0 0.75rem;
-    margin-top: 1.5rem;
+    margin: var(--c--globals--spacings--base) 0 0.75rem;
     font-size: 1.75rem;
     font-weight: 700;
     line-height: 1.2;
@@ -15,8 +14,7 @@
   }
 
   &__description {
-    margin: 0 0 2.5rem;
-    font-size: 1rem;
+    margin: 0 0 var(--c--globals--spacings--base);
     line-height: 1.5;
     font-weight: 400;
     color: var(
@@ -37,40 +35,87 @@
     align-items: center;
   }
 
-  &__tool {
-    flex: 1;
-    min-width: 0;
-    justify-content: flex-start;
-    border-radius: 12px;
-
-    &--done {
-      cursor: default;
-    }
-  }
-
-  &__tool-icon {
-    display: block;
-
-    path {
-      fill: #626a80;
-    }
-
-    &--active path {
-      fill: #fff;
-    }
-  }
-
   &__status {
     flex-shrink: 0;
     width: 22px;
     height: 22px;
     box-sizing: border-box;
-    border: 2px solid
-      var(--c--contextuals--content--semantic--neutral--secondary);
+    background-color: var(
+      --c--contextuals--background--semantic--neutral--tertiary
+    );
+    border: 1px solid var(--c--contextuals--border--surface--primary);
     border-radius: 50%;
 
     &--done {
       border: none;
+    }
+  }
+
+  &__card {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--c--theme--colors--greyscale-200, #e5e5e5);
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  &__tool-logo {
+    display: flex;
+    flex-shrink: 1;
+    align-items: center;
+    min-width: 0;
+  }
+
+  &__logo-svg {
+    display: block;
+    height: 32px;
+    width: auto;
+    max-width: 100%;
+    flex-shrink: 0;
+  }
+
+  &__action {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 520px) {
+  .migration-connect {
+    padding-top: 1.5rem;
+
+    &__title {
+      font-size: 1.5rem;
+    }
+
+    &__row {
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+
+    &__status {
+      margin-top: 0.875rem;
+    }
+
+    &__card {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+      padding: 0.75rem;
+    }
+
+    &__tool-logo {
+      justify-content: center;
+    }
+
+    &__action {
+      width: 100%;
+      white-space: normal;
     }
   }
 }

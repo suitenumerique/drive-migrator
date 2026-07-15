@@ -1,7 +1,7 @@
 'use client';
 
 import { Loader } from '@gouvfr-lasuite/cunningham-react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import React, { PropsWithChildren, useEffect, useState } from 'react';
 
 import { fetchAPI } from '@/api/fetchApi';
@@ -9,7 +9,7 @@ import { User } from '@/core/auth/types';
 import { baseApiUrl } from '@/core/conf';
 import { MIGRATION_RETURN_STORAGE_KEY } from '@/core/migrationTarget';
 
-import { isPublicPath } from './publicRoutes';
+import { isPublicPath, normalizePath } from './publicRoutes';
 
 export const logout = () => {
   window.location.replace(new URL('logout/', baseApiUrl()).href);
@@ -25,22 +25,28 @@ export const login = (returnPath?: string) => {
 interface AuthContextInterface {
   user?: User;
   isAuthenticated: boolean;
+  isAuthPending: boolean;
 }
 
 export const AuthContext = React.createContext<AuthContextInterface>({
   isAuthenticated: false,
+  isAuthPending: true,
 });
 
 export const useAuth = () => React.useContext(AuthContext);
 
 export const Auth = ({ children }: PropsWithChildren) => {
   const pathname = usePathname();
+  const router = useRouter();
   const publicRoute = isPublicPath(pathname);
   const [user, setUser] = useState<User>();
-  const [isLoading, setIsLoading] = useState(!publicRoute);
+  const [isAuthPending, setIsAuthPending] = useState(true);
 
   useEffect(() => {
     const init = async () => {
+      setIsAuthPending(true);
+      setUser(undefined);
+
       const response = await fetchAPI(`users/me/`, undefined, {
         logoutOn401: false,
       });
@@ -50,21 +56,39 @@ export const Auth = ({ children }: PropsWithChildren) => {
           login();
           return;
         }
-        setIsLoading(false);
+        setIsAuthPending(false);
         return;
       }
 
       const data = (await response.json()) as User;
       setUser(data);
-      setIsLoading(false);
+      setIsAuthPending(false);
     };
 
-    setIsLoading(!publicRoute);
-    setUser(undefined);
     void init();
   }, [pathname, publicRoute]);
 
-  if (isLoading) {
+  useEffect(() => {
+    if (isAuthPending || !user) {
+      return;
+    }
+
+    const returnPath = sessionStorage.getItem(MIGRATION_RETURN_STORAGE_KEY);
+    if (!returnPath) {
+      return;
+    }
+
+    sessionStorage.removeItem(MIGRATION_RETURN_STORAGE_KEY);
+
+    // Post-OIDC callback only: avoid hijacking in-app navigation (e.g. /connect-resana).
+    if (normalizePath(pathname) !== '/') {
+      return;
+    }
+
+    router.replace(returnPath);
+  }, [isAuthPending, user, router, pathname]);
+
+  if (isAuthPending && !publicRoute) {
     return <Loader />;
   }
 
@@ -73,6 +97,7 @@ export const Auth = ({ children }: PropsWithChildren) => {
       value={{
         user,
         isAuthenticated: Boolean(user),
+        isAuthPending,
       }}
     >
       {children}

@@ -9,8 +9,10 @@ import { useTranslation } from 'react-i18next';
 import FichiersLogo from '@/assets/icons/fichier-mono.svg';
 import ZipLogo from '@/assets/icons/icon-zip.svg';
 import ResanaLogo from '@/assets/icons/resana-mono.svg';
+import MigratorLogo from '@/assets/images/logo.svg';
 import migrationHero from '@/assets/images/migration.png';
 import { ArrowRightIcon } from '@/components/icons/ArrowRightIcon';
+import { login, useAuth } from '@/core/auth/Auth';
 import {
   MIGRATION_TARGET_STORAGE_KEY,
   MigrationTarget,
@@ -46,6 +48,7 @@ const SOURCE_OPTIONS: Option[] = [
 export default function Home() {
   const { t } = useTranslation();
   const router = useRouter();
+  const { isAuthenticated, isAuthPending } = useAuth();
   const [targetTool, setTargetTool] =
     useState<MigrationTarget>('lasuite-fichiers');
 
@@ -67,7 +70,14 @@ export default function Home() {
 
   const handleStartMigration = () => {
     sessionStorage.setItem(MIGRATION_TARGET_STORAGE_KEY, targetTool);
-    router.push(getConnectPath(targetTool));
+    const connectPath = getConnectPath(targetTool);
+
+    if (isAuthenticated) {
+      router.push(connectPath);
+      return;
+    }
+
+    login(connectPath);
   };
 
   return (
@@ -81,12 +91,20 @@ export default function Home() {
         />
       </div>
 
-      <h1 className="migration-landing__title">{t('Outil de migration')}</h1>
+      <h1 className="migration-landing__title">
+        <MigratorLogo
+          className="migration-landing__title-logo"
+          width={224}
+          height={60}
+          role="img"
+          aria-label={t('Migrateur - Outil de migration')}
+        />
+      </h1>
 
       <p className="migration-landing__description">
-        {t(
-          'Migrez vos données d’un outil vers un autre. D’autres outils seront ajoutés progressivement.',
-        )}
+        {t('Migrez vos données d’un outil vers un autre.')}
+        <br />
+        {t('D’autres outils seront ajoutés progressivement.')}
       </p>
 
       <div className="migration-landing__selectors">
@@ -123,6 +141,7 @@ export default function Home() {
         onClick={handleStartMigration}
         variant="primary"
         color="brand"
+        disabled={isAuthPending}
       >
         {t('Démarrer la migration')}
       </Button>
