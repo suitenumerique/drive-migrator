@@ -14,5 +14,5 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "source_type",
             "destination_statuses",
             "destination_metadata",
-            "files_limited",
+            "is_truncated",
         ]

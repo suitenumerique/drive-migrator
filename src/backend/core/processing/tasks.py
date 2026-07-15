@@ -93,12 +93,12 @@ def export(self, data):  # pylint: disable=unused-argument
 
     file_limit = settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE
     if file_limit > 0:
-        workspace.files_limited = truncate_folder_files(folder, file_limit)
+        workspace.is_truncated = truncate_folder_files(folder, file_limit)
         workspace.save()
         logger.info(
-            "File limit %s applied, files_limited=%s",
+            "File limit %s applied, is_truncated=%s",
             file_limit,
-            workspace.files_limited,
+            workspace.is_truncated,
         )
 
     logger.info("Calling create_folder ...")
