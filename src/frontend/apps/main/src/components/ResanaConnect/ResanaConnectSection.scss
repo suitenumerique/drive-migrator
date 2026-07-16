@@ -3,14 +3,15 @@
   flex-direction: column;
   gap: 8px;
   width: 100%;
-
   --c--components--forms-input--border-radius: 8px;
 
   &__error {
     margin: 0;
     font-size: 0.875rem;
     line-height: 1.4;
-    color: var(--c--contextuals--content--semantic--error--primary);
+    padding-bottom: 12px;
+
+    color: var(--c--contextuals--content--semantic--error--secondary);
   }
 
   &__field {
@@ -25,6 +26,11 @@
 
     input::placeholder {
       color: var(--c--contextuals--content--semantic--neutral--tertiary);
+    }
+
+    &--otp input {
+      letter-spacing: 0.35em;
+      font-variant-numeric: tabular-nums;
     }
   }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { Button, Input } from '@gouvfr-lasuite/cunningham-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { fetchAPI } from '@/api/fetchApi';
@@ -9,22 +9,30 @@ import { useAuth } from '@/core/auth/Auth';
 
 import './ResanaConnectSection.scss';
 
+type AuthStep = 'password' | 'otp';
+
 interface Props {
   onConnected: () => void;
   onAuthRequired?: () => void;
+  onStepChange?: (step: AuthStep) => void;
 }
 
 export const ResanaConnectSection = ({
   onConnected,
   onAuthRequired,
+  onStepChange,
 }: Props) => {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const [step, setStep] = useState<'password' | 'otp'>('password');
+  const [step, setStep] = useState<AuthStep>('password');
   const [password, setPassword] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    onStepChange?.(step);
+  }, [step, onStepChange]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,10 +51,7 @@ export const ResanaConnectSection = ({
         } else {
           onConnected();
         }
-      } else if (response.status === 401 && onAuthRequired) {
-        onAuthRequired();
-      } else {
-        setError(t('Identifiants invalides, veuillez réessayer.'));
+        return;
       }
 
       if (response.status === 401) {

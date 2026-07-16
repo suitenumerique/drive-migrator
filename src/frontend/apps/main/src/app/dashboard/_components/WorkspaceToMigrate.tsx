@@ -57,10 +57,15 @@ export const WorkspacesToMigrate = ({
   const isArchiveZipTarget = migrationTarget === 'archive-zip';
 
   const selectableWorkspaces = workspaces[WorkspaceStatus.NONE];
+  const pendingWorkspaces = workspaces[WorkspaceStatus.PENDING];
   const migratedWorkspaces = workspaces[WorkspaceStatus.SUCCESS];
   const listingWorkspaces = useMemo(
-    () => [...selectableWorkspaces, ...migratedWorkspaces],
-    [selectableWorkspaces, migratedWorkspaces],
+    () => [
+      ...selectableWorkspaces,
+      ...pendingWorkspaces,
+      ...migratedWorkspaces,
+    ],
+    [selectableWorkspaces, pendingWorkspaces, migratedWorkspaces],
   );
 
   const defaultValues = useMemo(
@@ -281,6 +286,7 @@ export const WorkspacesToMigrate = ({
                 <WorkspaceSelectCard
                   key={workspace.id}
                   workspace={workspace}
+                  pending={workspace.status === WorkspaceStatus.PENDING}
                   migrated={workspace.status === WorkspaceStatus.SUCCESS}
                 />
               ))}
