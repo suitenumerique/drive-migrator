@@ -31,6 +31,11 @@ description: Build and push a container image based on the input arguments provi
         required: false
         default: ""
         description: The docker_user ARGUMENT to pass to the build step
+      frontend_theme:
+        type: string
+        required: false
+        default: ""
+        description: The FRONTEND_THEME ARGUMENT to pass to the build step
     secrets:
       DOCKER_HUB_USER:
         required: true
@@ -82,6 +87,7 @@ jobs:
           build-args: |
             DOCKER_USER=${{ inputs.docker_user }}
             PUBLISH_AS_MIT=false
+            FRONTEND_THEME=${{ inputs.frontend_theme }}
           push: ${{ inputs.should_push }}
           provenance: false
           tags: ${{ steps.meta.outputs.tags }}
