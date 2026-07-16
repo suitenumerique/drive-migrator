@@ -1,8 +1,0 @@
-creation_rules:
-  - path_regex: ./*
-    key_groups:
-    - age:
-      - age15fyxdwmg5mvldtqqus87xspuws2u0cpvwheehrtvkexj4tnsqqysw6re2x # jacques
-      - age1hnhuzj96ktkhpyygvmz0x9h8mfvssz7ss6emmukags644mdhf4msajk93r # Samuel Paccoud
-      - age175v7g8tmv7gur6xaqvzzwe4h4ttfqpqk3fqcllx3uv67alc3pexsk2w6mt # Nathan Vasse
-      - age1jssv9yd2js4l29l6vz48kny9jf46dyamcu9va4e6rh2qvk8ppggsgxxtth # github-repo
