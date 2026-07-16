@@ -16,12 +16,15 @@
 .suite__header__logo {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   text-decoration: none;
 
-  img {
+  &-img {
     display: block;
-    height: 2.5rem;
+    flex-shrink: 0;
+    height: 50px;
     width: auto;
+    aspect-ratio: 224 / 60;
   }
 }
 

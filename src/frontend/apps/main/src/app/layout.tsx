@@ -3,7 +3,7 @@ import SubLayout from '@/app/sub-layout';
 import './global.scss';
 
 export const metadata = {
-  title: 'Migration Resana',
+  title: 'Migrateur',
   description: 'Migrez vos données Resana.',
 };
 

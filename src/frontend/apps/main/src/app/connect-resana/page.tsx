@@ -1,14 +1,14 @@
 'use client';
 
-import { Button } from '@gouvfr-lasuite/cunningham-react';
+import { Button, Loader } from '@gouvfr-lasuite/cunningham-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import ResanaLogo from '@/assets/icons/resana-logo.svg';
 import { ResanaConnectSection } from '@/components/ResanaConnect/ResanaConnectSection';
 import { ArrowLeftIcon } from '@/components/icons/ArrowLeftIcon';
-import { login } from '@/core/auth/Auth';
+import { login, useAuth } from '@/core/auth/Auth';
 import {
   MigrationTarget,
   getConnectPath,
@@ -22,10 +22,28 @@ function ConnectResanaContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useTranslation();
-
+  const { isAuthenticated, isAuthPending } = useAuth();
   const target = isMigrationTarget(searchParams.get('target'))
     ? (searchParams.get('target') as MigrationTarget)
     : 'lasuite-fichiers';
+
+  const resanaConnectPath = getResanaConnectPath(target);
+
+  useEffect(() => {
+    if (isAuthPending || isAuthenticated) {
+      return;
+    }
+
+    router.replace(getConnectPath(target));
+  }, [isAuthPending, isAuthenticated, router, target]);
+
+  if (isAuthPending || !isAuthenticated) {
+    return (
+      <div className="resana-connect-page container">
+        <Loader />
+      </div>
+    );
+  }
 
   return (
     <div className="resana-connect-page container">
@@ -47,7 +65,7 @@ function ConnectResanaContent() {
       </p>
 
       <ResanaConnectSection
-        onAuthRequired={() => login(getResanaConnectPath(target))}
+        onAuthRequired={() => login(resanaConnectPath)}
         onConnected={() =>
           router.replace(`${getConnectPath(target)}&resana_connected=1`)
         }
