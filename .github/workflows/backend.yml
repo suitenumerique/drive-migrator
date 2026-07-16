@@ -22,6 +22,10 @@ jobs:
       - name: Check absence of fixup commits
         run: |
           ! git log | grep 'fixup!'
+      - name: Install Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: "3.10"
       - name: Install gitlint
         run: pip install --user requests gitlint
       - name: Lint commit messages added to main
@@ -147,6 +151,8 @@ jobs:
       AWS_S3_ACCESS_KEY_ID: dinum
       AWS_S3_SECRET_ACCESS_KEY: password
       REDIS_URL: redis://localhost:6379/1
+      OIDC_TOKENS_ENCRYPTION_KEY: VGhpcklzQUZha2VLZXlGb3JUZXN0UHVycG9zZU9ubHk=
+      APP_WORK_DIR: /tmp/test-workdir
 
     steps:
       - name: Checkout repository
@@ -198,7 +204,7 @@ jobs:
       - name: Install gettext (required to compile messages)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gettext
+          sudo apt-get install -y gettext libmagic1
 
       - name: Generate a MO file from strings extracted from the project
         run: python manage.py compilemessages

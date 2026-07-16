@@ -101,6 +101,43 @@ def test_export_calls_get_workspace_structure(workspace, user):
     source_backend.get_workspace_structure.assert_called_once_with(workspace)
 
 
+def test_export_skips_file_truncation_when_limit_is_zero(workspace, user, settings):
+    """export() does not touch the folder tree or save the workspace when the limit is 0."""
+    settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE = 0
+    folder_tree = SourceFolder(name="root", files=[MagicMock()])
+
+    _run_export(workspace, user, source_folder=folder_tree)
+
+    assert len(folder_tree.files) == 1
+    workspace.save.assert_not_called()
+
+
+def test_export_truncates_files_when_limit_is_set_and_exceeded(
+    workspace, user, settings
+):
+    """export() truncates the folder tree and marks the workspace as is_truncated."""
+    settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE = 1
+    folder_tree = SourceFolder(name="root", files=[MagicMock(), MagicMock()])
+
+    _run_export(workspace, user, source_folder=folder_tree)
+
+    assert workspace.is_truncated is True
+    assert len(folder_tree.files) == 1
+    workspace.save.assert_called()
+
+
+def test_export_does_not_flag_workspace_when_limit_is_set_but_not_exceeded(
+    workspace, user, settings
+):
+    """export() does not mark the workspace as is_truncated when it's under the limit."""
+    settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE = 5
+    folder_tree = SourceFolder(name="root", files=[MagicMock()])
+
+    _run_export(workspace, user, source_folder=folder_tree)
+
+    assert workspace.is_truncated is False
+
+
 def test_export_builds_local_folder(workspace, user):
     """export() calls FolderCreator.create_folder() with workspace, folder tree, and source backend."""
     folder_tree = SourceFolder(name="root")

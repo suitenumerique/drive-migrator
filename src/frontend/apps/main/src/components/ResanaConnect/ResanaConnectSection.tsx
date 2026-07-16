@@ -20,7 +20,9 @@ export const ResanaConnectSection = ({
 }: Props) => {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const [step, setStep] = useState<'password' | 'otp'>('password');
   const [password, setPassword] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -35,8 +37,16 @@ export const ResanaConnectSection = ({
         { logoutOn401: false },
       );
       if (response.ok) {
-        onConnected();
-        return;
+        const data = await response.json().catch(() => null);
+        if (data?.otp_required) {
+          setStep('otp');
+        } else {
+          onConnected();
+        }
+      } else if (response.status === 401 && onAuthRequired) {
+        onAuthRequired();
+      } else {
+        setError(t('Identifiants invalides, veuillez réessayer.'));
       }
 
       if (response.status === 401) {
@@ -68,6 +78,72 @@ export const ResanaConnectSection = ({
       setIsLoading(false);
     }
   };
+
+  const handleOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setIsLoading(true);
+    try {
+      const response = await fetchAPI(
+        'resana/auth/otp',
+        { method: 'POST', body: JSON.stringify({ code: otpCode }) },
+        { logoutOn401: false },
+      );
+      if (response.ok) {
+        onConnected();
+      } else if (response.status === 401) {
+        setError(t('Code de vérification invalide, veuillez réessayer.'));
+      } else if (response.status === 400) {
+        setStep('password');
+        setError(
+          t('La session a expiré, veuillez ressaisir votre mot de passe.'),
+        );
+      } else {
+        setError(t('Une erreur est survenue, veuillez réessayer.'));
+      }
+    } catch {
+      setError(t('Une erreur est survenue, veuillez réessayer.'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (step === 'otp') {
+    return (
+      <form
+        className="resana-connect-form"
+        onSubmit={(e) => void handleOtpSubmit(e)}
+      >
+        {error && (
+          <p className="resana-connect-form__error" role="alert">
+            {error}
+          </p>
+        )}
+        <Input
+          className="resana-connect-form__field"
+          variant="classic"
+          label={t('Code de vérification')}
+          type="text"
+          inputMode="numeric"
+          maxLength={6}
+          placeholder={t('Code à 6 chiffres')}
+          value={otpCode}
+          onChange={(e) => setOtpCode(e.target.value)}
+          fullWidth
+          required
+        />
+        <Button
+          type="submit"
+          fullWidth
+          variant="primary"
+          color="brand"
+          disabled={isLoading}
+        >
+          {t('Valider')}
+        </Button>
+      </form>
+    );
+  }
 
   return (
     <form

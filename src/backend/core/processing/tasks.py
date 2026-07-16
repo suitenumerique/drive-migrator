@@ -8,7 +8,7 @@ from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
 
 from core.backends.destination import DestinationRegistry
-from core.backends.source import SourceFolder, SourceManager
+from core.backends.source import SourceFolder, SourceManager, truncate_folder_files
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.folder_creator import FolderCreator
@@ -90,6 +90,16 @@ def export(self, data):  # pylint: disable=unused-argument
     logger.info("Calling get_workspace_structure ...")
     folder = source_backend.get_workspace_structure(workspace)
     debug_folder(folder)
+
+    file_limit = settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE
+    if file_limit > 0:
+        workspace.is_truncated = truncate_folder_files(folder, file_limit)
+        workspace.save()
+        logger.info(
+            "File limit %s applied, is_truncated=%s",
+            file_limit,
+            workspace.is_truncated,
+        )
 
     logger.info("Calling create_folder ...")
     creator = FolderCreator()

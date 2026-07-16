@@ -9,12 +9,14 @@ import {
   WorkspaceExporting,
   WorkspaceStatus,
 } from '@/components/Workspace/Workspace';
+import { useMigrationConfig } from '@/hooks/useMigrationConfig';
 import { useWorkspaces } from '@/hooks/useWorkspaces';
 
 export type WorkspaceByStatus = Record<WorkspaceStatus, Workspace[]>;
 
 export default function Dashboard() {
   const { workspacesByStatus, fetch, hasError } = useWorkspaces();
+  const { fileLimitPerWorkspace } = useMigrationConfig();
   const hasFetched = useRef(false);
 
   useEffect(() => {
@@ -31,6 +33,7 @@ export default function Dashboard() {
 
   return (
     <div className="container">
+      <MigrationLimitNotice fileLimitPerWorkspace={fileLimitPerWorkspace} />
       {workspacesByStatus ? (
         <>
           <FailureWorkspaces workspaces={workspacesByStatus} />
@@ -45,6 +48,25 @@ export default function Dashboard() {
     </div>
   );
 }
+
+const MigrationLimitNotice = ({
+  fileLimitPerWorkspace,
+}: {
+  fileLimitPerWorkspace: number;
+}) => {
+  const { t } = useTranslation();
+  if (fileLimitPerWorkspace <= 0) {
+    return null;
+  }
+  return (
+    <Alert type={VariantType.INFO} className="mb-s">
+      {t(
+        'Phase de test : la migration est actuellement limitée à {{limit}} fichiers par espace.',
+        { limit: fileLimitPerWorkspace },
+      )}
+    </Alert>
+  );
+};
 
 const PendingWorkspaces = ({
   workspaces,

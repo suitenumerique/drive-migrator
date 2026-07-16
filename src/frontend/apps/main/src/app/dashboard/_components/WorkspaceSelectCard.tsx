@@ -1,8 +1,10 @@
 'use client';
 
+import { VariantType } from '@gouvfr-lasuite/cunningham-react';
 import { useController, useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
+import { Badge } from '@/components/Badge/Badge';
 import { Workspace } from '@/components/Workspace/Workspace';
 
 import './WorkspaceSelectCard.scss';
@@ -71,6 +73,9 @@ export const WorkspaceSelectCard = ({
         )}
       </span>
       <span className="workspace-select-card__title">{workspace.title}</span>
+      {migrated && workspace.is_truncated && (
+        <Badge variant={VariantType.WARNING}>{t('Migration partielle')}</Badge>
+      )}
       {migrated && (
         <span className="workspace-select-card__badge">{t('Migré')}</span>
       )}

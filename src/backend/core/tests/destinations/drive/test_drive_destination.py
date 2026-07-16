@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.drive.backend import DriveDestinationBackend
 from core.models import Workspace

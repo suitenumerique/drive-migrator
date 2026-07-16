@@ -41,10 +41,16 @@ and this project adheres to
 - add optional osmose backend debug files
 - add helm files for local and staging envs
 - implement basic Resana API
+- add optional setting to cap migrated files per workspace.
+- add MFA/OTP support to Resana Keycloak login flow
 
 ### Changed
 
 - update cunningham tokens
+
+### Fixed
+
+- fix CI checks (self-hosted runner deps, gitlint job, test-back env vars)
 
 ### Removed
 

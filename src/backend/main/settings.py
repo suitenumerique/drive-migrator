@@ -179,6 +179,9 @@ class Base(Configuration):
     RESANA_AUTHSERVICE_ENDPOINT = values.Value(
         environ_name="RESANA_AUTHSERVICE_ENDPOINT", environ_prefix=None
     )
+    RESANA_OTP_CHALLENGE_TTL = values.IntegerValue(
+        120, environ_name="RESANA_OTP_CHALLENGE_TTL", environ_prefix=None
+    )
     RESANA_S3_BUCKET = values.Value(
         environ_name="RESANA_S3_BUCKET", environ_prefix=None
     )
@@ -209,6 +212,13 @@ class Base(Configuration):
     EXTRA_API_URL_MODULES = values.ListValue(
         [],
         environ_name="EXTRA_API_URL_MODULES",
+        environ_prefix=None,
+    )
+    # 0 = unlimited. When > 0, migrations only download the first N files per
+    # workspace (source structure fetch is unaffected, only file downloads are capped).
+    MIGRATION_FILE_LIMIT_PER_WORKSPACE = values.IntegerValue(
+        0,
+        environ_name="MIGRATION_FILE_LIMIT_PER_WORKSPACE",
         environ_prefix=None,
     )
 
