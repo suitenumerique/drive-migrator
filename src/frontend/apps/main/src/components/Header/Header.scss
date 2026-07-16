@@ -1,9 +1,9 @@
-.suite__header {
+.header {
   width: 100%;
   z-index: 100;
 }
 
-.suite__header__inner {
+.header__inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -13,22 +13,19 @@
   padding: 0.5rem 0;
 }
 
-.suite__header__logo {
-  display: flex;
-  align-items: center;
+.header__logo {
   flex-shrink: 0;
   text-decoration: none;
+  position: relative;
 
   &-img {
     display: block;
     flex-shrink: 0;
-    height: 50px;
     width: auto;
-    aspect-ratio: 224 / 60;
   }
 }
 
-.suite__header__actions {
+.header__actions {
   display: flex;
   align-items: center;
   gap: 0.5rem;

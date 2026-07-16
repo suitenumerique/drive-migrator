@@ -37,7 +37,6 @@ export default function Dashboard() {
       {workspacesByStatus ? (
         <>
           <FailureWorkspaces workspaces={workspacesByStatus} />
-          <PendingWorkspaces workspaces={workspacesByStatus} />
           <WorkspacesToMigrate workspaces={workspacesByStatus} />
         </>
       ) : (
@@ -65,27 +64,6 @@ const MigrationLimitNotice = ({
         { limit: fileLimitPerWorkspace },
       )}
     </Alert>
-  );
-};
-
-const PendingWorkspaces = ({
-  workspaces,
-}: {
-  workspaces: WorkspaceByStatus;
-}) => {
-  const { t } = useTranslation();
-  if (workspaces[WorkspaceStatus.PENDING].length === 0) {
-    return null;
-  }
-  return (
-    <div>
-      <h2>{t('Communautés en cours de migration')}</h2>
-      <div className="suite__workspaces">
-        {workspaces[WorkspaceStatus.PENDING].map((workspace) => (
-          <WorkspaceExporting workspace={workspace} key={workspace.id} />
-        ))}
-      </div>
-    </div>
   );
 };
 

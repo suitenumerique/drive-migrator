@@ -12,11 +12,13 @@ import './WorkspaceSelectCard.scss';
 type WorkspaceSelectCardProps = {
   workspace: Workspace;
   migrated?: boolean;
+  pending?: boolean;
 };
 
 export const WorkspaceSelectCard = ({
   workspace,
   migrated = false,
+  pending = false,
 }: WorkspaceSelectCardProps) => {
   const { t } = useTranslation();
   const { setValue } = useFormContext();
@@ -25,23 +27,24 @@ export const WorkspaceSelectCard = ({
     defaultValue: false,
   });
 
+  const locked = migrated || pending;
   const checked = Boolean(field.value);
-  const showCheck = migrated || checked;
+  const showCheck = locked || checked;
 
   return (
     <button
       type="button"
       className={[
         'workspace-select-card',
-        migrated && 'workspace-select-card--migrated',
-        !migrated && checked && 'workspace-select-card--selected',
+        locked && 'workspace-select-card--locked',
+        !locked && checked && 'workspace-select-card--selected',
       ]
         .filter(Boolean)
         .join(' ')}
-      disabled={migrated}
-      aria-pressed={!migrated && checked}
+      disabled={locked}
+      aria-pressed={!locked && checked}
       onClick={() => {
-        if (!migrated) {
+        if (!locked) {
           setValue(workspace.id, !checked, { shouldValidate: true });
         }
       }}
@@ -50,7 +53,7 @@ export const WorkspaceSelectCard = ({
         className={[
           'workspace-select-card__checkbox',
           showCheck && 'workspace-select-card__checkbox--checked',
-          migrated && 'workspace-select-card__checkbox--migrated',
+          locked && 'workspace-select-card__checkbox--locked',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -76,8 +79,15 @@ export const WorkspaceSelectCard = ({
       {migrated && workspace.is_truncated && (
         <Badge variant={VariantType.WARNING}>{t('Migration partielle')}</Badge>
       )}
+      {pending && (
+        <span className="workspace-select-card__status workspace-select-card__status--pending">
+          {t('En cours')}
+        </span>
+      )}
       {migrated && (
-        <span className="workspace-select-card__badge">{t('Migré')}</span>
+        <span className="workspace-select-card__status workspace-select-card__status--migrated">
+          {t('Migré')}
+        </span>
       )}
     </button>
   );
