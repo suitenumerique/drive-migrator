@@ -142,6 +142,7 @@ stop-celery-flower:
 demo: ## flush db then create a demo for load testing purpose
 	@$(MAKE) resetdb
 	@$(MANAGE) create_demo
+	@python3 src/backend/demo/generate_demo_data.py --force
 .PHONY: demo
 
 # Nota bene: Black should come after isort just in case they don't agree...
@@ -265,8 +266,8 @@ help:
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(GREEN)%-30s$(RESET) %s\n", $$1, $$2}'
 .PHONY: help
 
-# Front 
-run-frontend-dev: ## Install and run the frontend dev  
+# Front
+run-frontend-dev: ## Install and run the frontend dev
 	@$(COMPOSE) up --force-recreate -d frontend-dev
 .PHONY: run-frontend-dev
 
