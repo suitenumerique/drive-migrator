@@ -7,6 +7,7 @@ import {
   VariantType,
   useToastProvider,
 } from '@gouvfr-lasuite/cunningham-react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
@@ -19,6 +20,7 @@ import {
 } from '@/app/dashboard/_components/SharedAccessModal';
 import { WorkspaceSelectCard } from '@/app/dashboard/_components/WorkspaceSelectCard';
 import { WorkspaceByStatus } from '@/app/dashboard/page';
+import emptySpacesIllustration from '@/assets/images/empty-spaces-illustration.svg?url';
 import { WorkspaceStatus } from '@/components/Workspace/Workspace';
 import { ArrowLeftIcon } from '@/components/icons/ArrowLeftIcon';
 import {
@@ -65,14 +67,21 @@ export const WorkspacesToMigrate = ({
 
   const selectableWorkspaces = workspaces[WorkspaceStatus.NONE];
   const pendingWorkspaces = workspaces[WorkspaceStatus.PENDING];
+  const failedWorkspaces = workspaces[WorkspaceStatus.FAILURE];
   const migratedWorkspaces = workspaces[WorkspaceStatus.SUCCESS];
   const listingWorkspaces = useMemo(
     () => [
       ...selectableWorkspaces,
       ...pendingWorkspaces,
+      ...failedWorkspaces,
       ...migratedWorkspaces,
     ],
-    [selectableWorkspaces, pendingWorkspaces, migratedWorkspaces],
+    [
+      selectableWorkspaces,
+      pendingWorkspaces,
+      failedWorkspaces,
+      migratedWorkspaces,
+    ],
   );
 
   const defaultValues = useMemo(
@@ -222,6 +231,39 @@ export const WorkspacesToMigrate = ({
     );
   }
 
+  if (listingWorkspaces.length === 0) {
+    return (
+      <div className="workspaces-empty">
+        <div className="workspaces-empty__content">
+          <Image
+            src={emptySpacesIllustration}
+            alt=""
+            className="workspaces-empty__illustration"
+            width={120}
+            height={96}
+            priority
+          />
+          <h1 className="workspaces-empty__title">
+            {t('Aucun espace à migrer')}
+          </h1>
+          <p className="workspaces-empty__description">
+            {t(
+              'Vous ne pouvez migrer que les espaces dont vous êtes animateur.',
+            )}
+          </p>
+          <Button
+            variant="primary"
+            color="brand"
+            fullWidth
+            onClick={() => router.push('/')}
+          >
+            {t('Retour')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="workspaces-to-migrate">
       <Button
@@ -267,85 +309,91 @@ export const WorkspacesToMigrate = ({
         )}
       </div>
 
-      {listingWorkspaces.length === 0 ? (
-        <Alert className="workspaces-to-migrate__alert" type={VariantType.INFO}>
-          {t('Aucun espace à migrer')}
-        </Alert>
-      ) : (
-        <FormProvider {...methods}>
-          {!canMigrate && !isArchiveZipTarget && (
-            <Alert
-              type={VariantType.WARNING}
-              className="workspaces-to-migrate__alert"
-            >
-              {flags?.[FeatureFlags.READ_ONLY_MODE]
-                ? t(
-                    'Les migrations ne sont désormais plus possibles, la plateforme Resana est désormais décomissionnée.',
-                  )
-                : t(
-                    'Les migrations sont temporairement suspendues pour cause de maintenance, veuillez réessayer plus tard.',
-                  )}
-            </Alert>
-          )}
-
-          <form
-            className="workspaces-to-migrate__form"
-            onSubmit={(event) => {
-              void methods.handleSubmit(openSharedAccessModal)(event);
-            }}
+      <FormProvider {...methods}>
+        {!canMigrate && !isArchiveZipTarget && (
+          <Alert
+            type={VariantType.WARNING}
+            className="workspaces-to-migrate__alert"
           >
-            <div className="workspaces-to-migrate__grid">
-              {listingWorkspaces.map((workspace) => (
-                <WorkspaceSelectCard
-                  key={workspace.id}
-                  workspace={workspace}
-                  pending={workspace.status === WorkspaceStatus.PENDING}
-                  migrated={workspace.status === WorkspaceStatus.SUCCESS}
-                />
-              ))}
-            </div>
+            {flags?.[FeatureFlags.READ_ONLY_MODE]
+              ? t(
+                  'Les migrations ne sont désormais plus possibles, la plateforme Resana est désormais décomissionnée.',
+                )
+              : t(
+                  'Les migrations sont temporairement suspendues pour cause de maintenance, veuillez réessayer plus tard.',
+                )}
+          </Alert>
+        )}
 
-            <div className="workspaces-to-migrate__footer">
-              {isArchiveZipTarget && (
-                <Button
-                  type="button"
-                  variant={isArchiveZipTarget ? 'primary' : 'bordered'}
-                  color="brand"
-                  disabled={!isSomethingSelected || isDownloading}
-                  onClick={() => void downloadSelection()}
-                >
-                  {t('Télécharger la sélection')}
-                </Button>
-              )}
-              {!isArchiveZipTarget && (
-                <Button
-                  type="submit"
-                  variant="primary"
-                  color="brand"
-                  disabled={!methods.formState.isValid || !canMigrate}
-                >
-                  {t('Migrer')}
-                </Button>
-              )}
-            </div>
-          </form>
+        {failedWorkspaces.length > 0 && (
+          <Alert
+            type={VariantType.ERROR}
+            className="workspaces-to-migrate__alert"
+          >
+            {t(
+              "Si une communauté est en erreur, c'est qu'il y a eu un problème inattendu lors de la migration. Contactez le support pour obtenir de l'aide.",
+            )}
+          </Alert>
+        )}
 
-          <SharedAccessModal
-            isOpen={isSharedAccessModalOpen}
-            onClose={() => setIsSharedAccessModalOpen(false)}
-            onContinue={continueToConfirmModal}
-            selectedMode={sharedAccessMode}
-            onSelectMode={setSharedAccessMode}
-          />
-          <MigrationConfirmModal
-            isOpen={isConfirmModalOpen}
-            onClose={() => setIsConfirmModalOpen(false)}
-            onConfirm={() => void confirmMigration()}
-            selectedCount={selectedCount}
-            isConfirming={isMigrating}
-          />
-        </FormProvider>
-      )}
+        <form
+          className="workspaces-to-migrate__form"
+          onSubmit={(event) => {
+            void methods.handleSubmit(openSharedAccessModal)(event);
+          }}
+        >
+          <div className="workspaces-to-migrate__grid">
+            {listingWorkspaces.map((workspace) => (
+              <WorkspaceSelectCard
+                key={workspace.id}
+                workspace={workspace}
+                pending={workspace.status === WorkspaceStatus.PENDING}
+                failed={workspace.status === WorkspaceStatus.FAILURE}
+                migrated={workspace.status === WorkspaceStatus.SUCCESS}
+              />
+            ))}
+          </div>
+
+          <div className="workspaces-to-migrate__footer">
+            {isArchiveZipTarget && (
+              <Button
+                type="button"
+                variant={isArchiveZipTarget ? 'primary' : 'bordered'}
+                color="brand"
+                disabled={!isSomethingSelected || isDownloading}
+                onClick={() => void downloadSelection()}
+              >
+                {t('Télécharger la sélection')}
+              </Button>
+            )}
+            {!isArchiveZipTarget && (
+              <Button
+                type="submit"
+                variant="primary"
+                color="brand"
+                disabled={!methods.formState.isValid || !canMigrate}
+              >
+                {t('Migrer')}
+              </Button>
+            )}
+          </div>
+        </form>
+
+        <SharedAccessModal
+          isOpen={isSharedAccessModalOpen}
+          onClose={() => setIsSharedAccessModalOpen(false)}
+          onContinue={continueToConfirmModal}
+          selectedMode={sharedAccessMode}
+          onSelectMode={setSharedAccessMode}
+        />
+        <MigrationConfirmModal
+          isOpen={isConfirmModalOpen}
+          onClose={() => setIsConfirmModalOpen(false)}
+          onConfirm={() => void confirmMigration()}
+          selectedCount={selectedCount}
+          isConfirming={isMigrating}
+        />
+      </FormProvider>
     </div>
   );
 };
