@@ -46,10 +46,8 @@ const nextConfig = {
   sassOptions: {
     includePaths: [path.join(__dirname, 'styles')],
   },
-  webpack(config, { dev }) {
-    // En dev : une seule instance React (Cunningham v4 + yarn workspaces).
-    // En prod/build : pas d'alias — Next résout React via outputFileTracingRoot.
-    if (dev) {
+  webpack(config, { dev, isServer }) {
+    if (dev && !isServer) {
       config.resolve.alias = {
         ...config.resolve.alias,
         react: reactPath,
