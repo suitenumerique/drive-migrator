@@ -53,6 +53,7 @@ and this project adheres to
 - fix CI checks (self-hosted runner deps, gitlint job, test-back env vars)
 - fix Resana access token refresh crashing with KeyError: 'access_token'
 - fix HTML entities not decoded in Resana workspace/folder/file names
+- fix standalone bootstrap (OIDC endpoint, CSRF) and update README #105
 
 ### Removed
 

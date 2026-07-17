@@ -37,7 +37,14 @@ It is a concrete implementation of the cross-app data portability pillar defined
 * Other workspace content: wikis, calendars, discussion boards, project tasks
 
 
-## Get started (🚨 to be updated 🚨)
+## Get started
+
+This section covers running the migrator in **standalone mode**, with its own bundled Keycloak
+and MinIO instances. It is the quickest way to try the tool locally.
+
+> A second setup lets you run this tool alongside a local [LaSuite
+> Drive](https://github.com/suitenumerique/drive) instance instead of the bundled
+> one. That configuration will be documented separately.
 
 ### Prerequisite
 
@@ -46,10 +53,10 @@ Compose](https://docs.docker.com/compose/install) installed on your laptop:
 
 ```bash
 $ docker -v
-  Docker version 20.10.2, build 2291f61
+  Docker version 25.0.2, build 29cf629
 
-$ docker compose -v
-  docker compose version 1.27.4, build 40524192
+$ docker compose version
+  Docker Compose version v2.24.5
 ```
 
 > ⚠️ You may need to run the following commands with `sudo` but this can be
@@ -120,7 +127,7 @@ Contributions to add new integrations are very welcome.
 
 We welcome contributions of any kind — bug reports, feature requests, documentation improvements, and pull requests. 
 
-* Open a PR — see [CONTRIBUTING.md](https://github.com/suitenumerique/drive-migrator/blob/CONTRIBUTING.md) for development setup
+* Open a PR — see [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup
 * Submit a [feature request](https://github.com/suitenumerique/drive-migrator/issues/new?template=Feature_request.md) or [bug report](https://github.com/suitenumerique/drive-migrator/issues/new?template=Bug_report.md)
 
 This project is community-driven. Don't hesitate to get in touch if you have questions about implementation or design decisions.
