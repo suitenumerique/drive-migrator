@@ -52,6 +52,7 @@ TSCLIENT_YARN       = $(COMPOSE_RUN) -w /app/src/tsclient node yarn
 
 # -- Frontend
 PATH_FRONT          = ./src/frontend
+FRONTEND_YARN       = $(COMPOSE_RUN) frontend-dev yarn
 
 # ==============================================================================
 # RULES
@@ -274,6 +275,10 @@ run-frontend-dev: ## Install and run the frontend dev
 run-frontend-prod: ## Install and run the frontend dev
 	@$(COMPOSE) up --force-recreate -d frontend-prod
 .PHONY: run-frontend-prod
+
+frontend-lint: ## lint front-end sources
+	@$(FRONTEND_YARN) lint
+.PHONY: frontend-lint
 
 # -- K8S
 build-k8s-cluster: ## build the kubernetes cluster using kind
