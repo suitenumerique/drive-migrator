@@ -13,6 +13,10 @@ import { FormProvider, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
 import { MigrationConfirmModal } from '@/app/dashboard/_components/MigrationConfirmModal';
+import {
+  SharedAccessModal,
+  SharedAccessMode,
+} from '@/app/dashboard/_components/SharedAccessModal';
 import { WorkspaceSelectCard } from '@/app/dashboard/_components/WorkspaceSelectCard';
 import { WorkspaceByStatus } from '@/app/dashboard/page';
 import { WorkspaceStatus } from '@/components/Workspace/Workspace';
@@ -42,7 +46,10 @@ export const WorkspacesToMigrate = ({
   const { toast } = useToastProvider();
   const [isDownloading, setIsDownloading] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
+  const [isSharedAccessModalOpen, setIsSharedAccessModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [sharedAccessMode, setSharedAccessMode] =
+    useState<SharedAccessMode>('manual');
   const [pendingFormData, setPendingFormData] = useState<IForm | null>(null);
   const [migrationTarget, setMigrationTarget] =
     useState<MigrationTarget>('lasuite-fichiers');
@@ -147,8 +154,14 @@ export const WorkspacesToMigrate = ({
     }
   };
 
-  const openConfirmModal = (data: IForm) => {
+  const openSharedAccessModal = (data: IForm) => {
     setPendingFormData(data);
+    setSharedAccessMode('manual');
+    setIsSharedAccessModalOpen(true);
+  };
+
+  const continueToConfirmModal = () => {
+    setIsSharedAccessModalOpen(false);
     setIsConfirmModalOpen(true);
   };
 
@@ -278,7 +291,7 @@ export const WorkspacesToMigrate = ({
           <form
             className="workspaces-to-migrate__form"
             onSubmit={(event) => {
-              void methods.handleSubmit(openConfirmModal)(event);
+              void methods.handleSubmit(openSharedAccessModal)(event);
             }}
           >
             <div className="workspaces-to-migrate__grid">
@@ -317,6 +330,13 @@ export const WorkspacesToMigrate = ({
             </div>
           </form>
 
+          <SharedAccessModal
+            isOpen={isSharedAccessModalOpen}
+            onClose={() => setIsSharedAccessModalOpen(false)}
+            onContinue={continueToConfirmModal}
+            selectedMode={sharedAccessMode}
+            onSelectMode={setSharedAccessMode}
+          />
           <MigrationConfirmModal
             isOpen={isConfirmModalOpen}
             onClose={() => setIsConfirmModalOpen(false)}
