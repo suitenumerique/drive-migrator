@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 
-import migrationResanaIllustration from '@/assets/images/migration-resana.svg?url';
+import migrationResanaIllustration from '@/assets/images/migrator-illustration.svg?url';
 import { ArrowLeftIcon } from '@/components/icons/ArrowLeftIcon';
 
 import './page.scss';
