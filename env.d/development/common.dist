@@ -9,6 +9,16 @@ PYTHONPATH=/app
 
 # impress settings
 
+# Migration source/destination
+# Filesystem source + archive (zip) destination require no external API
+# credentials, unlike the Osmose/Resana/Drive backends, so they are the
+# default for a standalone setup. Source data is read from
+# data/demo-data/<user-email>/<workspace>/ (see FILESYSTEM_SOURCE_ROOT in
+# settings.py) — that directory is empty on a fresh clone, drop files there
+# to try out a migration.
+SOURCE_BACKEND=core.sources.filesystem.FileSystemSourceBackend
+DESTINATION_BACKENDS=core.destinations.archive.backend.ArchiveDestinationBackend
+
 # Mail
 DJANGO_EMAIL_HOST="mailcatcher"
 DJANGO_EMAIL_PORT=1025
