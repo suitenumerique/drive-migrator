@@ -51,6 +51,7 @@ and this project adheres to
 ### Fixed
 
 - fix CI checks (self-hosted runner deps, gitlint job, test-back env vars)
+- fix Resana access token refresh crashing with KeyError: 'access_token'
 
 ### Removed
 

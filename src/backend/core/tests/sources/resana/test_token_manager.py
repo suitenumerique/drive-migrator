@@ -5,12 +5,17 @@ from unittest.mock import MagicMock, patch
 
 from django.utils import timezone
 
+import jwt
 import pytest
 from cryptography.fernet import Fernet
 
 from core.encryption import decrypt_token, encrypt_token
 from core.factories import UserFactory
-from core.sources.resana.token_manager import ResanaTokenExpired, ResanaTokenManager
+from core.sources.resana.token_manager import (
+    ResanaTokenExpired,
+    ResanaTokenManager,
+    _token_expires_at,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -25,6 +30,16 @@ def _make_user(access="", refresh="", expires_at=None):
         resana_access_token=encrypt_token(access) if access else "",
         resana_refresh_token=encrypt_token(refresh) if refresh else "",
         resana_token_expires_at=expires_at,
+    )
+
+
+def _make_access_jwt(exp_delta=timedelta(hours=3)):
+    """Build a fake Resana access token JWT carrying an `exp` claim."""
+    exp = timezone.now() + exp_delta
+    return jwt.encode(
+        {"exp": int(exp.timestamp())},
+        "test-secret-long-enough-for-hs256",
+        algorithm="HS256",
     )
 
 
@@ -65,35 +80,50 @@ def test_is_connected_true_even_when_token_expired():
 def test_store_tokens_encrypts_and_persists(settings):
     settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
     user = _make_user()
-    ResanaTokenManager(user).store_tokens("plain-access", "plain-refresh")
+    access = _make_access_jwt()
+    ResanaTokenManager(user).store_tokens(access, "plain-refresh")
 
     user.refresh_from_db()
-    assert decrypt_token(user.resana_access_token) == "plain-access"
+    assert decrypt_token(user.resana_access_token) == access
     assert decrypt_token(user.resana_refresh_token) == "plain-refresh"
     assert user.resana_token_expires_at is not None
 
 
-def test_store_tokens_sets_expiry_roughly_3h(settings):
+def test_store_tokens_sets_expiry_from_token_exp_claim(settings):
+    """expires_at must come from the access token's own `exp` claim, not a hardcoded duration."""
     settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
     user = _make_user()
-    before = timezone.now()
-    ResanaTokenManager(user).store_tokens("acc", "ref")
-    after = timezone.now()
+    access = _make_access_jwt(timedelta(minutes=15))
+
+    ResanaTokenManager(user).store_tokens(access, "plain-refresh")
 
     user.refresh_from_db()
-    expected_low = before + timedelta(hours=3) - timedelta(seconds=5)
-    expected_high = after + timedelta(hours=3) + timedelta(seconds=5)
-    assert expected_low < user.resana_token_expires_at < expected_high
+    expected = timezone.now() + timedelta(minutes=15)
+    assert abs((user.resana_token_expires_at - expected).total_seconds()) < 5
 
 
 def test_store_tokens_does_not_store_plaintext(settings):
     settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
     user = _make_user()
-    ResanaTokenManager(user).store_tokens("plain-access", "plain-refresh")
+    access = _make_access_jwt()
+    ResanaTokenManager(user).store_tokens(access, "plain-refresh")
 
     user.refresh_from_db()
-    assert user.resana_access_token != "plain-access"
+    assert user.resana_access_token != access
     assert user.resana_refresh_token != "plain-refresh"
+
+
+# ---------------------------------------------------------------------------
+# _token_expires_at()
+# ---------------------------------------------------------------------------
+
+
+def test_token_expires_at_reads_exp_claim():
+    """_token_expires_at derives expiry from the JWT's own exp claim."""
+    access = _make_access_jwt(timedelta(minutes=42))
+    expires_at = _token_expires_at(access)
+    expected = timezone.now() + timedelta(minutes=42)
+    assert abs((expires_at - expected).total_seconds()) < 5
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +226,8 @@ def test_refresh_calls_authservice_endpoint(settings):
     )
 
     mock_response = MagicMock()
-    mock_response.json.return_value = {"access_token": "fresh-access"}
+    mock_response.status_code = 200
+    mock_response.cookies = {"interstis_access": _make_access_jwt()}
 
     with patch(
         "core.sources.resana.token_manager.requests.post", return_value=mock_response
@@ -215,6 +246,43 @@ def test_refresh_calls_authservice_endpoint(settings):
 
 
 def test_refresh_stores_new_access_token(settings):
+    """The new access token comes from the interstis_access Set-Cookie, not the JSON body.
+
+    Resana's AuthService response body only contains {"success": ..., "message": ...},
+    the actual token is set via a Set-Cookie header.
+    """
+    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
+    settings.RESANA_AUTHSERVICE_ENDPOINT = (
+        "https://resana.example.com/auth-service/public/api"
+    )
+    user = _make_user(
+        access="old-access",
+        refresh="my-refresh",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    new_access = _make_access_jwt(timedelta(minutes=15))
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "success": True,
+        "message": "New Access Token created successfully",
+    }
+    mock_response.cookies = {"interstis_access": new_access}
+
+    with patch(
+        "core.sources.resana.token_manager.requests.post", return_value=mock_response
+    ):
+        ResanaTokenManager(user)._refresh()  # pylint: disable=protected-access
+
+    user.refresh_from_db()
+    assert decrypt_token(user.resana_access_token) == new_access
+    expected_expiry = timezone.now() + timedelta(minutes=15)
+    assert abs((user.resana_token_expires_at - expected_expiry).total_seconds()) < 5
+
+
+def test_refresh_raises_token_expired_when_no_access_cookie(settings):
+    """If the AuthService response doesn't set interstis_access, treat it as a failed refresh."""
     settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
     settings.RESANA_AUTHSERVICE_ENDPOINT = (
         "https://resana.example.com/auth-service/public/api"
@@ -226,16 +294,19 @@ def test_refresh_stores_new_access_token(settings):
     )
 
     mock_response = MagicMock()
-    mock_response.json.return_value = {"access_token": "brand-new-access"}
+    mock_response.status_code = 200
+    mock_response.cookies = {}
 
     with patch(
         "core.sources.resana.token_manager.requests.post", return_value=mock_response
     ):
-        ResanaTokenManager(user)._refresh()  # pylint: disable=protected-access
+        with pytest.raises(ResanaTokenExpired):
+            ResanaTokenManager(user)._refresh()  # pylint: disable=protected-access
 
     user.refresh_from_db()
-    assert decrypt_token(user.resana_access_token) == "brand-new-access"
-    assert user.resana_token_expires_at is not None
+    assert user.resana_access_token == ""
+    assert user.resana_refresh_token == ""
+    assert user.resana_token_expires_at is None
 
 
 def test_refresh_raises_token_expired_on_401(settings):
