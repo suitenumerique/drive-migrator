@@ -13,12 +13,14 @@ type WorkspaceSelectCardProps = {
   workspace: Workspace;
   migrated?: boolean;
   pending?: boolean;
+  failed?: boolean;
 };
 
 export const WorkspaceSelectCard = ({
   workspace,
   migrated = false,
   pending = false,
+  failed = false,
 }: WorkspaceSelectCardProps) => {
   const { t } = useTranslation();
   const { setValue } = useFormContext();
@@ -27,7 +29,7 @@ export const WorkspaceSelectCard = ({
     defaultValue: false,
   });
 
-  const locked = migrated || pending;
+  const locked = migrated || pending || failed;
   const checked = Boolean(field.value);
   const showCheck = locked || checked;
 
@@ -82,6 +84,11 @@ export const WorkspaceSelectCard = ({
       {pending && (
         <span className="workspace-select-card__status workspace-select-card__status--pending">
           {t('En cours')}
+        </span>
+      )}
+      {failed && (
+        <span className="workspace-select-card__status workspace-select-card__status--failed">
+          {t('Échoué')}
         </span>
       )}
       {migrated && (

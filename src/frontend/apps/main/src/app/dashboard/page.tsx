@@ -4,11 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { WorkspacesToMigrate } from '@/app/dashboard/_components/WorkspaceToMigrate';
-import {
-  Workspace,
-  WorkspaceExporting,
-  WorkspaceStatus,
-} from '@/components/Workspace/Workspace';
+import { Workspace, WorkspaceStatus } from '@/components/Workspace/Workspace';
 import { useMigrationConfig } from '@/hooks/useMigrationConfig';
 import { useWorkspaces } from '@/hooks/useWorkspaces';
 
@@ -35,10 +31,7 @@ export default function Dashboard() {
     <div className="container">
       <MigrationLimitNotice fileLimitPerWorkspace={fileLimitPerWorkspace} />
       {workspacesByStatus ? (
-        <>
-          <FailureWorkspaces workspaces={workspacesByStatus} />
-          <WorkspacesToMigrate workspaces={workspacesByStatus} />
-        </>
+        <WorkspacesToMigrate workspaces={workspacesByStatus} />
       ) : (
         <div className="container__loader">
           <Loader size="medium" />
@@ -64,33 +57,5 @@ const MigrationLimitNotice = ({
         { limit: fileLimitPerWorkspace },
       )}
     </Alert>
-  );
-};
-
-const FailureWorkspaces = ({
-  workspaces,
-}: {
-  workspaces: WorkspaceByStatus;
-}) => {
-  const { t } = useTranslation();
-  if (workspaces[WorkspaceStatus.FAILURE].length === 0) {
-    return null;
-  }
-  return (
-    <div>
-      <h2>{t('Communautés en erreur')}</h2>
-      <Alert type={VariantType.ERROR}>
-        <div>
-          {t(
-            "Si une communauté est en erreur, c'est qu'il y a eu un problème inattendu lors de la migration. Contactez le support pour obtenir de l'aide.",
-          )}
-        </div>
-      </Alert>
-      <div className="suite__workspaces mt-s">
-        {workspaces[WorkspaceStatus.FAILURE].map((workspace) => (
-          <WorkspaceExporting workspace={workspace} key={workspace.id} />
-        ))}
-      </div>
-    </div>
   );
 };

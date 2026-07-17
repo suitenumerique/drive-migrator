@@ -98,6 +98,11 @@
       color: var(--c--contextuals--content--semantic--warning--tertiary);
     }
 
+    &--failed {
+      background: var(--c--contextuals--background--semantic--error--secondary);
+      color: var(--c--contextuals--content--semantic--error--tertiary);
+    }
+
     &--migrated {
       background: var(
         --c--contextuals--background--semantic--neutral--secondary
