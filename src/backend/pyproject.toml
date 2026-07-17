@@ -80,7 +80,7 @@ dev = [
     "pytest-django==4.7.0",
     "pytest-icdiff==0.8",
     "pytest-xdist==3.5.0",
-    "pytest==7.4.3",
+    "pytest==9.0.3",
     "responses==0.24.1",
     "ruff==0.1.6",
     "types-requests==2.31.0.10",
