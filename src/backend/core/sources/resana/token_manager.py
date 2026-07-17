@@ -1,20 +1,32 @@
 """Resana token lifecycle management for per-user authentication."""
 
+import datetime
 from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
 
+import jwt
 import requests
 
 from core.encryption import decrypt_token, encrypt_token
 
-TOKEN_LIFETIME_HOURS = 3
 REFRESH_BUFFER_SECONDS = 60
 
 
 class ResanaTokenExpired(Exception):
     """Raised when the Resana access token is expired and no refresh token is available."""
+
+
+def _token_expires_at(access_token: str) -> datetime.datetime:
+    """Return the access token's own expiry, read from its `exp` JWT claim.
+
+    Signature isn't verified: this is only used to schedule our own proactive
+    refresh, not as a trust decision, and the token just came straight from
+    Resana over TLS.
+    """
+    claims = jwt.decode(access_token, options={"verify_signature": False})
+    return datetime.datetime.fromtimestamp(claims["exp"], tz=datetime.timezone.utc)
 
 
 class ResanaTokenManager:
@@ -33,12 +45,10 @@ class ResanaTokenManager:
         self.user.save()
 
     def store_tokens(self, access: str, refresh: str) -> None:
-        """Encrypt and persist both tokens. Sets expires_at = now + 3h."""
+        """Encrypt and persist both tokens. expires_at comes from the access token itself."""
         self.user.resana_access_token = encrypt_token(access)
         self.user.resana_refresh_token = encrypt_token(refresh)
-        self.user.resana_token_expires_at = timezone.now() + timedelta(
-            hours=TOKEN_LIFETIME_HOURS
-        )
+        self.user.resana_token_expires_at = _token_expires_at(access)
         self.user.save()
 
     def get_valid_token(self) -> str:
@@ -74,9 +84,14 @@ class ResanaTokenManager:
             self.clear_tokens()
             raise ResanaTokenExpired("Resana refresh token is no longer valid.")
         response.raise_for_status()
-        new_access = response.json()["access_token"]
+
+        new_access = response.cookies.get("interstis_access")
+        if not new_access:
+            self.clear_tokens()
+            raise ResanaTokenExpired(
+                "Resana refresh response did not set an interstis_access cookie."
+            )
+
         self.user.resana_access_token = encrypt_token(new_access)
-        self.user.resana_token_expires_at = timezone.now() + timedelta(
-            hours=TOKEN_LIFETIME_HOURS
-        )
+        self.user.resana_token_expires_at = _token_expires_at(new_access)
         self.user.save()

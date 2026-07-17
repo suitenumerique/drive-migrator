@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from django.core.cache import cache
 from django.utils import timezone
 
+import jwt
 import pytest
 from cryptography.fernet import Fernet
 from rest_framework.test import APIClient
@@ -99,7 +100,7 @@ def test_connect_stores_tokens_on_success(settings):
     user = UserFactory(email="u@example.com")
 
     with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
-        mock_login.return_value = ("fresh-access", "fresh-refresh")
+        mock_login.return_value = (_make_access_jwt(), "fresh-refresh")
         response = _auth_client(user).post(CONNECT_URL, {"password": "s3cr3t"})
 
     assert response.status_code == 200
@@ -125,7 +126,7 @@ def test_connect_ignores_email_from_request_body(settings):
     user = UserFactory(email="real-user@example.com")
 
     with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
-        mock_login.return_value = ("acc", "ref")
+        mock_login.return_value = (_make_access_jwt(), "ref")
         response = _auth_client(user).post(
             CONNECT_URL,
             {"email": "spoofed@example.com", "password": "s3cr3t"},
@@ -192,7 +193,7 @@ def test_connect_returns_status_connected_after_success(settings):
     client = _auth_client(user)
 
     with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
-        mock_login.return_value = ("acc", "ref")
+        mock_login.return_value = (_make_access_jwt(), "ref")
         client.post(CONNECT_URL, {"password": "pw"})
 
     response = client.get(STATUS_URL)
@@ -238,7 +239,7 @@ def test_otp_stores_tokens_on_success(settings):
     _store_challenge(user.id, challenge)
 
     with patch("core.api.views.resana_auth._keycloak_submit_otp") as mock_submit:
-        mock_submit.return_value = ("acc-tok", "ref-tok")
+        mock_submit.return_value = (_make_access_jwt(), "ref-tok")
         response = _auth_client(user).post(OTP_URL, {"code": "123456"})
 
     assert response.status_code == 200
@@ -284,7 +285,7 @@ def test_connect_then_otp_full_flow(settings):
     assert connect_response.data["otp_required"] is True
 
     with patch("core.api.views.resana_auth._keycloak_submit_otp") as mock_submit:
-        mock_submit.return_value = ("acc-tok", "ref-tok")
+        mock_submit.return_value = (_make_access_jwt(), "ref-tok")
         otp_response = client.post(OTP_URL, {"code": "123456"})
 
     assert otp_response.status_code == 200
@@ -340,14 +341,14 @@ def test_keycloak_login_returns_tokens_on_success():
     mock_response_get.text = '<form action="https://kc.example.com/login-actions/authenticate?session_code=XYZ"></form>'
     mock_response_post = MagicMock()
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.get.return_value = mock_response_get
         session.post.return_value = mock_response_post
-        session.cookies.get.side_effect = lambda k: {
+        session.cookies.get.side_effect = {
             "interstis_access": "acc-tok",
             "interstis_refresh": "ref-tok",
-        }.get(k)
+        }.get
 
         access, refresh = _keycloak_login(
             "user@example.com",
@@ -364,8 +365,8 @@ def test_keycloak_login_raises_when_form_not_found():
     mock_response_get = MagicMock()
     mock_response_get.text = "<html>no form here</html>"
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.get.return_value = mock_response_get
 
         with pytest.raises(ValueError, match="login form not found"):
@@ -385,8 +386,8 @@ def test_keycloak_login_raises_when_no_cookie():
     mock_response_post = MagicMock()
     mock_response_post.text = "<html>invalid credentials</html>"
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.get.return_value = mock_response_get
         session.post.return_value = mock_response_post
         session.cookies.get.return_value = None
@@ -408,8 +409,8 @@ def test_keycloak_login_decodes_html_entities_in_form_action():
     )
     mock_response_post = MagicMock()
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.get.return_value = mock_response_get
         session.post.return_value = mock_response_post
         session.cookies.get.side_effect = (
@@ -463,8 +464,8 @@ def test_keycloak_login_raises_otp_required_when_its_portail_present():
     mock_response_post = MagicMock()
     mock_response_post.text = _its_portail_html()
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.get.return_value = mock_response_get
         session.post.return_value = mock_response_post
         session.cookies.get.return_value = None
@@ -498,8 +499,8 @@ def test_keycloak_login_otp_field_name_is_totp_when_not_input_only():
     mock_response_post = MagicMock()
     mock_response_post.text = _its_portail_html(otp_input_only="false")
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.get.return_value = mock_response_get
         session.post.return_value = mock_response_post
         session.cookies.get.return_value = None
@@ -528,8 +529,8 @@ def test_keycloak_login_decodes_html_entities_in_login_action():
         login_action="https://kc.example.com/authenticate?session_code=X&amp;execution=Y"
     )
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.get.return_value = mock_response_get
         session.post.return_value = mock_response_post
         session.cookies.get.return_value = None
@@ -570,13 +571,13 @@ def test_keycloak_submit_otp_returns_tokens_on_success():
     challenge = _make_challenge()
     mock_response = MagicMock()
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.post.return_value = mock_response
-        session.cookies.get.side_effect = lambda k: {
+        session.cookies.get.side_effect = {
             "interstis_access": "acc-tok",
             "interstis_refresh": "ref-tok",
-        }.get(k)
+        }.get
 
         access, refresh = _keycloak_submit_otp("123456", challenge)
 
@@ -600,8 +601,8 @@ def test_keycloak_submit_otp_uses_totp_field_name():
     challenge = _make_challenge(otp_field_name="totp")
     mock_response = MagicMock()
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.post.return_value = mock_response
         session.cookies.get.side_effect = lambda k: (
             "tok" if k == "interstis_access" else None
@@ -622,8 +623,8 @@ def test_keycloak_submit_otp_raises_on_invalid_code():
     challenge = _make_challenge()
     mock_response = MagicMock()
 
-    with patch("core.api.views.resana_auth.requests.Session") as MockSession:
-        session = MockSession.return_value
+    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
+        session = mock_session_cls.return_value
         session.post.return_value = mock_response
         session.cookies.get.return_value = None
 
@@ -638,3 +639,17 @@ def test_keycloak_submit_otp_raises_on_invalid_code():
 
 def _fernet_key() -> str:
     return Fernet.generate_key().decode()
+
+
+def _make_access_jwt(exp_delta=timedelta(hours=3)) -> str:
+    """Build a fake Resana access token JWT carrying an `exp` claim.
+
+    store_tokens() reads its own expiry from this claim, so any mocked
+    access token used in these tests must be shaped like a real one.
+    """
+    exp = timezone.now() + exp_delta
+    return jwt.encode(
+        {"exp": int(exp.timestamp())},
+        "test-secret-long-enough-for-hs256",
+        algorithm="HS256",
+    )
