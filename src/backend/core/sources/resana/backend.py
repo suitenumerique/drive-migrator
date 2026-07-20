@@ -1,5 +1,7 @@
 """ResanaSourceBackend — reads workspaces from the Interstis GED API."""
 
+import html
+
 from django.conf import settings
 
 from core.backends.source import (
@@ -37,7 +39,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
         self._user = user
         client = self._get_client()
         return [
-            SourceWorkspace(id=ws["uuid"], title=ws["name"], raw_data=ws)
+            SourceWorkspace(id=ws["uuid"], title=html.unescape(ws["name"]), raw_data=ws)
             for ws in client.get_workspaces()
         ]
 
@@ -73,7 +75,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
         for raw_child in raw.get("folders", []):
             folder.children.append(
                 self._explore_folder(
-                    raw_child["uuid"], raw_child.get("name", ""), client
+                    raw_child["uuid"], html.unescape(raw_child.get("name", "")), client
                 )
             )
         for raw_file in raw.get("files", []):
@@ -83,7 +85,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
             folder.files.append(
                 SourceFile(
                     id=raw_file["uuid"],
-                    name=raw_file.get("name", ""),
+                    name=html.unescape(raw_file.get("name", "")),
                     extension=extension,
                     download_url=raw_file["uuid"],
                     raw_data=raw_file,

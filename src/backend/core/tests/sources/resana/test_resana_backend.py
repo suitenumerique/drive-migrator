@@ -104,6 +104,27 @@ def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
     assert result[1].id == "ws-2"
 
 
+def test_get_workspaces_unescapes_html_entities_in_title(settings):
+    """Resana returns names HTML-escaped (e.g. &#039; for apostrophe); decode them."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    raw_workspaces = [
+        {
+            "uuid": "ws-1",
+            "name": "Rapports d&#039;activit&eacute; &amp; suivi",
+            "isPersonalWorkspace": False,
+        }
+    ]
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.get_workspaces.return_value = raw_workspaces
+            result = ResanaSourceBackend().get_workspaces(user)
+
+    assert result[0].title == "Rapports d'activité & suivi"
+
+
 def test_get_workspaces_stores_user_on_backend(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     user = MagicMock()
@@ -169,6 +190,39 @@ def test_get_workspace_structure_flat_folder(settings):
     assert f.name == "readme"
     assert f.extension == ".txt"
     assert f.download_url == "file-1"
+
+
+def test_get_workspace_structure_unescapes_html_entities_in_names(settings):
+    """Folder and file names from Resana are HTML-unescaped before use."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    workspace = _make_workspace()
+
+    def explore_side_effect(uuid):
+        if uuid == workspace.source_id:
+            return [
+                {
+                    "folders": [
+                        {"uuid": "folder-1", "name": "Suivi budg&eacute;taire &amp; RH"}
+                    ],
+                    "files": [
+                        {
+                            "uuid": "file-1",
+                            "name": "Compte-rendu &lt;final&gt; d&#039;&eacute;quipe",
+                            "extension": ".txt",
+                        }
+                    ],
+                }
+            ]
+        return []
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            mock_client.return_value.explore.side_effect = explore_side_effect
+            result = ResanaSourceBackend().get_workspace_structure(workspace)
+
+    assert result.children[0].name == "Suivi budgétaire & RH"
+    assert result.files[0].name == "Compte-rendu <final> d'équipe"
 
 
 def test_get_workspace_structure_empty_workspace(settings):
