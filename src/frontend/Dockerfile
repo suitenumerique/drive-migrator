@@ -1,4 +1,4 @@
-FROM node:20-alpine as frontend-deps
+FROM node:24-alpine as frontend-deps
 
 WORKDIR /home/frontend/
 

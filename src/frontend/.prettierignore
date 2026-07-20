@@ -1,0 +1,17 @@
+# Dependencies
+**/node_modules
+
+# Build artifacts
+**/.next
+**/out
+**/coverage
+**/dist
+**/.turbo
+
+# Static assets / vendored bundles (e.g. minified pdf.js worker)
+apps/main/public
+
+# Generated files
+apps/main/src/i18n/translations.json
+apps/main/src/cunningham/cunningham-tokens*
+**/*.min.*
