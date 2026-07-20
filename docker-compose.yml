@@ -1,4 +1,4 @@
-version: "3.8"
+name: drive-migrator
 
 services:
   postgresql:
