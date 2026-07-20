@@ -1,0 +1,60 @@
+name: Install node, yarn and project dependencies
+description: Add cache support for self-hosted runners
+
+inputs:
+  node-version:
+    required: true
+    description: expected node version
+  lock-file-path:
+    required: true
+    description: lock file path to use for caching
+  node-module-path:
+    required: true
+    description: node_module path to use for caching
+  cache:
+    default: false
+    description: should we cache project's node_module?
+  restore:
+    default: true
+    description: should we restore project's cache?
+  working-directory:
+    default: ${{ github.workspace }}
+    description: set the action working directory
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: Setup Node.js (without cache)
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        package-manager-cache: false
+
+    - name: Enable corepack
+      run: corepack enable
+      shell: sh
+
+    - name: Restore the frontend cache
+      if: ${{ inputs.restore == 'true' }}
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ inputs.node-module-path }}
+        key: front-node-modules-${{ hashFiles(inputs.lock-file-path) }}
+
+    - name: Get the current working-directory
+      run: echo "working-directory $PWD"
+      shell: sh
+
+    - name: Install dependencies
+      run: cd ${WORKING_DIRECTORY} && yarn install --frozen-lockfile
+      shell: sh
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+
+    - name: Cache frontend dependencies
+      if: ${{ inputs.cache == 'true' }}
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ inputs.node-module-path }}
+        key: front-node-modules-${{ hashFiles(inputs.lock-file-path) }}

@@ -8,67 +8,58 @@ on:
     branches:
       - "*"
 
+permissions:
+  contents: read
+
 jobs:
+
   install-front:
     runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: src/frontend
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup node and yarn 
+        uses: ./.github/actions/yarn-setup
         with:
           node-version: "20.x"
-
-      - name: Restore the frontend cache
-        uses: actions/cache@v4
-        id: front-node_modules
-        with:
-          path: "src/frontend/**/node_modules"
-          key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
-
-      - name: Install yarn
-        run: npm install -g yarn
-
-      - name: Install dependencies
-        if: steps.front-node_modules.outputs.cache-hit != 'true'
-        run: cd src/frontend/ && yarn install --frozen-lockfile
-
-      - name: Cache install frontend
-        if: steps.front-node_modules.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: "src/frontend/**/node_modules"
-          key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
+          lock-file-path: 'src/frontend/**/yarn.lock'
+          node-module-path: 'src/frontend/**/node_modules'
+          working-directory: src/frontend
+          cache: true 
 
   build-front:
     runs-on: self-hosted
     needs: install-front
+    defaults:
+      run:
+        working-directory: src/frontend
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Restore the frontend cache
-        uses: actions/cache@v4
-        id: front-node_modules
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          path: "src/frontend/**/node_modules"
-          key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
+          persist-credentials: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup node and yarn 
+        uses: ./.github/actions/yarn-setup
         with:
           node-version: "20.x"
-
-      - name: Install yarn
-        run: npm install -g yarn
+          lock-file-path: 'src/frontend/**/yarn.lock'
+          node-module-path: 'src/frontend/**/node_modules'
+          working-directory: src/frontend
 
       - name: Build CI App
-        run: cd src/frontend/ && yarn ci:build
+        run: yarn ci:build
 
       - name: Cache build frontend
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: src/frontend/apps/main/out/
           key: build-front-${{ github.run_id }}
@@ -76,49 +67,47 @@ jobs:
   test-front:
     runs-on: self-hosted
     needs: install-front
+    defaults:
+      run:
+        working-directory: src/frontend
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Restore the frontend cache
-        uses: actions/cache@v4
-        id: front-node_modules
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          path: "src/frontend/**/node_modules"
-          key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
+          persist-credentials: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup node and yarn 
+        uses: ./.github/actions/yarn-setup
         with:
           node-version: "20.x"
-
-      - name: Install yarn
-        run: npm install -g yarn
+          lock-file-path: 'src/frontend/**/yarn.lock'
+          node-module-path: 'src/frontend/**/node_modules'
+          working-directory: src/frontend
 
       - name: Test App
-        run: cd src/frontend/ && yarn app:test
+        run: yarn app:test
 
   lint-front:
     runs-on: self-hosted
     needs: install-front
+    defaults:
+      run:
+        working-directory: src/frontend
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Restore the frontend cache
-        uses: actions/cache@v4
-        id: front-node_modules
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          path: "src/frontend/**/node_modules"
-          key: front-node_modules-${{ hashFiles('src/frontend/**/yarn.lock') }}
+          persist-credentials: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup node and yarn 
+        uses: ./.github/actions/yarn-setup
         with:
           node-version: "20.x"
-
-      - name: Install yarn
-        run: npm install -g yarn
+          lock-file-path: 'src/frontend/**/yarn.lock'
+          node-module-path: 'src/frontend/**/node_modules'
+          working-directory: src/frontend
 
       - name: Check linting
-        run: cd src/frontend/ && yarn lint
+        run: yarn lint

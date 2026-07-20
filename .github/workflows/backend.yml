@@ -8,28 +8,44 @@ on:
     branches:
       - "*"
 
+permissions:
+  contents: read
+
 jobs:
   lint-git:
     runs-on: self-hosted
     if: github.event_name == 'pull_request' # Makes sense only for pull requests
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 0
+          persist-credentials: false
+          fetch-depth: 0 
+
       - name: show
         run: git log
+
+      - name: Enforce absence of print statements in code
+        run: |
+          ! git diff "origin/${GIT_REF}..HEAD" -- . ':(exclude)**/backend.yml' | grep "print("
+        env:
+          GIT_REF: ${{ github.event.pull_request.base.ref }}
+
       - name: Check absence of fixup commits
         run: |
           ! git log | grep 'fixup!'
+
       - name: Install Python
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.14.6"
+
       - name: Install gitlint
         run: pip install --user requests gitlint
+
       - name: Lint commit messages added to main
-        run: ~/.local/bin/gitlint --commits origin/${{ github.event.pull_request.base.ref }}..HEAD
+        run: ~/.local/bin/gitlint --commits "origin/${GIT_REF}..HEAD"
+        env:
+          GIT_REF: ${{ github.event.pull_request.base.ref }}
 
   check-changelog:
     runs-on: self-hosted
@@ -38,9 +54,11 @@ jobs:
       github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
           fetch-depth: 50
+          persist-credentials: false
+
       - name: Check that the CHANGELOG has been modified in the current branch
         run: git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.after }} | grep 'CHANGELOG.md'
 
@@ -48,7 +66,10 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@ee0669bd1cc54295c223e0bb666b733df41de1c5 # v2.7.0
+        with:
+          persist-credentials: false
+
       - name: Check CHANGELOG max line length
         run: |
           max_line_length=$(cat CHANGELOG.md | grep -Ev "^\[.*\]: https://github.com" | wc -L)
@@ -62,25 +83,27 @@ jobs:
     defaults:
       run:
         working-directory: src/mail
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          node-version: "18"
+          persist-credentials: false
 
       - name: Restore the mail templates
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: mail-templates
         with:
           path: "src/backend/core/templates/mail"
           key: mail-templates-${{ hashFiles('src/mail/mjml') }}
 
-      - name: Install yarn
-        if: steps.mail-templates.outputs.cache-hit != 'true'
-        run: npm install -g yarn
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20.x"
+
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Install node dependencies
         if: steps.mail-templates.outputs.cache-hit != 'true'
@@ -92,7 +115,7 @@ jobs:
 
       - name: Cache mail templates
         if: steps.mail-templates.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: "src/backend/core/templates/mail"
           key: mail-templates-${{ hashFiles('src/mail/mjml') }}
@@ -102,28 +125,33 @@ jobs:
     defaults:
       run:
         working-directory: src/backend
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@ee0669bd1cc54295c223e0bb666b733df41de1c5 # v2.7.0
+        with:
+          persist-credentials: false
+
       - name: Install Python
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@3542bca2639a428e1796aaa6a2ffef0c0f575566 # v3
         with:
           python-version: "3.14.6"
+
       - name: Install development dependencies
         run: pip install --user .[dev]
+
       - name: Check code formatting with ruff
         run: ~/.local/bin/ruff format . --diff
+
       - name: Lint code with ruff
         run: ~/.local/bin/ruff check .
 
   test-back:
     runs-on: self-hosted
     needs: build-mails
-
     defaults:
       run:
         working-directory: src/backend
-
     services:
       postgres:
         image: postgres:16
@@ -135,7 +163,6 @@ jobs:
           - 5432:5432
         # needed because the postgres container does not provide a healthcheck
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-
     env:
       DJANGO_CONFIGURATION: Test
       DJANGO_SETTINGS_MODULE: main.settings
@@ -156,7 +183,9 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Create writable /data
         run: |
@@ -164,7 +193,7 @@ jobs:
           sudo mkdir -p /data/static
 
       - name: Restore the mail templates
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: mail-templates
         with:
           path: "src/backend/core/templates/mail"
@@ -194,7 +223,7 @@ jobs:
           docker run -d --name redis -p 6379:6379 redis:5
 
       - name: Install Python
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@3542bca2639a428e1796aaa6a2ffef0c0f575566 # v3
         with:
           python-version: "3.14.6"
 
