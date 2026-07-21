@@ -14,7 +14,7 @@
 
           <!-- Main Message -->
           <mj-text>{% blocktrans %}Suite à votre demande, vous pouvez télécharger une archive contenant l'ensemble des fichiers de votre espace {{source_label}} <strong>{{workspace_name}}</strong>{% endblocktrans %}</mj-text>
-          <mj-text>{% blocktrans %}Attention, le lien de téléchargement de ce mail est valide 7 jours. Passé ce délai vous pourrez toujours télécharger l'archive depuis l'outil de migration en vous connectant.{% endblocktrans %}</mj-text>
+          <mj-text>{% blocktrans %}Ce lien vous amène vers l'outil de migration, où une connexion sera nécessaire pour lancer le téléchargement.{% endblocktrans %}</mj-text>
 
           <mj-button href="{{download_url}}" background-color="#000091" color="white">
             {% trans "Télécharger l'archive"%}

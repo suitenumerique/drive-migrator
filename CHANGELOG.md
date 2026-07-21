@@ -54,6 +54,7 @@ and this project adheres to
 - fix Resana access token refresh crashing with KeyError: 'access_token'
 - fix HTML entities not decoded in Resana workspace/folder/file names
 - fix standalone bootstrap (OIDC endpoint, CSRF) and update README #105
+- secure archive ZIP download link
 
 ### Removed
 

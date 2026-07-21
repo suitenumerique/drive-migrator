@@ -3,6 +3,7 @@
 import csv
 import os
 
+from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 
 from core.backends.destination import AbstractDestinationBackend
@@ -36,13 +37,14 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
         manager.zip_workspace_folder(workspace)
         if csv_path:
             os.remove(csv_path)
-        archive_url = manager.upload_archive(workspace)
+        manager.upload_archive(workspace)
         title = _(f"Votre archive de l'espace {workspace.title} est prête !")
+        download_url = f"{settings.LOGIN_REDIRECT_URL}/download-archive/?workspaceId={workspace.id}"
         MailsManager().send_migration_mail(
             user,
             workspace,
             "archive_download",
-            {"title": title, "download_url": archive_url},
+            {"title": title, "download_url": download_url},
         )
         workspace.set_destination_status("archive", Workspace.Status.SUCCESS)
         workspace.save()

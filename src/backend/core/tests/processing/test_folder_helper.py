@@ -1,5 +1,9 @@
 """Tests for ArchiveManager and ProgressPercentage."""
 
+# pylint: disable=protected-access
+# Reaching into ProgressPercentage's internal counters is the only way to assert
+# its progress-tracking state from the outside.
+
 import os
 from unittest.mock import MagicMock, patch
 
@@ -160,6 +164,26 @@ def test_get_download_url_raises_when_no_s3_key():
     manager = ArchiveManager()
     with pytest.raises(ValueError, match="does not have an archive path"):
         manager.get_download_url(workspace)
+
+
+def test_get_download_url_uses_short_expiry(settings):
+    """get_download_url() requests a short-lived presigned URL (not 7 days) so a leaked
+    email link/log entry can't be used to download the archive long after the fact."""
+    settings.AWS_S3_DOWNLOAD_URL = ""
+    workspace = MagicMock(spec=Workspace)
+    workspace.get_destination_metadata.return_value = {"s3_key": "ws.zip"}
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        mock_client = mock_boto3.resource.return_value.meta.client
+        mock_client.generate_presigned_url.return_value = (
+            "http://minio:9000/bucket/ws.zip?sig=abc"
+        )
+        manager = ArchiveManager()
+        manager.get_download_url(workspace)
+
+    _, kwargs = mock_client.generate_presigned_url.call_args
+    assert kwargs["ExpiresIn"] == ArchiveManager.download_url_expires_in
+    assert kwargs["ExpiresIn"] <= 300
 
 
 def test_get_download_url_returns_raw_url_without_download_url_setting(settings):

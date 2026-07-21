@@ -17,11 +17,13 @@ def _patch_mails_manager():
         yield mock_cls
 
 
-def test_export_sends_download_mail(_patch_mails_manager):
+def test_export_sends_download_mail(_patch_mails_manager, settings):
     """export() sends the archive download email to the user after uploading,
     via the generic MailsManager.send_migration_mail()."""
+    settings.LOGIN_REDIRECT_URL = "http://localhost:3010"
     workspace = MagicMock(spec=Workspace)
     workspace.members = []
+    workspace.id = "ws-1"
     user = MagicMock()
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
@@ -36,8 +38,31 @@ def test_export_sends_download_mail(_patch_mails_manager):
     args, kwargs = mock_send.call_args
     assert args[:3] == (user, workspace, "archive_download")
     assert str(args[3]["title"])
-    assert args[3]["download_url"] == "http://s3.example.com/ws.zip"
     assert kwargs == {}
+
+
+def test_export_mail_links_to_frontend_not_raw_s3_url(_patch_mails_manager, settings):
+    """The mail must never carry the raw S3 presigned URL: it must link to the
+    frontend download page, which will fetch a short-lived URL once authenticated."""
+    settings.LOGIN_REDIRECT_URL = "http://localhost:3010"
+    workspace = MagicMock(spec=Workspace)
+    workspace.members = []
+    workspace.id = "ws-1"
+    user = MagicMock()
+
+    with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
+        mock_manager = mock_manager_cls.return_value
+        mock_manager.upload_archive.return_value = (
+            "http://s3.example.com/ws.zip?sig=secret"
+        )
+
+        backend = ArchiveDestinationBackend()
+        backend.export(workspace, user, "/tmp/workspace")
+
+    mock_send = _patch_mails_manager.return_value.send_migration_mail
+    args, _kwargs = mock_send.call_args
+    download_url = args[3]["download_url"]
+    assert download_url == "http://localhost:3010/download-archive/?workspaceId=ws-1"
 
 
 def test_implements_abstract_destination():

@@ -15,7 +15,7 @@ from core.processing.folder_creator import FolderCreator
 logger = get_task_logger(__name__)
 
 
-class ProgressPercentage(object):
+class ProgressPercentage:
     def __init__(self, filename):
         self._filename = filename
         self._size = float(os.path.getsize(filename))
@@ -31,14 +31,17 @@ class ProgressPercentage(object):
             current_time = time.time()
             if current_time - self._last_update_time > 30:
                 logger.info(
-                    "%s  %s / %s  (%.2f%%)"
-                    % (self._filename, self._seen_so_far, self._size, percentage)
+                    f"{self._filename}  {self._seen_so_far} / {self._size}  ({percentage:.2f}%)"
                 )
                 self._last_update_time = current_time
 
 
 class ArchiveManager:
     archive_format = "zip"
+    # Short-lived on purpose: the URL is regenerated on demand by an authenticated
+    # API call, so it only needs to survive the time between generation and the
+    # browser actually starting the S3 request (see docs/securisation-lien-export-zip.md).
+    download_url_expires_in = 60 * 5
 
     def zip_workspace_folder(self, workspace: Workspace):
         folder_creator = FolderCreator()
@@ -76,7 +79,7 @@ class ArchiveManager:
                 "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
                 "Key": s3_key,
             },
-            ExpiresIn=3600 * 24 * 7,  # 7 days
+            ExpiresIn=self.download_url_expires_in,
         )
 
         logger.info("ArchiveManager.upload_archive")

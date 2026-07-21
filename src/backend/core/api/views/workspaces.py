@@ -11,6 +11,7 @@ from ...models import Workspace
 from ...processing.folder_helper import ArchiveManager
 from ...sources.osmose.serializers import WorkspaceSerializer
 from ..filters import MultipleValueFilter
+from ..permissions import IsAuthenticated
 
 
 class WorkspacesFilterSet(FilterSet):
@@ -27,6 +28,7 @@ class WorkspacesViewset(viewsets.ReadOnlyModelViewSet):  # pylint: disable=too-m
     """Viewset for Workspaces."""
 
     serializer_class = WorkspaceSerializer
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_class = WorkspacesFilterSet
 
