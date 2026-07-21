@@ -54,7 +54,7 @@ jobs:
       github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 50
           persist-credentials: false
@@ -66,7 +66,7 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Checkout repository
-        uses: actions/checkout@ee0669bd1cc54295c223e0bb666b733df41de1c5 # v2.7.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -86,12 +86,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Restore the mail templates
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: mail-templates
         with:
           path: "src/backend/core/templates/mail"
@@ -115,7 +115,7 @@ jobs:
 
       - name: Cache mail templates
         if: steps.mail-templates.outputs.cache-hit != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: "src/backend/core/templates/mail"
           key: mail-templates-${{ hashFiles('src/mail/mjml') }}
@@ -128,12 +128,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@ee0669bd1cc54295c223e0bb666b733df41de1c5 # v2.7.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Install Python
-        uses: actions/setup-python@3542bca2639a428e1796aaa6a2ffef0c0f575566 # v3
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.14.6"
 
@@ -183,7 +183,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -193,7 +193,7 @@ jobs:
           sudo mkdir -p /data/static
 
       - name: Restore the mail templates
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: mail-templates
         with:
           path: "src/backend/core/templates/mail"
@@ -223,7 +223,7 @@ jobs:
           docker run -d --name redis -p 6379:6379 redis:5
 
       - name: Install Python
-        uses: actions/setup-python@3542bca2639a428e1796aaa6a2ffef0c0f575566 # v3
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.14.6"
 
