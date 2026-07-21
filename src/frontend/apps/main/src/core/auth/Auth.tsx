@@ -53,7 +53,7 @@ export const Auth = ({ children }: PropsWithChildren) => {
 
       if (!response.ok) {
         if (!publicRoute) {
-          login();
+          login(pathname);
           return;
         }
         setIsAuthPending(false);
