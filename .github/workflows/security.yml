@@ -12,7 +12,7 @@ permissions:
 jobs:
   zizmor:
     name: Run zizmor 🌈
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
@@ -25,6 +25,3 @@ jobs:
 
       - name: Run zizmor 🌈
         uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
-        # FIXME: should be activated once the project is open sourced
-        with:
-          advanced-security: false
