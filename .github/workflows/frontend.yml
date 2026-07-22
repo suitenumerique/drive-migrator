@@ -14,7 +14,7 @@ permissions:
 jobs:
 
   install-front:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: src/frontend
@@ -35,7 +35,7 @@ jobs:
           cache: true 
 
   build-front:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: install-front
     defaults:
       run:
@@ -65,7 +65,7 @@ jobs:
           key: build-front-${{ github.run_id }}
 
   test-front:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: install-front
     defaults:
       run:
@@ -89,7 +89,7 @@ jobs:
         run: yarn app:test
 
   lint-front:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: install-front
     defaults:
       run:
