@@ -1,6 +1,9 @@
 import os
+from logging import getLogger
 
 from core.models import FeatureFlag
+
+logger = getLogger(__name__)
 
 
 def get_dir_size(path="."):
@@ -57,17 +60,17 @@ def ensure_file_uniqueness(file_path):
 
 def truncate_folder_and_file_names(path, max_folder_length=57, max_files_length=200):
     for root, dirs, files in os.walk(path):
-        for dir in dirs:
-            if len(dir) > max_folder_length:
-                old_name = os.path.join(root, dir)
-                new_name = os.path.join(root, dir[:max_folder_length])
-                print(f"Renaming folder {old_name} to {new_name}")  # noqa: T201
+        for folder_name in dirs:
+            if len(folder_name) > max_folder_length:
+                old_name = os.path.join(root, folder_name)
+                new_name = os.path.join(root, folder_name[:max_folder_length])
+                logger.info("Renaming folder %s to %s", old_name, new_name)
                 rename_with_counter(old_name, new_name)
         for file in files:
             if len(file) > max_files_length:
                 old_name = os.path.join(root, file)
                 new_name = truncate_file_name(file, max_files_length)
-                print(f"Renaming file {old_name} to {new_name}")  # noqa: T201
+                logger.info("Renaming file %s to %s", old_name, new_name)
                 rename_with_counter(old_name, new_name)
 
 
@@ -81,6 +84,14 @@ def truncate_file_name(filename, max_length=200):
     new_length = max_length - len(extension) - 1 if extension else max_length
     new_base = base[:new_length]
     return new_base + extension
+
+
+def sanitize_path_component(name):
+    """
+    Replace path separators in a single path segment (folder or file name)
+    so a source name containing "/" can't be split into unintended sub-paths.
+    """
+    return name.replace("/", "-").replace(os.sep, "-")
 
 
 def truncate_path_parts(path, max_folder_length=200, max_files_length=190):

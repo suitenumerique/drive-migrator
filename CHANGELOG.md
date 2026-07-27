@@ -55,6 +55,7 @@ and this project adheres to
 - fix HTML entities not decoded in Resana workspace/folder/file names
 - fix standalone bootstrap (OIDC endpoint, CSRF) and update README #105
 - secure archive ZIP download link
+- fix export crash on folder/file names containing "/" #165
 
 ### Removed
 

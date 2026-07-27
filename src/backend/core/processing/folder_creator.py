@@ -10,6 +10,7 @@ from core.models import Workspace
 from core.utils import (
     ensure_file_uniqueness,
     get_dir_size,
+    sanitize_path_component,
     sizeof_fmt,
     truncate_path_parts,
 )
@@ -65,7 +66,9 @@ class FolderCreator:
         folder: SourceFolder,
         source_backend: AbstractSourceBackend,
     ):
-        path = truncate_path_parts(os.path.join(current_dir, folder.name))
+        path = truncate_path_parts(
+            os.path.join(current_dir, sanitize_path_component(folder.name))
+        )
         if not os.path.exists(path):
             os.mkdir(path)
 
@@ -83,7 +86,9 @@ class FolderCreator:
                 "Downloading file %s/%s ...", self.files_current, self.files_count
             )
 
-            destination = os.path.join(path, file.name_with_extension)
+            destination = os.path.join(
+                path, sanitize_path_component(file.name_with_extension)
+            )
             destination_truncated = truncate_path_parts(destination)
             if destination != destination_truncated:
                 logger.info(

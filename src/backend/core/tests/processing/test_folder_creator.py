@@ -205,6 +205,43 @@ def test_create_folder_recurses_into_nested_subfolders(tmp_path, settings):
     assert os.path.isdir(tmp_path / "workspace_ws9" / "level1" / "level2")
 
 
+def test_create_folder_sanitizes_slash_in_folder_name(tmp_path, settings):
+    """A source folder name containing a "/" must not be split into sub-paths."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws12")
+    folder = SourceFolder(
+        name="root",
+        children=[SourceFolder(name="GT_Tronc/Socle_communs")],
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    workspace_dir = tmp_path / "workspace_ws12"
+    assert not (workspace_dir / "GT_Tronc").exists()
+    assert os.path.isdir(workspace_dir / "GT_Tronc-Socle_communs")
+
+
+def test_create_folder_sanitizes_slash_in_file_name(tmp_path, settings):
+    """A source file name containing a "/" must not be split into sub-paths."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws13")
+    file = SourceFile(
+        id="f1", name="report/final", extension=".pdf", download_url="http://x"
+    )
+    folder = SourceFolder(
+        name="root", children=[SourceFolder(name="sub", files=[file])]
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    called_dest = backend.download_file.call_args[0][1]
+    assert called_dest == str(tmp_path / "workspace_ws13" / "sub" / "report-final.pdf")
+
+
 def test_create_folder_logs_truncated_filename(tmp_path, settings):
     """When a filename is truncated, create_folder() uses the truncated path."""
     settings.APP_WORK_DIR = str(tmp_path)
