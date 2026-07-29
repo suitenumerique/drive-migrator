@@ -1,13 +1,54 @@
 """DriveBackend — HTTP client for La Suite Drive API."""
 
+import time
 from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
 
 import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError, Timeout
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from core.encryption import decrypt_token, encrypt_token
+
+_UPLOAD_STATE_NOT_PENDING = "item_upload_state_not_pending"
+
+# Applied to calls that are safe to blindly retry: GET/PUT/token-refresh requests that
+# don't create a new resource, so replaying them after a transient network error can't
+# produce a duplicate side effect.
+_retry_on_transient_network_error = retry(
+    retry=retry_if_exception_type((Timeout, RequestsConnectionError)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2),
+    reraise=True,
+)
+
+
+def _is_upload_already_processed(error: HTTPError) -> bool:
+    """Detect the item_upload_state_not_pending error.
+
+    A ReadTimeout can happen after Drive already processed the request but before
+    we received the response. Retrying then hits this 400 error, which means the
+    original call actually succeeded and should be treated as such.
+    """
+    response = error.response
+    if response is None or response.status_code != 400:
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    return any(
+        error_detail.get("code") == _UPLOAD_STATE_NOT_PENDING
+        for error_detail in payload.get("errors", [])
+    )
 
 
 def user_has_usable_drive_token(user) -> bool:
@@ -99,6 +140,7 @@ class DriveBackend:
         response.raise_for_status()
         return response.json()
 
+    @_retry_on_transient_network_error
     def upload_to_s3(self, policy_url: str, file_path: str) -> None:
         """Step 2: Upload file content directly to the S3 presigned URL (no Drive token)."""
         with open(file_path, "rb") as f:
@@ -108,16 +150,31 @@ class DriveBackend:
         response.raise_for_status()
 
     def notify_upload_ended(self, item_id: str) -> None:
-        """Step 3: Notify Drive that the S3 upload is complete."""
-        response = requests.post(
-            f"{self._base_url()}{self._api_prefix()}/items/{item_id}/upload-ended/",
-            headers=self._headers(),
-            timeout=30,
-        )
-        response.raise_for_status()
+        """Step 3: Notify Drive that the S3 upload is complete.
+
+        A ReadTimeout here doesn't tell us whether Drive actually processed the
+        request, so a retry may land on an item that's no longer PENDING - see
+        _is_upload_already_processed().
+        """
+        url = f"{self._base_url()}{self._api_prefix()}/items/{item_id}/upload-ended/"
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(url, headers=self._headers(), timeout=30)
+                response.raise_for_status()
+                return
+            except HTTPError as error:
+                if _is_upload_already_processed(error):
+                    return
+                raise
+            except (Timeout, RequestsConnectionError):
+                if attempt == max_attempts:
+                    raise
+                time.sleep(2**attempt)
 
     # --- Sharing ---
 
+    @_retry_on_transient_network_error
     def find_user_by_email(self, email: str) -> dict | None:
         """Resolve an email to a Drive user dict. Returns None if not found."""
         response = requests.get(
@@ -158,6 +215,7 @@ class DriveServiceAccountBackend(DriveBackend):
     def _api_prefix(self) -> str:
         return "/external_api/v1.0"
 
+    @_retry_on_transient_network_error
     def _refresh(self):
         response = requests.post(
             settings.DRIVE_OIDC_TOKEN_ENDPOINT,
@@ -195,6 +253,7 @@ class DriveUserTokenBackend(DriveBackend):
     def _api_prefix(self) -> str:
         return "/api/v1.0"
 
+    @_retry_on_transient_network_error
     def _refresh(self):
         plaintext_refresh = decrypt_token(self._user.oidc_refresh_token)
         if not plaintext_refresh:

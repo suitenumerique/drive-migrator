@@ -1,5 +1,7 @@
 """Tests for DriveServiceAccountBackend and DriveUserTokenBackend."""
 
+# pylint: disable=protected-access
+
 from datetime import timedelta
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -7,6 +9,8 @@ from django.utils import timezone
 
 import pytest
 from cryptography.fernet import Fernet
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError, Timeout
 
 from core.destinations.drive.drive_backend import (
     DriveServiceAccountBackend,
@@ -21,6 +25,48 @@ TEST_KEY = Fernet.generate_key().decode()
 @pytest.fixture(autouse=True)
 def set_encryption_key(settings):
     settings.OIDC_TOKENS_ENCRYPTION_KEY = TEST_KEY
+
+
+@pytest.fixture(autouse=True)
+def no_retry_delay():
+    """Skip real sleeping (tenacity's and our manual loop's) so retry tests run instantly."""
+    with (
+        patch("tenacity.nap.time.sleep"),
+        patch("core.destinations.drive.drive_backend.time.sleep"),
+    ):
+        yield
+
+
+def _not_pending_error():
+    """Build the HTTPError Drive raises when upload-ended is called on a non-PENDING item."""
+    response = MagicMock()
+    response.status_code = 400
+    response.json.return_value = {
+        "type": "validation_error",
+        "errors": [
+            {
+                "code": "item_upload_state_not_pending",
+                "detail": "This action is only available for items in PENDING state.",
+                "attr": "item",
+            }
+        ],
+    }
+    error = HTTPError("400 Client Error")
+    error.response = response
+    return error
+
+
+def _validation_error(status_code, code, detail, attr="item"):
+    """Build an arbitrary standardized-error HTTPError, for cases that must NOT be swallowed."""
+    response = MagicMock()
+    response.status_code = status_code
+    response.json.return_value = {
+        "type": "validation_error",
+        "errors": [{"code": code, "detail": detail, "attr": attr}],
+    }
+    error = HTTPError(f"{status_code} Client Error")
+    error.response = response
+    return error
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +140,28 @@ def test_service_account_get_token_refreshes_when_expired(settings):
 
     assert token == "new-tok"
     mock_requests.post.assert_called_once()
+
+
+def test_service_account_refresh_retries_on_timeout_then_succeeds(settings):
+    """A transient ReadTimeout on the client_credentials call is retried and succeeds."""
+    settings.DRIVE_OIDC_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.DRIVE_OIDC_CLIENT_ID = "client-id"
+    settings.DRIVE_OIDC_CLIENT_SECRET = "client-secret"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "old-tok"
+    backend._token_expires_at = timezone.now() - timedelta(seconds=1)
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {"access_token": "new-tok", "expires_in": 3600}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [Timeout("timed out"), success_response]
+        token = backend._get_token()
+
+    assert token == "new-tok"
+    assert mock_requests.post.call_count == 2
 
 
 def test_service_account_get_token_refreshes_within_buffer(settings):
@@ -217,6 +285,27 @@ def test_service_account_upload_to_s3_puts_file_content():
     )
 
 
+def test_service_account_upload_to_s3_retries_on_connection_error_then_succeeds():
+    """A transient ConnectionError on the S3 PUT is retried and succeeds."""
+    file_content = b"binary content"
+    policy_url = "https://s3.example.com/file.pdf?sig=x"
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch("builtins.open", mock_open(read_data=file_content)),
+    ):
+        mock_requests.put.side_effect = [
+            RequestsConnectionError("connection reset"),
+            success_response,
+        ]
+        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
+
+    assert mock_requests.put.call_count == 2
+
+
 def test_service_account_notify_upload_ended(settings):
     """notify_upload_ended() posts to /external_api/v1.0/items/{id}/upload-ended/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
@@ -234,6 +323,86 @@ def test_service_account_notify_upload_ended(settings):
         headers={"Authorization": "Bearer tok"},
         timeout=30,
     )
+
+
+def test_service_account_notify_upload_ended_retries_on_timeout_then_succeeds(settings):
+    """A transient ReadTimeout is retried and succeeds on the next attempt."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [Timeout("timed out"), success_response]
+        backend.notify_upload_ended("file-uuid")
+
+    assert mock_requests.post.call_count == 2
+
+
+def test_service_account_notify_upload_ended_timeout_then_not_pending_is_success(
+    settings,
+):
+    """If the first call actually succeeded server-side, the retry's 400
+    item_upload_state_not_pending must be treated as success, not an error."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
+
+    not_pending_response = MagicMock()
+    not_pending_response.raise_for_status.side_effect = _not_pending_error()
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [Timeout("timed out"), not_pending_response]
+        backend.notify_upload_ended("file-uuid")  # must not raise
+
+    assert mock_requests.post.call_count == 2
+
+
+def test_service_account_notify_upload_ended_exhausts_retries_and_raises(settings):
+    """Persistent timeouts are raised once retries are exhausted."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(Timeout),
+    ):
+        mock_requests.post.side_effect = Timeout("timed out")
+        backend.notify_upload_ended("file-uuid")
+
+
+def test_service_account_notify_upload_ended_other_validation_error_is_raised(settings):
+    """A validation error unrelated to upload_state must not be swallowed."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _validation_error(
+        400,
+        "item_upload_type_unavailable",
+        "This action is only available for items of type FILE.",
+    )
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(HTTPError),
+    ):
+        mock_requests.post.return_value = error_response
+        backend.notify_upload_ended("file-uuid")
+
+    assert mock_requests.post.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +432,26 @@ def test_service_account_find_user_by_email_paginated(settings):
         timeout=30,
     )
     assert result == {"id": "user-uuid", "email": "alice@example.com"}
+
+
+def test_service_account_find_user_by_email_retries_on_timeout_then_succeeds(settings):
+    """A transient ReadTimeout is retried and succeeds on the next attempt."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {"results": [{"id": "user-uuid"}]}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.get.side_effect = [Timeout("timed out"), success_response]
+        result = backend.find_user_by_email("alice@example.com")
+
+    assert mock_requests.get.call_count == 2
+    assert result == {"id": "user-uuid"}
 
 
 def test_service_account_find_user_by_email_flat_list(settings):
@@ -404,6 +593,30 @@ def test_user_token_refreshes_when_access_token_expired(settings):
         timeout=30,
     )
     assert token == "new-tok"
+
+
+def test_user_token_refresh_retries_on_timeout_then_succeeds(settings):
+    """A transient ReadTimeout on the refresh_token call is retried and succeeds."""
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.OIDC_RP_CLIENT_ID = "osmose-client"
+    settings.OIDC_RP_CLIENT_SECRET = "osmose-secret"
+
+    user = _make_user(
+        access_token="expired-tok",
+        refresh_token="valid-refresh-tok",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {"access_token": "new-tok", "expires_in": 60}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [Timeout("timed out"), success_response]
+        token = DriveUserTokenBackend(user)._get_token()
+
+    assert token == "new-tok"
+    assert mock_requests.post.call_count == 2
 
 
 def test_user_token_refresh_persists_new_tokens_to_user(settings):
@@ -700,12 +913,14 @@ def test_user_token_refresh_stores_refresh_token_encrypted(settings):
 
 def test_has_usable_token_returns_false_when_no_tokens():
     """Returns False when both access and refresh tokens are empty."""
+
     user = _make_user(access_token="", refresh_token="", expires_at=None)
     assert user_has_usable_drive_token(user) is False
 
 
 def test_has_usable_token_returns_true_when_valid_access_token():
     """Returns True when the access token is present and not yet expired."""
+
     user = _make_user(
         access_token="valid-tok",
         refresh_token="",
@@ -716,6 +931,7 @@ def test_has_usable_token_returns_true_when_valid_access_token():
 
 def test_has_usable_token_returns_false_when_access_expired_and_no_refresh():
     """Returns False when the access token is expired and no refresh token is stored."""
+
     user = _make_user(
         access_token="expired-tok",
         refresh_token="",
@@ -726,6 +942,7 @@ def test_has_usable_token_returns_false_when_access_expired_and_no_refresh():
 
 def test_has_usable_token_returns_true_when_access_expired_but_refresh_present():
     """Returns True when the access token is expired but a refresh token exists."""
+
     user = _make_user(
         access_token="expired-tok",
         refresh_token="valid-refresh",
@@ -736,5 +953,6 @@ def test_has_usable_token_returns_true_when_access_expired_but_refresh_present()
 
 def test_has_usable_token_returns_true_when_no_expiry_date():
     """Returns True when access token is present but expires_at is None (trust it)."""
+
     user = _make_user(access_token="tok", refresh_token="", expires_at=None)
     assert user_has_usable_drive_token(user) is True
