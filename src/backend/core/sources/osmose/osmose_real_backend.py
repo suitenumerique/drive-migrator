@@ -12,7 +12,7 @@ import requests
 from celery.utils.log import get_task_logger
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
-from retry import retry
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from core.models import Workspace
 from core.sources.osmose.osmose_backend import (
@@ -124,7 +124,11 @@ class OsmoseRealBackend(OsmoseBackend):
         ]
         return opener
 
-    @retry(tries=5, delay=2, backoff=2)
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=2, min=2),
+        reraise=True,
+    )
     def download_file(self, download_url, destination):
         get_logger().info("Downloading %s to %s ...", download_url, destination)
         encoded_url = requests.utils.requote_uri(download_url)

@@ -47,6 +47,7 @@ and this project adheres to
 ### Changed
 
 - update cunningham tokens
+- replace unmaintained retry package with tenacity
 
 ### Fixed
 
