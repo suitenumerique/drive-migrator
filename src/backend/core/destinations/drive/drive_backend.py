@@ -131,21 +131,21 @@ class DriveBackend:
         results = data if isinstance(data, list) else data.get("results", [])
         return results[0] if results else None
 
-    def share_with_user(self, item_id: str, user_id: str) -> None:
-        """Grant owner access to an existing Drive user."""
+    def share_with_user(self, item_id: str, user_id: str, role: str = "owner") -> None:
+        """Grant access to an existing Drive user at the specified role."""
         response = requests.post(
             f"{self._base_url()}{self._api_prefix()}/items/{item_id}/accesses/",
-            json={"user_id": user_id, "role": "owner"},
+            json={"user_id": user_id, "role": role},
             headers=self._headers(),
             timeout=30,
         )
         response.raise_for_status()
 
-    def invite_by_email(self, item_id: str, email: str) -> None:
-        """Invite a user not yet registered in Drive as owner."""
+    def invite_by_email(self, item_id: str, email: str, role: str = "owner") -> None:
+        """Invite a user not yet registered in Drive at the specified role."""
         response = requests.post(
             f"{self._base_url()}{self._api_prefix()}/items/{item_id}/invitations/",
-            json={"email": email, "role": "owner"},
+            json={"email": email, "role": role},
             headers=self._headers(),
             timeout=30,
         )
