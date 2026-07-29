@@ -1,5 +1,6 @@
 """Tests for DriveDestinationBackend."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -464,3 +465,73 @@ def test_export_sends_drive_ready_mail(
     assert args[:3] == (user, workspace, "drive_ready")
     assert str(args[3]["title"])
     assert kwargs == {}
+
+
+# ---------------------------------------------------------------------------
+# Drive manifest (_drive_manifest.json)
+# ---------------------------------------------------------------------------
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_export_writes_drive_manifest(mock_cls, tmp_path, settings):
+    """export() writes _drive_manifest.json mapping rel_path → drive file ID."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = mock_cls.return_value
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.create_file_item.return_value = {
+        "id": "drive-file-uuid",
+        "policy": "https://s3.example.com/file",
+    }
+    (tmp_path / "report.pdf").write_bytes(b"content")
+
+    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+
+    manifest_path = tmp_path / "_drive_manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest == {"report.pdf": "drive-file-uuid"}
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_drive_manifest_uses_relative_paths(mock_cls, tmp_path, settings):
+    """_drive_manifest.json uses paths relative to the local_folder_path root."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = mock_cls.return_value
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.create_subfolder.return_value = {"id": "sub-uuid"}
+    mock_backend.create_file_item.return_value = {
+        "id": "drive-nested-uuid",
+        "policy": "https://s3.example.com/file",
+    }
+    sub = tmp_path / "DossierA"
+    sub.mkdir()
+    (sub / "note.txt").write_bytes(b"content")
+
+    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+
+    manifest = json.loads((tmp_path / "_drive_manifest.json").read_text())
+    assert "DossierA/note.txt" in manifest
+    assert manifest["DossierA/note.txt"] == "drive-nested-uuid"
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_drive_manifest_skips_known_manifest_files(mock_cls, tmp_path, settings):
+    """Only known manifest files are skipped — other files starting with '_' are uploaded."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = mock_cls.return_value
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.create_file_item.side_effect = [
+        {"id": "drive-doc-uuid", "policy": "https://s3.example.com/doc"},
+        {"id": "drive-custom-uuid", "policy": "https://s3.example.com/custom"},
+    ]
+    (tmp_path / "doc.pdf").write_bytes(b"content")
+    (tmp_path / "_file_manifest.json").write_text("{}")
+    (tmp_path / "_custom.json").write_bytes(b"legitimate file")
+
+    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+
+    manifest = json.loads((tmp_path / "_drive_manifest.json").read_text())
+    assert "_file_manifest.json" not in manifest
+    assert "doc.pdf" in manifest
+    assert "_custom.json" in manifest
+    assert mock_backend.create_file_item.call_count == 2

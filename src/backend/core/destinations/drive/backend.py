@@ -13,6 +13,14 @@ from core.destinations.drive.drive_backend import (
 )
 from core.mails_manager import MailsManager
 from core.models import Workspace
+from core.processing.manifests import (
+    DRIVE_MANIFEST,
+    FILE_MANIFEST,
+    write_drive_manifest,
+)
+
+_UPLOAD_SKIP_FILES = {FILE_MANIFEST, DRIVE_MANIFEST}
+_USERS_CSV = "users.csv"
 
 
 class DriveDestinationBackend(AbstractDestinationBackend):
@@ -30,6 +38,10 @@ class DriveDestinationBackend(AbstractDestinationBackend):
     name = "drive"
     label = "La Suite Drive"
 
+    def __init__(self):
+        self._drive_manifest: dict = {}
+        self._upload_base_path: str = ""
+
     def _make_backend(self, user):
         auth_mode = getattr(settings, "DRIVE_AUTH_MODE", "service_account")
         if auth_mode == "user_token":
@@ -43,12 +55,15 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         root_id = root["id"]
         workspace.set_destination_metadata("drive", {"workspace_id": root_id})
 
+        self._drive_manifest = {}
+        self._upload_base_path = local_folder_path
         csv_path = self._write_users_csv(workspace, local_folder_path)
         try:
             self._upload_tree(backend, local_folder_path, root_id)
         finally:
             if csv_path:
                 os.remove(csv_path)
+        write_drive_manifest(local_folder_path, self._drive_manifest)
 
         if getattr(settings, "DRIVE_SHARE_MEMBERS", True):
             self._share_members(backend, workspace, root_id)
@@ -67,7 +82,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         """Write the shared-users listing into the local folder, like the archive export."""
         if not workspace.members:
             return None
-        csv_path = os.path.join(local_folder_path, "users.csv")
+        csv_path = os.path.join(local_folder_path, _USERS_CSV)
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerows(
@@ -110,12 +125,19 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             backend.invite_by_email(item_id, email)
 
     def _upload_tree(self, backend, local_path: str, drive_parent_id: str) -> None:
-        """Recursively create Drive folders and upload files from the local tree."""
+        """Recursively create Drive folders and upload files from the local tree.
+
+        Known manifest files (_file_manifest.json, _drive_manifest.json) are skipped
+        to avoid uploading internal migration artefacts.
+        """
         for entry in sorted(os.scandir(local_path), key=lambda e: e.name):
             if entry.is_dir():
                 folder = backend.create_subfolder(entry.name, parent_id=drive_parent_id)
                 self._upload_tree(backend, entry.path, folder["id"])
-            elif entry.is_file():
+            elif entry.is_file() and entry.name not in _UPLOAD_SKIP_FILES:
                 item = backend.create_file_item(entry.name, parent_id=drive_parent_id)
                 backend.upload_to_s3(item["policy"], entry.path)
                 backend.notify_upload_ended(item["id"])
+                if entry.name != _USERS_CSV:
+                    rel_path = os.path.relpath(entry.path, self._upload_base_path)
+                    self._drive_manifest[rel_path] = item["id"]

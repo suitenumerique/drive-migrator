@@ -1,5 +1,6 @@
 """Tests for FolderCreator — generic SourceFolder/SourceFile-based implementation."""
 
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -249,3 +250,99 @@ def test_create_folder_ensures_filename_uniqueness(tmp_path, settings):
 
     called_dest = backend.download_file.call_args[0][1]
     assert "doc (1).pdf" in called_dest
+
+
+# ---------------------------------------------------------------------------
+# create_folder — _file_manifest.json
+# ---------------------------------------------------------------------------
+
+
+def test_create_folder_writes_file_manifest(tmp_path, settings):
+    """create_folder() writes _file_manifest.json in the workspace directory."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws-manifest")
+    file = SourceFile(id="src-uuid-1", name="doc", extension=".pdf", download_url="x")
+    folder = SourceFolder(name="root", files=[file])
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    local_path = creator.create_folder(workspace, folder, backend)
+
+    assert os.path.exists(os.path.join(local_path, "_file_manifest.json"))
+
+
+def test_file_manifest_maps_rel_path_to_source_id(tmp_path, settings):
+    """_file_manifest.json maps each file's relative path to its source file ID."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws-manifest2")
+    file = SourceFile(
+        id="src-uuid-42", name="rapport", extension=".pdf", download_url="x"
+    )
+    folder = SourceFolder(name="root", files=[file])
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    local_path = creator.create_folder(workspace, folder, backend)
+
+    with open(os.path.join(local_path, "_file_manifest.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    assert manifest == {"rapport.pdf": "src-uuid-42"}
+
+
+def test_file_manifest_uses_relative_paths_for_nested_files(tmp_path, settings):
+    """Nested files are recorded with their folder-relative path."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws-manifest3")
+    file = SourceFile(id="src-nested", name="note", extension=".txt", download_url="x")
+    folder = SourceFolder(
+        name="root",
+        children=[SourceFolder(name="DossierA", files=[file])],
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    local_path = creator.create_folder(workspace, folder, backend)
+
+    with open(os.path.join(local_path, "_file_manifest.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    assert "DossierA/note.txt" in manifest
+    assert manifest["DossierA/note.txt"] == "src-nested"
+
+
+def test_file_manifest_preserves_source_id_after_rename(tmp_path, settings):
+    """Even when ensure_file_uniqueness renames the file, the source ID is preserved."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws-manifest4")
+    file = SourceFile(id="src-original", name="doc", extension=".pdf", download_url="x")
+    folder = SourceFolder(name="root", files=[file])
+    backend = _make_backend()
+
+    with patch(
+        "core.processing.folder_creator.ensure_file_uniqueness",
+        side_effect=lambda p: p.replace("doc.pdf", "doc (1).pdf"),
+    ):
+        creator = FolderCreator()
+        local_path = creator.create_folder(workspace, folder, backend)
+
+    with open(os.path.join(local_path, "_file_manifest.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    assert manifest.get("doc (1).pdf") == "src-original"
+
+
+def test_file_manifest_contains_all_files(tmp_path, settings):
+    """_file_manifest.json contains an entry for every downloaded file."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws-manifest5")
+    files = [
+        SourceFile(id=f"id-{i}", name=f"file{i}", extension=".pdf", download_url="x")
+        for i in range(5)
+    ]
+    folder = SourceFolder(name="root", files=files)
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    local_path = creator.create_folder(workspace, folder, backend)
+
+    with open(os.path.join(local_path, "_file_manifest.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    assert len(manifest) == 5

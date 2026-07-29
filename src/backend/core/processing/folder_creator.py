@@ -7,6 +7,7 @@ from celery.utils.log import get_task_logger
 
 from core.backends.source import AbstractSourceBackend, SourceFolder
 from core.models import Workspace
+from core.processing.manifests import write_file_manifest
 from core.utils import (
     ensure_file_uniqueness,
     get_dir_size,
@@ -23,6 +24,7 @@ class FolderCreator:
         self.files_success = 0
         self.files_current = 0
         self.workspace = None
+        self._file_manifest: dict = {}
 
     def __get_files_count(self, folder: SourceFolder):
         count = len(folder.files)
@@ -38,6 +40,7 @@ class FolderCreator:
     ) -> str:
         self.workspace = workspace
         self.files_count = self.__get_files_count(folder)
+        self._file_manifest = {}
         self.delete_folder(workspace)
 
         path = self.get_workspace_path(workspace)
@@ -48,6 +51,7 @@ class FolderCreator:
 
         self.__download_folder_files(folder, path, source_backend)
 
+        write_file_manifest(path, self._file_manifest)
         return path
 
     def get_workspace_path(self, workspace):
@@ -101,7 +105,9 @@ class FolderCreator:
                 destination = destination_uniqueness
 
             source_backend.download_file(file, destination)
-            size = get_dir_size(self.get_workspace_path(self.workspace))
+            workspace_path = self.get_workspace_path(self.workspace)
+            self._file_manifest[os.path.relpath(destination, workspace_path)] = file.id
+            size = get_dir_size(workspace_path)
             size_formatted = sizeof_fmt(size)
             logger.info("Directory size: %s (%s)", size_formatted, size)
             self.files_success += 1

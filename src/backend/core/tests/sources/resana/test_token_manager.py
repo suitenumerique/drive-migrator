@@ -310,6 +310,7 @@ def test_refresh_raises_token_expired_when_no_access_cookie(settings):
 
 
 def test_refresh_raises_token_expired_on_401(settings):
+    """A 401 from the refresh endpoint raises ResanaTokenExpired instead of HTTPError."""
     settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
     settings.RESANA_AUTHSERVICE_ENDPOINT = (
         "https://resana.example.com/auth-service/public/api"
