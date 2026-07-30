@@ -1,11 +1,29 @@
 """Tests for InterstisClient — Interstis GED API HTTP client."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests as req_lib
 
+from core.sources.resana import interstis_client
 from core.sources.resana.interstis_client import InterstisClient
+
+
+@pytest.fixture(autouse=True)
+def no_retry_delay():
+    """Skip real sleeping so retry tests run instantly."""
+    with patch("tenacity.nap.time.sleep"):
+        yield
+
+
+def _http_error(status_code):
+    response = MagicMock()
+    response.status_code = status_code
+    error = req_lib.HTTPError(f"{status_code} error")
+    error.response = response
+    return error
+
 
 # ---------------------------------------------------------------------------
 # Group 1 — Constructor
@@ -15,10 +33,10 @@ from core.sources.resana.interstis_client import InterstisClient
 def test_client_sets_bearer_token_header(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
 
-    with patch("core.sources.resana.interstis_client.requests.Session") as MockSession:
+    with patch("core.sources.resana.interstis_client.requests.Session") as mock_session:
         client = InterstisClient("my-token")
 
-    MockSession.return_value.headers.__setitem__.assert_called_once_with(
+    mock_session.return_value.headers.__setitem__.assert_called_once_with(
         "Authorization", "Bearer my-token"
     )
     assert client.token == "my-token"
@@ -27,10 +45,10 @@ def test_client_sets_bearer_token_header(settings):
 def test_client_creates_session_on_init(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
 
-    with patch("core.sources.resana.interstis_client.requests.Session") as MockSession:
+    with patch("core.sources.resana.interstis_client.requests.Session") as mock_session:
         InterstisClient("tok")
 
-    MockSession.assert_called_once()
+    mock_session.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -181,3 +199,155 @@ def test_download_file_raises_on_http_error(settings):
 
     with pytest.raises(req_lib.HTTPError):
         client.download_file("missing-uuid", "/tmp/x.pdf")
+
+
+def _success_response(content=b"content"):
+    response = MagicMock()
+    response.iter_content.return_value = [content]
+    response.raise_for_status = MagicMock()
+    response.__enter__ = lambda s: response
+    response.__exit__ = MagicMock(return_value=False)
+    return response
+
+
+def _failing_response(status_code):
+    response = MagicMock()
+    response.raise_for_status.side_effect = _http_error(status_code)
+    response.__enter__ = lambda s: response
+    response.__exit__ = MagicMock(return_value=False)
+    return response
+
+
+def test_download_file_retries_on_timeout_then_succeeds(settings, tmp_path):
+    """A transient network timeout is retried and eventually succeeds."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    destination = str(tmp_path / "output.pdf")
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.side_effect = [
+        req_lib.Timeout("timed out"),
+        _success_response(),
+    ]
+
+    client.download_file("file-uuid", destination)
+
+    assert client.session.get.call_count == 2
+
+
+def test_download_file_retries_on_connection_error_then_succeeds(settings, tmp_path):
+    """A transient connection error is retried and eventually succeeds."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    destination = str(tmp_path / "output.pdf")
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.side_effect = [
+        req_lib.ConnectionError("connection reset"),
+        _success_response(),
+    ]
+
+    client.download_file("file-uuid", destination)
+
+    assert client.session.get.call_count == 2
+
+
+def test_download_file_retries_on_server_error_then_succeeds(settings, tmp_path):
+    """A 504 Gateway Timeout from Interstis is retried and eventually succeeds."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    destination = str(tmp_path / "output.pdf")
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.side_effect = [_failing_response(504), _success_response()]
+
+    client.download_file("file-uuid", destination)
+
+    assert client.session.get.call_count == 2
+
+
+def test_download_file_does_not_retry_on_client_error(settings):
+    """A 403 Forbidden is a permanent failure, not worth retrying."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.return_value = _failing_response(403)
+
+    with pytest.raises(req_lib.HTTPError):
+        client.download_file("file-uuid", "/tmp/x.pdf")
+
+    assert client.session.get.call_count == 1
+
+
+def test_download_file_retries_configured_max_attempts(settings):
+    """The number of retry attempts before giving up follows RESANA_RETRY_MAX_ATTEMPTS."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.side_effect = req_lib.Timeout("timed out")
+
+    with pytest.raises(req_lib.Timeout):
+        client.download_file("file-uuid", "/tmp/x.pdf")
+
+    assert client.session.get.call_count == 2
+
+
+def test_download_file_wait_uses_configured_timing(settings, tmp_path):
+    """Retry backoff timing follows RESANA_RETRY_WAIT_MULTIPLIER / RESANA_RETRY_WAIT_MIN."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_RETRY_WAIT_MULTIPLIER = 5
+    settings.RESANA_RETRY_WAIT_MIN = 7
+    destination = str(tmp_path / "output.pdf")
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.side_effect = [
+        req_lib.Timeout("timed out"),
+        _success_response(),
+    ]
+
+    with patch("tenacity.nap.time.sleep") as mock_sleep:
+        client.download_file("file-uuid", destination)
+
+    mock_sleep.assert_called_once()
+    assert mock_sleep.call_args[0][0] >= 7
+
+
+def test_download_file_logs_before_sleeping_on_retry(settings, tmp_path):
+    """A retry attempt is logged at INFO: it's recoverable, not a definitive failure."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    destination = str(tmp_path / "output.pdf")
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.side_effect = [
+        req_lib.Timeout("timed out"),
+        _success_response(),
+    ]
+
+    with patch.object(interstis_client.logger, "log") as mock_log:
+        client.download_file("file-uuid", destination)
+
+    mock_log.assert_called_once()
+    assert mock_log.call_args[0][0] == logging.INFO
+
+
+def test_download_file_logs_error_on_final_failure(settings):
+    """Once every attempt is exhausted, the definitive failure is logged at ERROR."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.side_effect = req_lib.Timeout("timed out")
+
+    with (
+        patch.object(interstis_client.logger, "error") as mock_error,
+        pytest.raises(req_lib.Timeout),
+    ):
+        client.download_file("file-uuid", "/tmp/x.pdf")
+
+    mock_error.assert_called_once()

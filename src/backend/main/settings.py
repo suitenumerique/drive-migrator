@@ -206,6 +206,16 @@ class Base(Configuration):
     RESANA_DEFAULT_ORGANIZATION = values.Value(
         environ_name="RESANA_DEFAULT_ORGANIZATION", environ_prefix=None
     )
+    # Retry tuning for transient network errors on Resana/Interstis API calls.
+    RESANA_RETRY_MAX_ATTEMPTS = values.IntegerValue(
+        3, environ_name="RESANA_RETRY_MAX_ATTEMPTS", environ_prefix=None
+    )
+    RESANA_RETRY_WAIT_MULTIPLIER = values.IntegerValue(
+        2, environ_name="RESANA_RETRY_WAIT_MULTIPLIER", environ_prefix=None
+    )
+    RESANA_RETRY_WAIT_MIN = values.IntegerValue(
+        2, environ_name="RESANA_RETRY_WAIT_MIN", environ_prefix=None
+    )
 
     S3_VERSIONS_PAGE_SIZE = 50
 
