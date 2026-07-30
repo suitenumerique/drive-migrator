@@ -105,6 +105,15 @@ def export(self, data):  # pylint: disable=unused-argument
     creator = FolderCreator()
     local_path = creator.create_folder(workspace, folder, source_backend)
 
+    if creator.failed_files:
+        workspace.download_errors = creator.failed_files
+        workspace.save(update_fields=["download_errors"])
+        logger.warning(
+            "%s file(s) failed to download: %s",
+            len(creator.failed_files),
+            creator.failed_files,
+        )
+
     list_workspace_dir(workspace)
 
     logger.info("Calling prepare_export ...")

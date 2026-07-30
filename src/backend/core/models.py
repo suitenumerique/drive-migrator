@@ -98,6 +98,12 @@ class Workspace(BaseModel):
     # this workspace's file tree (i.e. it had more files than the configured limit).
     is_truncated = models.BooleanField(default=False)
 
+    # Files that FolderCreator failed to download from the source backend.
+    # Each entry: {"name": str, "path": str, "error": str}, where "path" is
+    # relative to the workspace root (see FolderCreator.get_workspace_path).
+    # Set by the export task.
+    download_errors = models.JSONField(default=list, blank=True)
+
     def get_destination_status(self, destination_name: str) -> str:
         return self.destination_statuses.get(destination_name, Workspace.Status.NONE)
 

@@ -65,6 +65,7 @@ and this project adheres to
 - fix export crash on folder/file names containing "/" #165
 - fix lint-git print() check matching removed lines instead of only added ones
 - retry Drive upload-ended notification on transient network timeouts #176
+- retry Resana file download and skip failing files instead of aborting #175
 
 ### Removed
 

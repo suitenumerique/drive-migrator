@@ -102,14 +102,13 @@ def test_export_calls_get_workspace_structure(workspace, user):
 
 
 def test_export_skips_file_truncation_when_limit_is_zero(workspace, user, settings):
-    """export() does not touch the folder tree or save the workspace when the limit is 0."""
+    """export() does not touch the folder tree when the limit is 0."""
     settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE = 0
     folder_tree = SourceFolder(name="root", files=[MagicMock()])
 
     _run_export(workspace, user, source_folder=folder_tree)
 
     assert len(folder_tree.files) == 1
-    workspace.save.assert_not_called()
 
 
 def test_export_truncates_files_when_limit_is_set_and_exceeded(
@@ -151,6 +150,80 @@ def test_export_calls_prepare_export(workspace, user):
     """export() calls source_backend.prepare_export() with the local folder path."""
     source_backend, _, _ = _run_export(workspace, user)
     source_backend.prepare_export.assert_called_once_with(workspace, "/tmp/ws-1")
+
+
+def test_export_persists_download_errors_on_workspace(workspace, user):
+    """export() persists FolderCreator.failed_files onto the workspace's download_errors."""
+    failed_files = [{"name": "broken.docx", "error": "403 Forbidden"}]
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator") as mock_fc,
+        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
+    ):
+        mock_sm.return_value.get_backend.return_value.get_workspace_structure.return_value = SourceFolder(
+            name="root"
+        )
+        mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
+        mock_fc.return_value.failed_files = failed_files
+        mock_dr.get_all.return_value = []
+
+        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+
+    assert workspace.download_errors == failed_files
+    workspace.save.assert_called()
+
+
+def test_export_does_not_save_download_errors_when_all_files_succeed(
+    workspace, user, settings
+):
+    """export() does not touch/save download_errors when no file failed."""
+    settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE = 0
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator") as mock_fc,
+        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
+    ):
+        mock_sm.return_value.get_backend.return_value.get_workspace_structure.return_value = SourceFolder(
+            name="root"
+        )
+        mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
+        mock_fc.return_value.failed_files = []
+        mock_fc.return_value.files_count = 1
+        mock_fc.return_value.files_success = 1
+        mock_dr.get_all.return_value = []
+
+        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+
+    workspace.save.assert_not_called()
+
+
+def test_export_saves_download_errors_with_update_fields(workspace, user, settings):
+    """export() saves download_errors with update_fields=["download_errors"] only."""
+    settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE = 0
+    failed_files = [{"name": "broken.docx", "error": "403 Forbidden"}]
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator") as mock_fc,
+        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
+    ):
+        mock_sm.return_value.get_backend.return_value.get_workspace_structure.return_value = SourceFolder(
+            name="root"
+        )
+        mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
+        mock_fc.return_value.failed_files = failed_files
+        mock_fc.return_value.files_count = 2
+        mock_fc.return_value.files_success = 1
+        mock_dr.get_all.return_value = []
+
+        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+
+    workspace.save.assert_called_once_with(update_fields=["download_errors"])
 
 
 def test_export_calls_each_pending_destination(workspace, user):
