@@ -265,6 +265,145 @@ def test_create_folder_logs_truncated_filename(tmp_path, settings):
     assert len(os.path.basename(called_dest)) < len(long_name + ".pdf")
 
 
+# ---------------------------------------------------------------------------
+# __download_folder_files — per-file error handling
+# ---------------------------------------------------------------------------
+
+
+def test_create_folder_continues_after_one_file_download_fails(tmp_path, settings):
+    """A single file download failure (e.g. HTTP 403/504) must not abort the rest."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws14")
+    file_a = SourceFile(
+        id="f1", name="broken", extension=".docx", download_url="http://x/broken.docx"
+    )
+    file_b = SourceFile(
+        id="f2", name="ok", extension=".pdf", download_url="http://x/ok.pdf"
+    )
+    folder = SourceFolder(name="root", files=[file_a, file_b])
+    backend = _make_backend()
+    backend.download_file.side_effect = [RuntimeError("403 Forbidden"), None]
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)  # must not raise
+
+    assert backend.download_file.call_count == 2
+
+
+def test_create_folder_records_failed_downloads(tmp_path, settings):
+    """Failed downloads are tracked on creator.failed_files with name, path and error."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws15")
+    file_a = SourceFile(
+        id="f1", name="broken", extension=".docx", download_url="http://x/broken.docx"
+    )
+    folder = SourceFolder(name="root", files=[file_a])
+    backend = _make_backend()
+    backend.download_file.side_effect = RuntimeError("403 Forbidden")
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert len(creator.failed_files) == 1
+    assert creator.failed_files[0]["name"] == "broken.docx"
+    assert creator.failed_files[0]["path"] == "broken.docx"
+    assert "403 Forbidden" in creator.failed_files[0]["error"]
+
+
+def test_create_folder_records_failed_download_path_relative_to_workspace_root(
+    tmp_path, settings
+):
+    """A failed download nested in subfolders records a path relative to the workspace root."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws18")
+    file_a = SourceFile(
+        id="f1", name="broken", extension=".docx", download_url="http://x/broken.docx"
+    )
+    folder = SourceFolder(
+        name="root",
+        children=[
+            SourceFolder(
+                name="level1", children=[SourceFolder(name="level2", files=[file_a])]
+            )
+        ],
+    )
+    backend = _make_backend()
+    backend.download_file.side_effect = RuntimeError("403 Forbidden")
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert creator.failed_files[0]["path"] == os.path.join(
+        "level1", "level2", "broken.docx"
+    )
+
+
+def test_create_folder_does_not_count_failed_download_as_success(tmp_path, settings):
+    """A failed download must not increment files_success."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws16")
+    file_a = SourceFile(
+        id="f1", name="broken", extension=".pdf", download_url="http://x"
+    )
+    folder = SourceFolder(name="root", files=[file_a])
+    backend = _make_backend()
+    backend.download_file.side_effect = RuntimeError("boom")
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert creator.files_success == 0
+
+
+def test_create_folder_succeeding_downloads_are_not_reported_as_failed(
+    tmp_path, settings
+):
+    """A file that downloads fine must not appear in failed_files."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws17")
+    file_a = SourceFile(id="f1", name="ok", extension=".pdf", download_url="http://x")
+    folder = SourceFolder(name="root", files=[file_a])
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert not creator.failed_files
+    assert creator.files_success == 1
+
+
+def test_failed_download_removes_partial_file(tmp_path, settings):
+    """A download that writes partial bytes then raises must not leave a partial
+    file behind, while other files are still downloaded."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws19")
+    file_broken = SourceFile(
+        id="f1", name="broken", extension=".docx", download_url="http://x/broken.docx"
+    )
+    file_ok = SourceFile(
+        id="f2", name="ok", extension=".pdf", download_url="http://x/ok.pdf"
+    )
+    folder = SourceFolder(name="root", files=[file_broken, file_ok])
+    backend = _make_backend()
+
+    def download_file(_file, destination):
+        if destination.endswith("broken.docx"):
+            with open(destination, "wb") as fh:
+                fh.write(b"partial-content")
+            raise RuntimeError("connection reset")
+        with open(destination, "wb") as fh:
+            fh.write(b"full-content")
+
+    backend.download_file.side_effect = download_file
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    workspace_dir = tmp_path / "workspace_ws19"
+    assert not (workspace_dir / "broken.docx").exists()
+    assert (workspace_dir / "ok.pdf").exists()
+
+
 def test_create_folder_ensures_filename_uniqueness(tmp_path, settings):
     """When ensure_file_uniqueness returns a different path, create_folder() uses it."""
     settings.APP_WORK_DIR = str(tmp_path)

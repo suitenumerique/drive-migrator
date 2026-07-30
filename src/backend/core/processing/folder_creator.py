@@ -23,6 +23,7 @@ class FolderCreator:
         self.files_count = None
         self.files_success = 0
         self.files_current = 0
+        self.failed_files = []
         self.workspace = None
 
     def __get_files_count(self, folder: SourceFolder):
@@ -105,7 +106,29 @@ class FolderCreator:
                 )
                 destination = destination_uniqueness
 
-            source_backend.download_file(file, destination)
+            try:
+                source_backend.download_file(file, destination)
+            # Broad on purpose: source_backend is backend-agnostic (Resana, Osmose,
+            # filesystem...), so we can't target a specific exception type here. One
+            # file failing must not abort the rest of the workspace's download.
+            except Exception as error:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+                logger.error(
+                    "Failed to download %s: %s", file.name_with_extension, error
+                )
+                if os.path.exists(destination):
+                    os.remove(destination)
+                relative_path = os.path.relpath(
+                    destination, self.get_workspace_path(self.workspace)
+                )
+                self.failed_files.append(
+                    {
+                        "name": file.name_with_extension,
+                        "path": relative_path,
+                        "error": str(error),
+                    }
+                )
+                continue
+
             size = get_dir_size(self.get_workspace_path(self.workspace))
             size_formatted = sizeof_fmt(size)
             logger.info("Directory size: %s (%s)", size_formatted, size)
