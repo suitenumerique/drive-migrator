@@ -26,7 +26,7 @@ jobs:
 
       - name: Enforce absence of print statements in code
         run: |
-          ! git diff "origin/${GIT_REF}..HEAD" -- '*.py' | grep -v "^-" | grep "print("
+          ! git diff "origin/${GIT_REF}..HEAD" -- '*.py' | grep -v "^-" | grep -vE "^.[[:space:]]*#" | grep "print("
         env:
           GIT_REF: ${{ github.event.pull_request.base.ref }}
 
