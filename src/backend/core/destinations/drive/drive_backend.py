@@ -1,5 +1,6 @@
 """DriveBackend — HTTP client for La Suite Drive API."""
 
+import logging
 import time
 from datetime import timedelta
 
@@ -7,26 +8,45 @@ from django.conf import settings
 from django.utils import timezone
 
 import requests
+from celery.utils.log import get_task_logger
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError, Timeout
 from tenacity import (
+    before_sleep_log,
     retry,
     retry_if_exception_type,
-    stop_after_attempt,
     wait_exponential,
 )
 
 from core.encryption import decrypt_token, encrypt_token
 
+logger = get_task_logger(__name__)
+
 _UPLOAD_STATE_NOT_PENDING = "item_upload_state_not_pending"
+
+
+def _stop_after_configured_attempts(retry_state) -> bool:
+    """Read DRIVE_RETRY_MAX_ATTEMPTS at call time, not decoration time, so it
+    stays overridable per-test/per-environment like every other setting here."""
+    return retry_state.attempt_number >= settings.DRIVE_RETRY_MAX_ATTEMPTS
+
+
+def _wait_configured_backoff(retry_state) -> float:
+    """Same rationale as _stop_after_configured_attempts: read settings live."""
+    return wait_exponential(
+        multiplier=settings.DRIVE_RETRY_WAIT_MULTIPLIER,
+        min=settings.DRIVE_RETRY_WAIT_MIN,
+    )(retry_state)
+
 
 # Applied to calls that are safe to blindly retry: GET/PUT/token-refresh requests that
 # don't create a new resource, so replaying them after a transient network error can't
 # produce a duplicate side effect.
 _retry_on_transient_network_error = retry(
     retry=retry_if_exception_type((Timeout, RequestsConnectionError)),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=2, min=2),
+    stop=_stop_after_configured_attempts,
+    wait=_wait_configured_backoff,
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 
@@ -157,7 +177,7 @@ class DriveBackend:
         _is_upload_already_processed().
         """
         url = f"{self._base_url()}{self._api_prefix()}/items/{item_id}/upload-ended/"
-        max_attempts = 3
+        max_attempts = settings.DRIVE_RETRY_MAX_ATTEMPTS
         for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.post(url, headers=self._headers(), timeout=30)
@@ -167,10 +187,18 @@ class DriveBackend:
                 if _is_upload_already_processed(error):
                     return
                 raise
-            except (Timeout, RequestsConnectionError):
+            except (Timeout, RequestsConnectionError) as error:
                 if attempt == max_attempts:
                     raise
-                time.sleep(2**attempt)
+                wait = settings.DRIVE_RETRY_WAIT_MULTIPLIER**attempt
+                logger.warning(
+                    "notify_upload_ended attempt %s/%s failed (%s), retrying in %ss ...",
+                    attempt,
+                    max_attempts,
+                    error,
+                    wait,
+                )
+                time.sleep(wait)
 
     # --- Sharing ---
 

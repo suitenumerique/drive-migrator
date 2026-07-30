@@ -12,7 +12,7 @@ import requests
 from celery.utils.log import get_task_logger
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import before_sleep_log, retry, wait_exponential
 
 from core.models import Workspace
 from core.sources.osmose.osmose_backend import (
@@ -84,6 +84,20 @@ class OsmoseFailedDownloadException(Exception):
     pass
 
 
+def _stop_after_configured_attempts(retry_state) -> bool:
+    """Read OSMOSE_RETRY_MAX_ATTEMPTS at call time, not decoration time, so it
+    stays overridable per-test/per-environment like every other setting here."""
+    return retry_state.attempt_number >= settings.OSMOSE_RETRY_MAX_ATTEMPTS
+
+
+def _wait_configured_backoff(retry_state) -> float:
+    """Same rationale as _stop_after_configured_attempts: read settings live."""
+    return wait_exponential(
+        multiplier=settings.OSMOSE_RETRY_WAIT_MULTIPLIER,
+        min=settings.OSMOSE_RETRY_WAIT_MIN,
+    )(retry_state)
+
+
 class OsmoseRealBackend(OsmoseBackend):
     def __init__(self):
         self.jwt = None
@@ -125,8 +139,9 @@ class OsmoseRealBackend(OsmoseBackend):
         return opener
 
     @retry(
-        stop=stop_after_attempt(5),
-        wait=wait_exponential(multiplier=2, min=2),
+        stop=_stop_after_configured_attempts,
+        wait=_wait_configured_backoff,
+        before_sleep=before_sleep_log(get_logger(), logging.WARNING),
         reraise=True,
     )
     def download_file(self, download_url, destination):

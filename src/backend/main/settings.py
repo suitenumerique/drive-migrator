@@ -251,6 +251,16 @@ class Base(Configuration):
     DRIVE_SHARE_MEMBERS = values.BooleanValue(
         True, environ_name="DRIVE_SHARE_MEMBERS", environ_prefix=None
     )
+    # Retry tuning for transient network errors on Drive API/S3 calls.
+    DRIVE_RETRY_MAX_ATTEMPTS = values.IntegerValue(
+        3, environ_name="DRIVE_RETRY_MAX_ATTEMPTS", environ_prefix=None
+    )
+    DRIVE_RETRY_WAIT_MULTIPLIER = values.IntegerValue(
+        2, environ_name="DRIVE_RETRY_WAIT_MULTIPLIER", environ_prefix=None
+    )
+    DRIVE_RETRY_WAIT_MIN = values.IntegerValue(
+        2, environ_name="DRIVE_RETRY_WAIT_MIN", environ_prefix=None
+    )
     # Fernet key (URL-safe base64, 32 bytes) used to encrypt OIDC tokens at rest.
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     OIDC_TOKENS_ENCRYPTION_KEY = values.Value(
@@ -282,6 +292,16 @@ class Base(Configuration):
     # Prevent from failing the entire task if file downloads gives a 404.
     OSMOSE_BACKEND_ACCEPT_404 = values.BooleanValue(
         environ_name="OSMOSE_BACKEND_ACCEPT_404", environ_prefix=None, default=False
+    )
+    # Retry tuning for transient network errors on Osmose file downloads.
+    OSMOSE_RETRY_MAX_ATTEMPTS = values.IntegerValue(
+        5, environ_name="OSMOSE_RETRY_MAX_ATTEMPTS", environ_prefix=None
+    )
+    OSMOSE_RETRY_WAIT_MULTIPLIER = values.IntegerValue(
+        2, environ_name="OSMOSE_RETRY_WAIT_MULTIPLIER", environ_prefix=None
+    )
+    OSMOSE_RETRY_WAIT_MIN = values.IntegerValue(
+        2, environ_name="OSMOSE_RETRY_WAIT_MIN", environ_prefix=None
     )
 
     # Internationalization
