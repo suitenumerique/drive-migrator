@@ -3,7 +3,7 @@ import logging
 import os
 import time
 import urllib.request
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 
 from django.conf import settings
 
@@ -158,42 +158,17 @@ class OsmoseRealBackend(OsmoseBackend):
 
         error_ignored = False
 
+        # Per-attempt failures are surfaced by the @retry decorator above (INFO before
+        # each retry, ERROR once every attempt is exhausted), so these handlers only
+        # decide whether to swallow (404 accepted) or propagate for tenacity to retry.
         try:
             urllib.request.urlretrieve(download_url, destination)  # noqa: S310
 
         except HTTPError as e:
-            get_logger().error(
-                "HTTP Error: %s while downloading %s: %s",
-                e.code,
-                download_url,
-                e.reason,
-            )
-
-            # response = requests.get(
-            #     download_url,
-            #     headers={
-            #         "Authorization": "Bearer " + self.jwt,
-            #     },
-            # )
-            # get_logger().error(
-            #     f"HTTP Error: Additional request response: {response.text}"
-            # )
-
             if e.code == 404 and settings.OSMOSE_BACKEND_ACCEPT_404:
                 error_ignored = True
             else:
                 raise e
-        except URLError as e:
-            get_logger().error(
-                "URL Error: Failed to reach %s. Reason: %s", download_url, e.reason
-            )
-            raise e
-        except OSError as e:
-            get_logger().error("OS Error: %s while writing to %s", e, destination)
-            raise e
-        except Exception as e:
-            get_logger().error("Unexpected error occurred: %s", e)
-            raise e
 
         get_logger().info("Success %s to %s ...", download_url, destination)
         if error_ignored:
