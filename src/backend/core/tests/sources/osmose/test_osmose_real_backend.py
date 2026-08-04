@@ -73,7 +73,7 @@ def test_download_file_wait_uses_configured_timing(settings):
 
 
 def test_download_file_logs_before_sleeping_on_retry():
-    """A retry attempt is logged for debugging, with the level tenacity expects."""
+    """A retry attempt is logged at INFO: it's recoverable, not a definitive failure."""
     with (
         patch(
             "core.sources.osmose.osmose_real_backend.urllib.request.urlretrieve"
@@ -86,4 +86,21 @@ def test_download_file_logs_before_sleeping_on_retry():
         _backend().download_file("http://osmose.example.com/file", "/tmp/x.pdf")
 
     mock_log.assert_called_once()
-    assert mock_log.call_args[0][0] == logging.WARNING
+    assert mock_log.call_args[0][0] == logging.INFO
+
+
+def test_download_file_logs_error_on_final_failure(settings):
+    """Once every attempt is exhausted, the definitive failure is logged at ERROR."""
+    settings.OSMOSE_RETRY_MAX_ATTEMPTS = 2
+
+    with (
+        patch(
+            "core.sources.osmose.osmose_real_backend.urllib.request.urlretrieve"
+        ) as mock_urlretrieve,
+        patch.object(get_logger(), "error") as mock_error,
+        pytest.raises(URLError),
+    ):
+        mock_urlretrieve.side_effect = URLError("connection reset")
+        _backend().download_file("http://osmose.example.com/file", "/tmp/x.pdf")
+
+    mock_error.assert_called_once()

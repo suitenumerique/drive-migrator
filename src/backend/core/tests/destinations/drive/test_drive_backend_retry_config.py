@@ -76,7 +76,7 @@ def test_service_account_upload_to_s3_wait_uses_configured_timing(settings):
 
 
 def test_service_account_upload_to_s3_logs_before_sleeping_on_retry():
-    """A retry attempt is logged for debugging, with the level tenacity expects."""
+    """A retry attempt is logged at INFO: it's recoverable, not a definitive failure."""
     policy_url = "https://s3.example.com/file.pdf?sig=x"
 
     success_response = MagicMock()
@@ -94,7 +94,24 @@ def test_service_account_upload_to_s3_logs_before_sleeping_on_retry():
         DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
 
     mock_log.assert_called_once()
-    assert mock_log.call_args[0][0] == logging.WARNING
+    assert mock_log.call_args[0][0] == logging.INFO
+
+
+def test_service_account_upload_to_s3_logs_error_on_final_failure(settings):
+    """Once every attempt is exhausted, the definitive failure is logged at ERROR."""
+    settings.DRIVE_RETRY_MAX_ATTEMPTS = 2
+    policy_url = "https://s3.example.com/file.pdf?sig=x"
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch("builtins.open", mock_open(read_data=b"binary content")),
+        patch.object(drive_backend.logger, "error") as mock_error,
+        pytest.raises(RequestsConnectionError),
+    ):
+        mock_requests.put.side_effect = RequestsConnectionError("connection reset")
+        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
+
+    mock_error.assert_called_once()
 
 
 def test_service_account_notify_upload_ended_retries_configured_max_attempts(settings):
@@ -117,7 +134,7 @@ def test_service_account_notify_upload_ended_retries_configured_max_attempts(set
 
 
 def test_service_account_notify_upload_ended_logs_before_retrying(settings):
-    """Each retry of the manual loop is logged for debugging."""
+    """Each retry of the manual loop is logged at INFO: it's recoverable."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
 
     backend = DriveServiceAccountBackend()
@@ -129,9 +146,29 @@ def test_service_account_notify_upload_ended_logs_before_retrying(settings):
 
     with (
         patch("core.destinations.drive.drive_backend.requests") as mock_requests,
-        patch.object(drive_backend.logger, "warning") as mock_warning,
+        patch.object(drive_backend.logger, "info") as mock_info,
     ):
         mock_requests.post.side_effect = [Timeout("timed out"), success_response]
         backend.notify_upload_ended("file-uuid")
 
-    mock_warning.assert_called_once()
+    mock_info.assert_called_once()
+
+
+def test_service_account_notify_upload_ended_logs_error_on_final_failure(settings):
+    """Once every attempt is exhausted, the definitive failure is logged at ERROR."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+    settings.DRIVE_RETRY_MAX_ATTEMPTS = 2
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch.object(drive_backend.logger, "error") as mock_error,
+        pytest.raises(Timeout),
+    ):
+        mock_requests.post.side_effect = Timeout("timed out")
+        backend.notify_upload_ended("file-uuid")
+
+    mock_error.assert_called_once()

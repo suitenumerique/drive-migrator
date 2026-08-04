@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import serialization
 from tenacity import before_sleep_log, retry, wait_exponential
 
 from core.models import Workspace
+from core.retry_utils import log_final_failure_and_reraise
 from core.sources.osmose.osmose_backend import (
     OsmoseBackend,
     OsmoseFile,
@@ -141,8 +142,8 @@ class OsmoseRealBackend(OsmoseBackend):
     @retry(
         stop=_stop_after_configured_attempts,
         wait=_wait_configured_backoff,
-        before_sleep=before_sleep_log(get_logger(), logging.WARNING),
-        reraise=True,
+        before_sleep=before_sleep_log(get_logger(), logging.INFO),
+        retry_error_callback=log_final_failure_and_reraise(get_logger()),
     )
     def download_file(self, download_url, destination):
         get_logger().info("Downloading %s to %s ...", download_url, destination)

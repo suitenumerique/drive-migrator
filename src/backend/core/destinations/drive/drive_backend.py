@@ -19,6 +19,7 @@ from tenacity import (
 )
 
 from core.encryption import decrypt_token, encrypt_token
+from core.retry_utils import log_final_failure_and_reraise
 
 logger = get_task_logger(__name__)
 
@@ -46,8 +47,8 @@ _retry_on_transient_network_error = retry(
     retry=retry_if_exception_type((Timeout, RequestsConnectionError)),
     stop=_stop_after_configured_attempts,
     wait=_wait_configured_backoff,
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-    reraise=True,
+    before_sleep=before_sleep_log(logger, logging.INFO),
+    retry_error_callback=log_final_failure_and_reraise(logger),
 )
 
 
@@ -189,9 +190,14 @@ class DriveBackend:
                 raise
             except (Timeout, RequestsConnectionError) as error:
                 if attempt == max_attempts:
+                    logger.error(
+                        "notify_upload_ended giving up after %s attempt(s): %s",
+                        max_attempts,
+                        error,
+                    )
                     raise
                 wait = settings.DRIVE_RETRY_WAIT_MULTIPLIER**attempt
-                logger.warning(
+                logger.info(
                     "notify_upload_ended attempt %s/%s failed (%s), retrying in %ss ...",
                     attempt,
                     max_attempts,
