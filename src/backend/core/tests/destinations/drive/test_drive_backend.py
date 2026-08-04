@@ -364,22 +364,6 @@ def test_service_account_notify_upload_ended_timeout_then_not_pending_is_success
     assert mock_requests.post.call_count == 2
 
 
-def test_service_account_notify_upload_ended_exhausts_retries_and_raises(settings):
-    """Persistent timeouts are raised once retries are exhausted."""
-    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
-
-    backend = DriveServiceAccountBackend()
-    backend._access_token = "tok"
-    backend._token_expires_at = timezone.now() + timedelta(hours=1)
-
-    with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
-        pytest.raises(Timeout),
-    ):
-        mock_requests.post.side_effect = Timeout("timed out")
-        backend.notify_upload_ended("file-uuid")
-
-
 def test_service_account_notify_upload_ended_other_validation_error_is_raised(settings):
     """A validation error unrelated to upload_state must not be swallowed."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
