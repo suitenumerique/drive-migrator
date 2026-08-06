@@ -11,17 +11,24 @@ export const useResanaAuthStatus = () => {
   const [connected, setConnected] = useState<boolean | null>(null);
 
   const check = useCallback(async () => {
-    const response = await fetchAPI('resana/auth/status', undefined, {
-      logoutOn401: false,
-    });
+    try {
+      const response = await fetchAPI('resana/auth/status', undefined, {
+        logoutOn401: false,
+      });
 
-    if (!response.ok) {
+      if (!response.ok) {
+        setConnected(false);
+        return false;
+      }
+
+      const data = (await response.json()) as ResanaAuthStatus;
+      setConnected(data.connected);
+      return data.connected;
+    } catch (error) {
+      console.error(error);
       setConnected(false);
-      return;
+      return false;
     }
-
-    const data = (await response.json()) as ResanaAuthStatus;
-    setConnected(data.connected);
   }, []);
 
   const markConnected = useCallback(() => setConnected(true), []);

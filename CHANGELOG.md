@@ -64,6 +64,7 @@ and this project adheres to
 - secure archive ZIP download link
 - fix export crash on folder/file names containing "/" #165
 - fix lint-git print() check matching removed lines instead of only added ones
+- fix error modal looping infinitely on connect page #138
 - retry Drive upload-ended notification on transient network timeouts #176
 - retry Resana file download and skip failing files instead of aborting #175
 

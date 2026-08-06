@@ -226,8 +226,12 @@ function ConnectPageContent() {
       });
       router.push('/dashboard');
     } catch {
-      hasAutoContinued.current = false;
-      void checkResana();
+      const stillConnected = await checkResana();
+      if (!stillConnected) {
+        // Resana got disconnected, allow auto-continue to retry once the
+        // user reconnects it.
+        hasAutoContinued.current = false;
+      }
     } finally {
       setIsContinuing(false);
     }
