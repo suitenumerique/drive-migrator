@@ -140,13 +140,33 @@ class WorkspaceAdmin(admin.ModelAdmin):
         "title",
         "status",
         "destination_statuses",
+        "get_migration_user_email",
+        "get_migration_user_name",
     )
     list_filter = ("status", "source_type")
-    search_fields = ("id", "source_id", "title")
+    search_fields = (
+        "id",
+        "source_id",
+        "title",
+        "migration_user__email",
+        "migration_user__name",
+    )
     inlines = [ExtraTaskInfoAdminInline]
     change_form_template = "admin/workspace_retry_failed.html"
 
     actions = ["export_as_csv"]
+
+    def get_migration_user_email(self, obj):
+        return obj.migration_user.email if obj.migration_user else ""
+
+    get_migration_user_email.short_description = "User email"
+    get_migration_user_email.admin_order_field = "migration_user__email"
+
+    def get_migration_user_name(self, obj):
+        return obj.migration_user.name if obj.migration_user else ""
+
+    get_migration_user_name.short_description = "User name"
+    get_migration_user_name.admin_order_field = "migration_user__name"
 
     def export_as_csv(self, request, queryset):
         meta = self.model._meta  # noqa: SLF001
