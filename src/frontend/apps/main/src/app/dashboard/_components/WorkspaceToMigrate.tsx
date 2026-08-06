@@ -331,7 +331,7 @@ export const WorkspacesToMigrate = ({
             className="workspaces-to-migrate__alert"
           >
             {t(
-              "Si une communauté est en erreur, c'est qu'il y a eu un problème inattendu lors de la migration. Contactez le support pour obtenir de l'aide.",
+              "Si un espace est en erreur, c'est qu'il y a eu un problème inattendu lors de la migration. Contactez le support pour obtenir de l'aide.",
             )}
           </Alert>
         )}
