@@ -13,7 +13,7 @@
           <mj-divider border-width="1px" border-style="solid" border-color="#DDDDDD" width="30%" align="left"/>
 
           <!-- Main Message -->
-          <mj-text>{% blocktrans %}La demande d'export ou de migration de l'espace <strong>{{workspace_name}}</strong> a échouée.{% endblocktrans %}</mj-text>
+          <mj-text>{% blocktrans %}La demande d'export ou de migration de l'espace <strong>{{workspace_name}}</strong> a échoué.{% endblocktrans %}</mj-text>
           <mj-include path="./partial/support.mjml" />
 
           <!-- Signature -->
