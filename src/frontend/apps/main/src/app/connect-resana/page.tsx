@@ -1,81 +1,48 @@
 'use client';
 
-import { Button, Loader } from '@gouvfr-lasuite/cunningham-react';
+import { Loader } from '@gouvfr-lasuite/cunningham-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Suspense, useEffect } from 'react';
 
-import ResanaLogo from '@/assets/icons/resana-logo.svg';
-import { ResanaConnectSection } from '@/components/ResanaConnect/ResanaConnectSection';
-import { ArrowLeftIcon } from '@/components/icons/ArrowLeftIcon';
-import { login, useAuth } from '@/core/auth/Auth';
 import {
-  MigrationTarget,
+  MIGRATION_TARGET_STORAGE_KEY,
   getConnectPath,
-  getResanaConnectPath,
   isMigrationTarget,
 } from '@/core/migrationTarget';
 
 import './page.scss';
 
+/**
+ * Pure transit page: this is where the backend redirects the browser back to
+ * after the Keycloak/bridge round-trip (RESANA_MIGRATOR_REDIRECT_URL_SUCCESS
+ * / _FAILURE), since that redirect target is a fixed URL with no target
+ * query param. Forwards straight back to /connect with the stored target.
+ */
 function ConnectResanaContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { t } = useTranslation();
-  const { isAuthenticated, isAuthPending } = useAuth();
-  const [authStep, setAuthStep] = useState<'password' | 'otp'>('password');
-  const target = isMigrationTarget(searchParams.get('target'))
-    ? (searchParams.get('target') as MigrationTarget)
-    : 'lasuite-fichiers';
-
-  const resanaConnectPath = getResanaConnectPath(target);
 
   useEffect(() => {
-    if (isAuthPending || isAuthenticated) {
+    const storedTarget = sessionStorage.getItem(MIGRATION_TARGET_STORAGE_KEY);
+    const target = isMigrationTarget(storedTarget) ? storedTarget : null;
+    if (!target) {
+      router.replace('/');
       return;
     }
 
-    router.replace(getConnectPath(target));
-  }, [isAuthPending, isAuthenticated, router, target]);
+    const flag =
+      searchParams.get('resana_connected') === '1'
+        ? 'resana_connected=1'
+        : searchParams.get('resana_error') === '1'
+          ? 'resana_error=1'
+          : null;
 
-  if (isAuthPending || !isAuthenticated) {
-    return (
-      <div className="resana-connect-page container">
-        <Loader />
-      </div>
-    );
-  }
+    router.replace(`${getConnectPath(target)}${flag ? `&${flag}` : ''}`);
+  }, [router, searchParams]);
 
   return (
     <div className="resana-connect-page container">
-      <Button
-        variant="tertiary"
-        color="neutral"
-        icon={<ArrowLeftIcon width={16} height={16} aria-hidden />}
-        onClick={() => router.push(getConnectPath(target))}
-      >
-        {t('Retour')}
-      </Button>
-
-      <ResanaLogo className="resana-connect-page__logo" aria-hidden />
-
-      <h1 className="resana-connect-page__title">{t('Connexion à Resana')}</h1>
-
-      <p className="resana-connect-page__description">
-        {authStep === 'otp'
-          ? t(
-              'Entrez le code reçu par e-mail ou provenant de votre app d’authentification.',
-            )
-          : t('Connectez-vous aux outils pour commencer la migration.')}
-      </p>
-
-      <ResanaConnectSection
-        onStepChange={setAuthStep}
-        onAuthRequired={() => login(resanaConnectPath)}
-        onConnected={() =>
-          router.replace(`${getConnectPath(target)}&resana_connected=1`)
-        }
-      />
+      <Loader />
     </div>
   );
 }

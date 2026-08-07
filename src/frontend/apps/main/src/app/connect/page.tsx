@@ -20,7 +20,6 @@ import {
   MIGRATION_TARGET_STORAGE_KEY,
   MigrationTarget,
   getConnectPath,
-  getResanaConnectPath,
   isMigrationTarget,
 } from '@/core/migrationTarget';
 import { useApi } from '@/hooks/useApi';
@@ -121,6 +120,7 @@ function ConnectPageContent() {
   } = useResanaAuthStatus();
   const { fetchApi } = useApi();
   const [isContinuing, setIsContinuing] = useState(false);
+  const [isResanaConnecting, setIsResanaConnecting] = useState(false);
   const hasAutoContinued = useRef(false);
 
   const target = useMemo<MigrationTarget | null>(() => {
@@ -176,6 +176,10 @@ function ConnectPageContent() {
   const proConnectDone = isAuthenticated;
   const resanaDone = isAuthenticated && resanaConnected === true;
   const resanaStatusPending = isAuthenticated && resanaConnected === null;
+  const resanaError =
+    !resanaDone &&
+    !isResanaConnecting &&
+    searchParams.get('resana_error') === '1';
 
   const canContinue =
     Boolean(target) && isAuthenticated && resanaConnected === true;
@@ -194,11 +198,20 @@ function ConnectPageContent() {
     logout();
   };
 
-  const handleResanaConnect = () => {
-    if (!target || !isAuthenticated) {
+  const handleResanaConnect = async () => {
+    if (!target || !isAuthenticated || isResanaConnecting) {
       return;
     }
-    router.push(getResanaConnectPath(target));
+    setIsResanaConnecting(true);
+    try {
+      const response = await fetchApi('resana/auth/connect', undefined, {
+        closableError: true,
+      });
+      const data = (await response.json()) as { authorize_url: string };
+      window.location.replace(data.authorize_url);
+    } catch {
+      setIsResanaConnecting(false);
+    }
   };
 
   const continueToDashboard = async () => {
@@ -278,11 +291,19 @@ function ConnectPageContent() {
           }
           isDone={resanaDone}
           actionLabel={t('Se connecter')}
-          onAction={handleResanaConnect}
-          actionDisabled={!isAuthenticated || resanaStatusPending}
+          onAction={() => void handleResanaConnect()}
+          actionDisabled={
+            !isAuthenticated || resanaStatusPending || isResanaConnecting
+          }
           actionVariant="primary"
         />
       </div>
+
+      {resanaError && (
+        <p className="migration-connect__error" role="alert">
+          {t('La connexion à Resana a échoué, veuillez réessayer.')}
+        </p>
+      )}
     </div>
   );
 }

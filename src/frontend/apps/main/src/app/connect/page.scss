@@ -29,6 +29,13 @@
     gap: 1rem;
   }
 
+  &__error {
+    margin: 1rem 0 0;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    color: var(--c--contextuals--content--semantic--error--secondary);
+  }
+
   &__row {
     display: flex;
     gap: 1rem;

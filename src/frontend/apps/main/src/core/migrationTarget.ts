@@ -14,9 +14,6 @@ export const needsProConnect = (target: MigrationTarget) =>
 export const getConnectPath = (target: MigrationTarget) =>
   `/connect?target=${target}`;
 
-export const getResanaConnectPath = (target: MigrationTarget) =>
-  `/connect-resana?target=${target}`;
-
 export const getMigrationDestination = (
   target: MigrationTarget,
 ): 'archive' | 'drive' => (target === 'archive-zip' ? 'archive' : 'drive');

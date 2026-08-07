@@ -1,53 +1,5 @@
 .resana-connect-page {
-  max-width: 520px;
-  padding: 2rem 1rem 4rem;
-  margin: 0 auto;
-  text-align: left;
-  color: var(--c--contextuals--content--semantic--neutral--secondary);
-
-  &__back {
-    display: inline-flex;
-    gap: 0.5rem;
-    align-items: center;
-    margin-bottom: 24px;
-    padding: 0;
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--c--contextuals--content--semantic--neutral--secondary);
-    cursor: pointer;
-    background: none;
-    border: none;
-
-    &:hover {
-      color: var(--c--contextuals--content--semantic--neutral--primary);
-    }
-  }
-
-  &__logo {
-    display: block;
-    margin-top: 24px;
-    width: 100px;
-  }
-
-  &__title {
-    margin-bottom: 8px;
-    font-size: 1.75rem;
-    font-weight: 700;
-    line-height: 1.2;
-    color: var(--c--contextuals--content--semantic--neutral--primary);
-  }
-
-  &__description {
-    margin-bottom: 24px;
-    font-size: 1rem;
-    line-height: 1.5;
-    font-weight: 400;
-    color: var(--c--contextuals--content--semantic--neutral--secondary);
-  }
-
-  .c__input__label {
-    font-weight: 500;
-    color: var(--c--contextuals--content--semantic--neutral--primary);
-    font-size: 1rem;
-  }
+  display: flex;
+  justify-content: center;
+  padding: 4rem 1rem;
 }
