@@ -186,8 +186,16 @@ class Base(Configuration):
     RESANA_MIGRATOR_REDIRECT_URI = values.Value(
         environ_name="RESANA_MIGRATOR_REDIRECT_URI", environ_prefix=None
     )
-    RESANA_OTP_CHALLENGE_TTL = values.IntegerValue(
-        120, environ_name="RESANA_OTP_CHALLENGE_TTL", environ_prefix=None
+    RESANA_MIGRATOR_STATE_TTL = values.IntegerValue(
+        600, environ_name="RESANA_MIGRATOR_STATE_TTL", environ_prefix=None
+    )
+    # Frontend pages the resana-auth callback redirects to once the bridge
+    # session has been created (or failed to be).
+    RESANA_MIGRATOR_REDIRECT_URL_SUCCESS = values.Value(
+        None, environ_name="RESANA_MIGRATOR_REDIRECT_URL_SUCCESS", environ_prefix=None
+    )
+    RESANA_MIGRATOR_REDIRECT_URL_FAILURE = values.Value(
+        None, environ_name="RESANA_MIGRATOR_REDIRECT_URL_FAILURE", environ_prefix=None
     )
     RESANA_S3_BUCKET = values.Value(
         environ_name="RESANA_S3_BUCKET", environ_prefix=None

@@ -1,33 +1,45 @@
-"""Tests for the Resana auth endpoints (connect + status)."""
+"""Tests for the Resana auth endpoints (connect + callback + status).
+
+The connect/callback pair drives the resana-migrator PKCE flow: connect()
+returns the Keycloak authorize URL, the user authenticates in their browser
+(password or ProConnect, including any MFA — never simulated server-side),
+and Keycloak redirects back to callback() with an authorization code.
+"""
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
-from django.core.cache import cache
 from django.utils import timezone
 
 import jwt
 import pytest
+import requests
 from cryptography.fernet import Fernet
 from rest_framework.test import APIClient
 
 from core.api.views.resana_auth import (
-    KeycloakOtpRequired,
-    OtpChallenge,
-    _keycloak_login,
-    _keycloak_submit_otp,
-    _load_challenge,
-    _otp_cache_key,
-    _store_challenge,
+    PendingAuth,
+    _load_pending_auth,
+    _store_pending_auth,
 )
-from core.encryption import encrypt_token
+from core.encryption import decrypt_token, encrypt_token
 from core.factories import UserFactory
+from core.sources.resana.migrator_auth import MigratorClient
 
 pytestmark = pytest.mark.django_db
 
 CONNECT_URL = "/api/v1.0/resana/auth/connect"
-OTP_URL = "/api/v1.0/resana/auth/otp"
+CALLBACK_URL = "/api/v1.0/resana-auth/callback"
 STATUS_URL = "/api/v1.0/resana/auth/status"
+
+KEYCLOAK_BASE = "https://kc.example.com/realms/ONHEXAGONE"
+CLIENT_ID = "resana-migrator"
+CLIENT_SECRET = "s3cr3t"
+REDIRECT_URI = "https://migrator.example.com/api/v1.0/resana-auth/callback"
+WEB_ENDPOINT = "https://resana.example.com"
+SUCCESS_URL = "https://migrator.example.com/resana-connected"
+FAILURE_URL = "https://migrator.example.com/resana-connect-failed"
 
 
 def _auth_client(user):
@@ -36,17 +48,37 @@ def _auth_client(user):
     return client
 
 
+def _configure_settings(settings):
+    """Set the resana-migrator settings shared by most tests."""
+    settings.RESANA_KEYCLOAK_ENDPOINT = KEYCLOAK_BASE
+    settings.RESANA_MIGRATOR_CLIENT_ID = CLIENT_ID
+    settings.RESANA_MIGRATOR_CLIENT_SECRET = CLIENT_SECRET
+    settings.RESANA_MIGRATOR_REDIRECT_URI = REDIRECT_URI
+    settings.RESANA_WEB_ENDPOINT = WEB_ENDPOINT
+    settings.RESANA_MIGRATOR_REDIRECT_URL_SUCCESS = SUCCESS_URL
+    settings.RESANA_MIGRATOR_REDIRECT_URL_FAILURE = FAILURE_URL
+    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
+
+
 # ---------------------------------------------------------------------------
 # Authentication guard
 # ---------------------------------------------------------------------------
 
 
 def test_connect_requires_authentication():
-    response = APIClient().post(CONNECT_URL, {"password": "pw"})
+    """The connect endpoint must reject anonymous requests."""
+    response = APIClient().get(CONNECT_URL)
+    assert response.status_code == 401
+
+
+def test_callback_requires_authentication():
+    """The callback endpoint must reject anonymous requests."""
+    response = APIClient().get(CALLBACK_URL, {"code": "abc", "state": "xyz"})
     assert response.status_code == 401
 
 
 def test_status_requires_authentication():
+    """The status endpoint must reject anonymous requests."""
     response = APIClient().get(STATUS_URL)
     assert response.status_code == 401
 
@@ -57,6 +89,7 @@ def test_status_requires_authentication():
 
 
 def test_status_returns_not_connected_when_no_token():
+    """A user who never connected has no access token and no expiry."""
     user = UserFactory()
     response = _auth_client(user).get(STATUS_URL)
     assert response.status_code == 200
@@ -65,6 +98,7 @@ def test_status_returns_not_connected_when_no_token():
 
 
 def test_status_returns_connected_when_token_present():
+    """A user with a stored access token and expiry is reported as connected."""
     expires = timezone.now() + timedelta(hours=2)
     user = UserFactory(
         resana_access_token=encrypt_token("some-token"),
@@ -77,559 +111,435 @@ def test_status_returns_connected_when_token_present():
 
 
 # ---------------------------------------------------------------------------
-# POST /resana/auth/connect — validation
+# GET /resana/auth/connect
 # ---------------------------------------------------------------------------
 
 
-def test_connect_returns_400_when_password_missing():
+def test_connect_returns_an_authorize_url_targeting_keycloak(settings):
+    """The response must point the browser at the Keycloak authorization endpoint."""
+    _configure_settings(settings)
     user = UserFactory()
-    response = _auth_client(user).post(CONNECT_URL, {})
-    assert response.status_code == 400
 
-
-# ---------------------------------------------------------------------------
-# POST /resana/auth/connect — Keycloak flow
-# ---------------------------------------------------------------------------
-
-
-def test_connect_stores_tokens_on_success(settings):
-    settings.RESANA_KEYCLOAK_ENDPOINT = "https://kc.example.com/realms/TEST"
-    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/public/auth/login"
-    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
-
-    user = UserFactory(email="u@example.com")
-
-    with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
-        mock_login.return_value = (_make_access_jwt(), "fresh-refresh")
-        response = _auth_client(user).post(CONNECT_URL, {"password": "s3cr3t"})
+    response = _auth_client(user).get(CONNECT_URL)
 
     assert response.status_code == 200
-    mock_login.assert_called_once_with(
-        "u@example.com",
-        "s3cr3t",
-        keycloak_endpoint="https://kc.example.com/realms/TEST",
-        resana_auth_endpoint="https://resana.example.com/public/auth/login",
-    )
-    user.refresh_from_db()
-    assert user.resana_access_token != ""
-    assert user.resana_refresh_token != ""
-    assert user.resana_token_expires_at is not None
-
-
-def test_connect_ignores_email_from_request_body(settings):
-    """The Resana login always uses the authenticated user's app email,
-    never a value supplied in the request body."""
-    settings.RESANA_KEYCLOAK_ENDPOINT = "https://kc.example.com/realms/TEST"
-    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/public/auth/login"
-    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
-
-    user = UserFactory(email="real-user@example.com")
-
-    with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
-        mock_login.return_value = (_make_access_jwt(), "ref")
-        response = _auth_client(user).post(
-            CONNECT_URL,
-            {"email": "spoofed@example.com", "password": "s3cr3t"},
-        )
-
-    assert response.status_code == 200
-    mock_login.assert_called_once_with(
-        "real-user@example.com",
-        "s3cr3t",
-        keycloak_endpoint="https://kc.example.com/realms/TEST",
-        resana_auth_endpoint="https://resana.example.com/public/auth/login",
+    assert response.data["authorize_url"].startswith(
+        f"{KEYCLOAK_BASE}/protocol/openid-connect/auth?"
     )
 
 
-def test_connect_returns_otp_required_when_mfa_challenged(settings):
-    """When Keycloak challenges with MFA, connect must report otp_required
-    instead of storing tokens, and stash the (encrypted) challenge for the
-    OTP step."""
-    settings.RESANA_KEYCLOAK_ENDPOINT = "https://kc.example.com/realms/TEST"
-    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/public/auth/login"
-    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
-
-    user = UserFactory()
-    challenge = _make_challenge()
-
-    with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
-        mock_login.side_effect = KeycloakOtpRequired(challenge)
-        response = _auth_client(user).post(CONNECT_URL, {"password": "s3cr3t"})
-
-    assert response.status_code == 200
-    assert response.data["otp_required"] is True
-
-    user.refresh_from_db()
-    assert user.resana_access_token == ""
-
-    assert _load_challenge(user.id) == challenge
-
-    raw_cached_value = cache.get(_otp_cache_key(user.id))
-    assert isinstance(raw_cached_value, str)
-    assert challenge.login_action not in raw_cached_value
-    for cookie_value in challenge.cookies.values():
-        assert cookie_value not in raw_cached_value
-
-
-def test_connect_returns_401_on_bad_credentials(settings):
-    settings.RESANA_KEYCLOAK_ENDPOINT = "https://kc.example.com/realms/TEST"
-    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/public/auth/login"
-
+def test_connect_authorize_url_carries_pkce_and_client_params(settings):
+    """The authorize URL must use our dedicated client_id, redirect_uri, and PKCE S256."""
+    _configure_settings(settings)
     user = UserFactory()
 
-    with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
-        mock_login.side_effect = ValueError("Auth failed")
-        response = _auth_client(user).post(CONNECT_URL, {"password": "wrong"})
+    response = _auth_client(user).get(CONNECT_URL)
 
-    assert response.status_code == 401
+    params = parse_qs(urlparse(response.data["authorize_url"]).query)
+    assert params["client_id"] == [CLIENT_ID]
+    assert params["redirect_uri"] == [REDIRECT_URI]
+    assert params["response_type"] == ["code"]
+    assert params["code_challenge_method"] == ["S256"]
+    assert "offline_access" in params["scope"][0]
 
 
-def test_connect_returns_status_connected_after_success(settings):
-    settings.RESANA_KEYCLOAK_ENDPOINT = "https://kc.example.com/realms/TEST"
-    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/public/auth/login"
-    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
+def test_connect_stores_a_pending_auth_matching_the_returned_state(settings):
+    """The state embedded in the authorize URL must resolve to a stored pending auth."""
+    _configure_settings(settings)
+    user = UserFactory()
 
+    response = _auth_client(user).get(CONNECT_URL)
+
+    params = parse_qs(urlparse(response.data["authorize_url"]).query)
+    pending = _load_pending_auth(user.id)
+    assert pending is not None
+    assert pending.state == params["state"][0]
+    assert pending.nonce == params["nonce"][0]
+
+
+def test_connect_generates_a_fresh_state_on_each_call(settings):
+    """Two connect() calls must not reuse the same state/verifier."""
+    _configure_settings(settings)
     user = UserFactory()
     client = _auth_client(user)
 
-    with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
-        mock_login.return_value = (_make_access_jwt(), "ref")
-        client.post(CONNECT_URL, {"password": "pw"})
+    first = client.get(CONNECT_URL)
+    second = client.get(CONNECT_URL)
 
-    response = client.get(STATUS_URL)
-    assert response.data["connected"] is True
+    first_state = parse_qs(urlparse(first.data["authorize_url"]).query)["state"][0]
+    second_state = parse_qs(urlparse(second.data["authorize_url"]).query)["state"][0]
+    assert first_state != second_state
 
 
 # ---------------------------------------------------------------------------
-# POST /resana/auth/otp
+# GET /resana/auth/callback — validation
 # ---------------------------------------------------------------------------
 
 
-def test_otp_requires_authentication():
-    """Same auth guard as the other Resana auth endpoints."""
-    response = APIClient().post(OTP_URL, {"code": "123456"})
-    assert response.status_code == 401
-
-
-def test_otp_returns_400_when_code_missing_or_malformed():
-    """The OTP code must be exactly 6 digits."""
+def test_callback_redirects_to_failure_when_provider_reports_an_error(settings):
+    """Keycloak can redirect back with ?error=... instead of a code (e.g. access_denied)."""
+    _configure_settings(settings)
     user = UserFactory()
-    client = _auth_client(user)
 
-    assert client.post(OTP_URL, {}).status_code == 400
-    assert client.post(OTP_URL, {"code": "abc"}).status_code == 400
-    assert client.post(OTP_URL, {"code": "12345"}).status_code == 400
+    response = _auth_client(user).get(CALLBACK_URL, {"error": "access_denied"})
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
 
 
-def test_otp_returns_400_when_no_pending_challenge():
-    """Without a prior connect() call that raised otp_required, there is
-    nothing to complete — the user must restart from the password step."""
+def test_callback_failure_redirect_preserves_the_configured_query_string(settings):
+    """The failure URL may already carry a query string; ?error= must be appended, not stacked."""
+    _configure_settings(settings)
+    settings.RESANA_MIGRATOR_REDIRECT_URL_FAILURE = f"{FAILURE_URL}?resana_error=1"
     user = UserFactory()
-    response = _auth_client(user).post(OTP_URL, {"code": "123456"})
-    assert response.status_code == 400
 
+    response = _auth_client(user).get(CALLBACK_URL, {"error": "access_denied"})
 
-def test_otp_stores_tokens_on_success(settings):
-    """Given a pending challenge, a valid OTP code completes the login,
-    stores the tokens, and clears the pending challenge."""
-    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
-
-    user = UserFactory()
-    challenge = _make_challenge()
-    _store_challenge(user.id, challenge)
-
-    with patch("core.api.views.resana_auth._keycloak_submit_otp") as mock_submit:
-        mock_submit.return_value = (_make_access_jwt(), "ref-tok")
-        response = _auth_client(user).post(OTP_URL, {"code": "123456"})
-
-    assert response.status_code == 200
-    mock_submit.assert_called_once_with("123456", challenge)
-
-    user.refresh_from_db()
-    assert user.resana_access_token != ""
-    assert cache.get(_otp_cache_key(user.id)) is None
-
-
-def test_otp_returns_401_on_invalid_code(settings):
-    """An invalid OTP code must not clear the pending challenge, so the
-    user can retry without re-entering their password."""
-    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
-
-    user = UserFactory()
-    challenge = _make_challenge()
-    _store_challenge(user.id, challenge)
-
-    with patch("core.api.views.resana_auth._keycloak_submit_otp") as mock_submit:
-        mock_submit.side_effect = ValueError("Authentication failed")
-        response = _auth_client(user).post(OTP_URL, {"code": "000000"})
-
-    assert response.status_code == 401
-    assert _load_challenge(user.id) == challenge
-
-
-def test_connect_then_otp_full_flow(settings):
-    """End-to-end: connect() reports otp_required, then otp() completes the
-    login and status() reflects the connected state."""
-    settings.RESANA_KEYCLOAK_ENDPOINT = "https://kc.example.com/realms/TEST"
-    settings.RESANA_AUTH_ENDPOINT = "https://resana.example.com/public/auth/login"
-    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
-
-    user = UserFactory()
-    client = _auth_client(user)
-    challenge = _make_challenge()
-
-    with patch("core.api.views.resana_auth._keycloak_login") as mock_login:
-        mock_login.side_effect = KeycloakOtpRequired(challenge)
-        connect_response = client.post(CONNECT_URL, {"password": "s3cr3t"})
-
-    assert connect_response.data["otp_required"] is True
-
-    with patch("core.api.views.resana_auth._keycloak_submit_otp") as mock_submit:
-        mock_submit.return_value = (_make_access_jwt(), "ref-tok")
-        otp_response = client.post(OTP_URL, {"code": "123456"})
-
-    assert otp_response.status_code == 200
-
-    status_response = client.get(STATUS_URL)
-    assert status_response.data["connected"] is True
-
-
-# ---------------------------------------------------------------------------
-# _store_challenge() / _load_challenge() — encrypted cache round-trip
-# ---------------------------------------------------------------------------
-
-
-def test_store_and_load_challenge_round_trip(settings):
-    """A challenge stored via _store_challenge must come back identical
-    through _load_challenge."""
-    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
-
-    challenge = _make_challenge()
-    _store_challenge(42, challenge)
-
-    assert _load_challenge(42) == challenge
-
-
-def test_store_challenge_encrypts_cached_value(settings):
-    """The raw value in the cache backend must not contain the challenge's
-    plaintext fields — it must be Fernet-encrypted."""
-    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
-
-    challenge = _make_challenge()
-    _store_challenge(42, challenge)
-
-    raw_value = cache.get(_otp_cache_key(42))
-    assert isinstance(raw_value, str)
-    assert challenge.login_action not in raw_value
-    assert challenge.selected_credential_id not in raw_value
-    for cookie_value in challenge.cookies.values():
-        assert cookie_value not in raw_value
-
-
-def test_load_challenge_returns_none_when_absent():
-    """No cached entry means no pending challenge."""
-    assert _load_challenge(999999) is None
-
-
-# ---------------------------------------------------------------------------
-# _keycloak_login() unit tests
-# ---------------------------------------------------------------------------
-
-
-def test_keycloak_login_returns_tokens_on_success():
-    mock_response_get = MagicMock()
-    mock_response_get.text = '<form action="https://kc.example.com/login-actions/authenticate?session_code=XYZ"></form>'
-    mock_response_post = MagicMock()
-
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.get.return_value = mock_response_get
-        session.post.return_value = mock_response_post
-        session.cookies.get.side_effect = {
-            "interstis_access": "acc-tok",
-            "interstis_refresh": "ref-tok",
-        }.get
-
-        access, refresh = _keycloak_login(
-            "user@example.com",
-            "secret",
-            keycloak_endpoint="https://kc.example.com/realms/TEST",
-            resana_auth_endpoint="https://resana.example.com/public/auth/login",
-        )
-
-    assert access == "acc-tok"
-    assert refresh == "ref-tok"
-
-
-def test_keycloak_login_raises_when_form_not_found():
-    mock_response_get = MagicMock()
-    mock_response_get.text = "<html>no form here</html>"
-
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.get.return_value = mock_response_get
-
-        with pytest.raises(ValueError, match="login form not found"):
-            _keycloak_login(
-                "user@example.com",
-                "secret",
-                keycloak_endpoint="https://kc.example.com/realms/TEST",
-                resana_auth_endpoint="https://resana.example.com/public/auth/login",
-            )
-
-
-def test_keycloak_login_raises_when_no_cookie():
-    mock_response_get = MagicMock()
-    mock_response_get.text = (
-        '<form action="https://kc.example.com/authenticate"></form>'
-    )
-    mock_response_post = MagicMock()
-    mock_response_post.text = "<html>invalid credentials</html>"
-
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.get.return_value = mock_response_get
-        session.post.return_value = mock_response_post
-        session.cookies.get.return_value = None
-
-        with pytest.raises(ValueError, match="Authentication failed"):
-            _keycloak_login(
-                "user@example.com",
-                "wrong",
-                keycloak_endpoint="https://kc.example.com/realms/TEST",
-                resana_auth_endpoint="https://resana.example.com/public/auth/login",
-            )
-
-
-def test_keycloak_login_decodes_html_entities_in_form_action():
-    """&amp; in form action is decoded before posting."""
-    mock_response_get = MagicMock()
-    mock_response_get.text = (
-        '<form action="https://kc.example.com/auth?session_code=X&amp;tab_id=Y"></form>'
-    )
-    mock_response_post = MagicMock()
-
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.get.return_value = mock_response_get
-        session.post.return_value = mock_response_post
-        session.cookies.get.side_effect = (
-            lambda k: "tok" if k == "interstis_access" else None
-        )
-
-        _keycloak_login(
-            "u@example.com",
-            "pw",
-            keycloak_endpoint="https://kc.example.com/realms/TEST",
-            resana_auth_endpoint="https://resana.example.com/public/auth/login",
-        )
-
-    call_url = session.post.call_args[0][0]
-    assert "&amp;" not in call_url
-    assert "session_code=X&tab_id=Y" in call_url
-
-
-# ---------------------------------------------------------------------------
-# _keycloak_login() — MFA / OTP challenge detection
-# ---------------------------------------------------------------------------
-
-
-def _its_portail_html(
-    login_action="https://kc.example.com/login-actions/authenticate?session_code=NEW&execution=E1",
-    otp_input_only="true",
-    selected_credentials="abc-123",
-):
-    """Build the its-portail OTP challenge markup Keycloak returns when MFA is required."""
-    return (
-        "<its-portail "
-        f'login_action="{login_action}" '
-        'mail="u@example.com" '
-        'otp_qr_code="" '
-        'otp_code="" '
-        'otp_secret="" '
-        f'otp_input_only="{otp_input_only}" '
-        f'selected_credentials="{selected_credentials}">'
-        "</its-portail>"
-    )
-
-
-def test_keycloak_login_raises_otp_required_when_its_portail_present():
-    """When Keycloak challenges with MFA, the login/password step must
-    raise KeycloakOtpRequired carrying the parsed challenge instead of
-    failing with a generic ValueError."""
-    mock_response_get = MagicMock()
-    mock_response_get.text = (
-        '<form action="https://kc.example.com/authenticate?session_code=XYZ"></form>'
-    )
-    mock_response_post = MagicMock()
-    mock_response_post.text = _its_portail_html()
-
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.get.return_value = mock_response_get
-        session.post.return_value = mock_response_post
-        session.cookies.get.return_value = None
-        session.cookies.get_dict.return_value = {"AUTH_SESSION_ID": "xyz"}
-
-        with pytest.raises(KeycloakOtpRequired) as exc_info:
-            _keycloak_login(
-                "u@example.com",
-                "pw",
-                keycloak_endpoint="https://kc.example.com/realms/TEST",
-                resana_auth_endpoint="https://resana.example.com/public/auth/login",
-            )
-
-    challenge = exc_info.value.challenge
-    assert (
-        challenge.login_action
-        == "https://kc.example.com/login-actions/authenticate?session_code=NEW&execution=E1"
-    )
-    assert challenge.otp_field_name == "otp"
-    assert challenge.selected_credential_id == "abc-123"
-    assert challenge.cookies == {"AUTH_SESSION_ID": "xyz"}
-
-
-def test_keycloak_login_otp_field_name_is_totp_when_not_input_only():
-    """otp_input_only="false" means the account needs the QR-setup flow,
-    whose form field is named "totp" instead of "otp"."""
-    mock_response_get = MagicMock()
-    mock_response_get.text = (
-        '<form action="https://kc.example.com/authenticate?session_code=XYZ"></form>'
-    )
-    mock_response_post = MagicMock()
-    mock_response_post.text = _its_portail_html(otp_input_only="false")
-
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.get.return_value = mock_response_get
-        session.post.return_value = mock_response_post
-        session.cookies.get.return_value = None
-        session.cookies.get_dict.return_value = {}
-
-        with pytest.raises(KeycloakOtpRequired) as exc_info:
-            _keycloak_login(
-                "u@example.com",
-                "pw",
-                keycloak_endpoint="https://kc.example.com/realms/TEST",
-                resana_auth_endpoint="https://resana.example.com/public/auth/login",
-            )
-
-    assert exc_info.value.challenge.otp_field_name == "totp"
-
-
-def test_keycloak_login_decodes_html_entities_in_login_action():
-    """&amp; in the its-portail login_action attribute is decoded, same as
-    the regular form action."""
-    mock_response_get = MagicMock()
-    mock_response_get.text = (
-        '<form action="https://kc.example.com/authenticate?session_code=XYZ"></form>'
-    )
-    mock_response_post = MagicMock()
-    mock_response_post.text = _its_portail_html(
-        login_action="https://kc.example.com/authenticate?session_code=X&amp;execution=Y"
-    )
-
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.get.return_value = mock_response_get
-        session.post.return_value = mock_response_post
-        session.cookies.get.return_value = None
-        session.cookies.get_dict.return_value = {}
-
-        with pytest.raises(KeycloakOtpRequired) as exc_info:
-            _keycloak_login(
-                "u@example.com",
-                "pw",
-                keycloak_endpoint="https://kc.example.com/realms/TEST",
-                resana_auth_endpoint="https://resana.example.com/public/auth/login",
-            )
-
-    login_action = exc_info.value.challenge.login_action
-    assert "&amp;" not in login_action
-    assert "session_code=X&execution=Y" in login_action
-
-
-# ---------------------------------------------------------------------------
-# _keycloak_submit_otp() unit tests
-# ---------------------------------------------------------------------------
-
-
-def _make_challenge(**overrides):
-    defaults = {
-        "login_action": "https://kc.example.com/login-actions/authenticate?session_code=NEW&execution=E1",
-        "otp_field_name": "otp",
-        "selected_credential_id": "abc-123",
-        "cookies": {"AUTH_SESSION_ID": "xyz"},
-    }
-    defaults.update(overrides)
-    return OtpChallenge(**defaults)
-
-
-def test_keycloak_submit_otp_returns_tokens_on_success():
-    """Posting the OTP code to the challenge's login_action, on a session
-    restored from the saved cookies, must yield the Resana tokens."""
-    challenge = _make_challenge()
-    mock_response = MagicMock()
-
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.post.return_value = mock_response
-        session.cookies.get.side_effect = {
-            "interstis_access": "acc-tok",
-            "interstis_refresh": "ref-tok",
-        }.get
-
-        access, refresh = _keycloak_submit_otp("123456", challenge)
-
-    session.cookies.update.assert_called_once_with(challenge.cookies)
-    session.post.assert_called_once_with(
-        challenge.login_action,
-        data={
-            "otp": "123456",
-            "selectedCredentialId": "abc-123",
-            "userLabel": "Mon OTP",
-        },
-        allow_redirects=True,
-        timeout=15,
-    )
-    assert access == "acc-tok"
-    assert refresh == "ref-tok"
-
-
-def test_keycloak_submit_otp_uses_totp_field_name():
-    """The posted field name must match the challenge's otp_field_name."""
-    challenge = _make_challenge(otp_field_name="totp")
-    mock_response = MagicMock()
-
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.post.return_value = mock_response
-        session.cookies.get.side_effect = lambda k: (
-            "tok" if k == "interstis_access" else None
-        )
-
-        _keycloak_submit_otp("654321", challenge)
-
-    posted_data = session.post.call_args.kwargs["data"]
-    assert posted_data == {
-        "totp": "654321",
-        "selectedCredentialId": "abc-123",
-        "userLabel": "Mon OTP",
+    parsed = urlparse(response.url)
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == FAILURE_URL
+    assert parse_qs(parsed.query) == {
+        "resana_error": ["1"],
+        "error": ["access_denied"],
     }
 
 
-def test_keycloak_submit_otp_raises_on_invalid_code():
-    """No interstis_access cookie in the response means the OTP code was rejected."""
-    challenge = _make_challenge()
-    mock_response = MagicMock()
+def test_callback_failure_redirect_url_encodes_the_provider_error(settings):
+    """A provider-controlled error string must not inject extra query parameters."""
+    _configure_settings(settings)
+    user = UserFactory()
 
-    with patch("core.api.views.resana_auth.requests.Session") as mock_session_cls:
-        session = mock_session_cls.return_value
-        session.post.return_value = mock_response
-        session.cookies.get.return_value = None
+    response = _auth_client(user).get(CALLBACK_URL, {"error": "x&resana_connected=1"})
 
-        with pytest.raises(ValueError, match="Authentication failed"):
-            _keycloak_submit_otp("000000", challenge)
+    assert parse_qs(urlparse(response.url).query) == {"error": ["x&resana_connected=1"]}
+
+
+def test_callback_redirects_to_failure_when_code_is_missing(settings):
+    """A callback without a code cannot proceed to the token exchange."""
+    _configure_settings(settings)
+    user = UserFactory()
+
+    response = _auth_client(user).get(CALLBACK_URL, {"state": "xyz"})
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
+
+
+def test_callback_redirects_to_failure_when_there_is_no_pending_auth(settings):
+    """A callback with no prior connect() call has nothing to validate the state against."""
+    _configure_settings(settings)
+    user = UserFactory()
+
+    response = _auth_client(user).get(
+        CALLBACK_URL, {"code": "the-code", "state": "unknown"}
+    )
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
+
+
+def test_callback_redirects_to_failure_when_state_does_not_match(settings):
+    """A state mismatch must be rejected, it may indicate a CSRF attempt."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="expected-state", nonce="nonce", code_verifier="verifier"),
+    )
+
+    response = _auth_client(user).get(
+        CALLBACK_URL, {"code": "the-code", "state": "wrong-state"}
+    )
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
+
+
+# ---------------------------------------------------------------------------
+# GET /resana/auth/callback — happy path
+# ---------------------------------------------------------------------------
+
+
+def _make_access_jwt(exp_delta=timedelta(hours=1)) -> str:
+    """Build a fake bridge access token JWT carrying an exp claim."""
+    exp = timezone.now() + exp_delta
+    return jwt.encode(
+        {"exp": int(exp.timestamp())},
+        "test-secret-long-enough-for-hs256",
+        algorithm="HS256",
+    )
+
+
+def test_callback_exchanges_the_code_with_the_stored_verifier(settings):
+    """The token exchange must reuse the PKCE code_verifier generated at connect() time."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="the-state", nonce="the-nonce", code_verifier="the-verifier"),
+    )
+
+    with patch(
+        "core.api.views.resana_auth.exchange_code_for_tokens"
+    ) as mock_exchange, patch(
+        "core.api.views.resana_auth.create_bridge_session"
+    ) as mock_bridge:
+        mock_exchange.return_value = {
+            "access_token": _make_access_jwt(),
+            "refresh_token": "offline-tok",
+        }
+        mock_bridge.return_value = {
+            "plateformeSessionId": "sess-id",
+            "interstis_access": _make_access_jwt(),
+            "csrfToken": "csrf-value",
+        }
+        _auth_client(user).get(CALLBACK_URL, {"code": "the-code", "state": "the-state"})
+
+    mock_exchange.assert_called_once_with(
+        KEYCLOAK_BASE,
+        MigratorClient(
+            client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI
+        ),
+        "the-code",
+        "the-verifier",
+    )
+
+
+def test_callback_stores_tokens_and_redirects_to_success(settings):
+    """A full successful callback must persist the bridge session and redirect to the success page."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="the-state", nonce="the-nonce", code_verifier="the-verifier"),
+    )
+
+    bridge_access = _make_access_jwt(timedelta(minutes=5))
+    with patch(
+        "core.api.views.resana_auth.exchange_code_for_tokens"
+    ) as mock_exchange, patch(
+        "core.api.views.resana_auth.create_bridge_session"
+    ) as mock_bridge:
+        mock_exchange.return_value = {
+            "access_token": _make_access_jwt(),
+            "refresh_token": "offline-tok",
+        }
+        mock_bridge.return_value = {
+            "plateformeSessionId": "sess-id",
+            "interstis_access": bridge_access,
+            "csrfToken": "csrf-value",
+        }
+        response = _auth_client(user).get(
+            CALLBACK_URL, {"code": "the-code", "state": "the-state"}
+        )
+
+    assert response.status_code == 302
+    assert response.url == SUCCESS_URL
+
+    user.refresh_from_db()
+    assert decrypt_token(user.resana_refresh_token) == "offline-tok"
+    assert decrypt_token(user.resana_access_token) == bridge_access
+    assert decrypt_token(user.resana_session_id) == "sess-id"
+    assert decrypt_token(user.resana_csrf_token) == "csrf-value"
+
+
+def test_callback_clears_the_pending_auth_so_it_cannot_be_replayed(settings):
+    """The state must be single-use: a replayed callback must fail."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="the-state", nonce="the-nonce", code_verifier="the-verifier"),
+    )
+
+    with patch(
+        "core.api.views.resana_auth.exchange_code_for_tokens"
+    ) as mock_exchange, patch(
+        "core.api.views.resana_auth.create_bridge_session"
+    ) as mock_bridge:
+        mock_exchange.return_value = {
+            "access_token": _make_access_jwt(),
+            "refresh_token": "offline-tok",
+        }
+        mock_bridge.return_value = {
+            "plateformeSessionId": "sess-id",
+            "interstis_access": _make_access_jwt(),
+            "csrfToken": "csrf-value",
+        }
+        _auth_client(user).get(CALLBACK_URL, {"code": "the-code", "state": "the-state"})
+
+    assert _load_pending_auth(user.id) is None
+
+
+# ---------------------------------------------------------------------------
+# GET /resana/auth/callback — upstream failures
+# ---------------------------------------------------------------------------
+
+
+def test_callback_redirects_to_failure_when_token_exchange_fails(settings):
+    """A rejected authorization code must redirect to the failure page, not crash."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="the-state", nonce="the-nonce", code_verifier="the-verifier"),
+    )
+
+    with patch(
+        "core.api.views.resana_auth.exchange_code_for_tokens",
+        side_effect=requests.HTTPError("400 Bad Request"),
+    ):
+        response = _auth_client(user).get(
+            CALLBACK_URL, {"code": "bad-code", "state": "the-state"}
+        )
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        requests.ConnectionError("dns failure"),
+        requests.Timeout("read timed out"),
+        requests.exceptions.JSONDecodeError("Expecting value", "<html>", 0),
+    ],
+)
+def test_callback_redirects_to_failure_when_keycloak_is_unreachable(settings, exc):
+    """Network/transport errors on the token exchange must not surface as a 500."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="the-state", nonce="the-nonce", code_verifier="the-verifier"),
+    )
+
+    with patch("core.api.views.resana_auth.exchange_code_for_tokens", side_effect=exc):
+        response = _auth_client(user).get(
+            CALLBACK_URL, {"code": "the-code", "state": "the-state"}
+        )
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
+
+
+def test_callback_redirects_to_failure_when_the_bridge_is_unreachable(settings):
+    """A bridge timeout must redirect to the failure page like a bridge HTTP error."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="the-state", nonce="the-nonce", code_verifier="the-verifier"),
+    )
+
+    with patch(
+        "core.api.views.resana_auth.exchange_code_for_tokens"
+    ) as mock_exchange, patch(
+        "core.api.views.resana_auth.create_bridge_session",
+        side_effect=requests.Timeout("read timed out"),
+    ):
+        mock_exchange.return_value = {
+            "access_token": _make_access_jwt(),
+            "refresh_token": "offline-tok",
+        }
+        response = _auth_client(user).get(
+            CALLBACK_URL, {"code": "the-code", "state": "the-state"}
+        )
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
+
+
+def test_callback_redirects_to_failure_when_keycloak_omits_the_offline_token(settings):
+    """Without offline_access granted, there is no refresh token to store for later renewal."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="the-state", nonce="the-nonce", code_verifier="the-verifier"),
+    )
+
+    with patch("core.api.views.resana_auth.exchange_code_for_tokens") as mock_exchange:
+        mock_exchange.return_value = {"access_token": _make_access_jwt()}
+        response = _auth_client(user).get(
+            CALLBACK_URL, {"code": "the-code", "state": "the-state"}
+        )
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
+
+
+def test_callback_redirects_to_failure_when_the_bridge_call_fails(settings):
+    """A rejected bridge call (e.g. bad audience) must redirect to the failure page."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="the-state", nonce="the-nonce", code_verifier="the-verifier"),
+    )
+
+    with patch(
+        "core.api.views.resana_auth.exchange_code_for_tokens"
+    ) as mock_exchange, patch(
+        "core.api.views.resana_auth.create_bridge_session",
+        side_effect=requests.HTTPError("401 Unauthorized"),
+    ):
+        mock_exchange.return_value = {
+            "access_token": _make_access_jwt(),
+            "refresh_token": "offline-tok",
+        }
+        response = _auth_client(user).get(
+            CALLBACK_URL, {"code": "the-code", "state": "the-state"}
+        )
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
+
+
+def test_callback_redirects_to_failure_when_the_bridge_response_is_malformed(settings):
+    """A 200 OK bridge response missing required fields must redirect to failure too."""
+    _configure_settings(settings)
+    user = UserFactory()
+    _store_pending_auth(
+        user.id,
+        PendingAuth(state="the-state", nonce="the-nonce", code_verifier="the-verifier"),
+    )
+
+    with patch(
+        "core.api.views.resana_auth.exchange_code_for_tokens"
+    ) as mock_exchange, patch(
+        "core.api.views.resana_auth.create_bridge_session",
+        side_effect=ValueError("Bridge response missing fields: csrfToken"),
+    ):
+        mock_exchange.return_value = {
+            "access_token": _make_access_jwt(),
+            "refresh_token": "offline-tok",
+        }
+        response = _auth_client(user).get(
+            CALLBACK_URL, {"code": "the-code", "state": "the-state"}
+        )
+
+    assert response.status_code == 302
+    assert response.url.startswith(FAILURE_URL)
+
+
+# ---------------------------------------------------------------------------
+# _store_pending_auth() / _load_pending_auth() — encrypted cache round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_store_and_load_pending_auth_round_trip(settings):
+    """A pending auth stored via _store_pending_auth must come back identical."""
+    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
+    pending = PendingAuth(state="s", nonce="n", code_verifier="v")
+
+    _store_pending_auth(42, pending)
+
+    assert _load_pending_auth(42) == pending
+
+
+def test_load_pending_auth_returns_none_when_absent():
+    """No cached entry means no pending auth to validate a callback against."""
+    assert _load_pending_auth(999999) is None
 
 
 # ---------------------------------------------------------------------------
@@ -638,18 +548,5 @@ def test_keycloak_submit_otp_raises_on_invalid_code():
 
 
 def _fernet_key() -> str:
+    """Return a valid Fernet key for test settings."""
     return Fernet.generate_key().decode()
-
-
-def _make_access_jwt(exp_delta=timedelta(hours=3)) -> str:
-    """Build a fake Resana access token JWT carrying an `exp` claim.
-
-    store_tokens() reads its own expiry from this claim, so any mocked
-    access token used in these tests must be shaped like a real one.
-    """
-    exp = timezone.now() + exp_delta
-    return jwt.encode(
-        {"exp": int(exp.timestamp())},
-        "test-secret-long-enough-for-hs256",
-        algorithm="HS256",
-    )

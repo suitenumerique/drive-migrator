@@ -42,7 +42,6 @@ and this project adheres to
 - add helm files for local and staging envs
 - implement basic Resana API
 - add optional setting to cap migrated files per workspace.
-- add MFA/OTP support to Resana Keycloak login flow
 
 ### Changed
 
