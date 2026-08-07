@@ -1,22 +1,20 @@
-"""Tests for ResanaMembersClient — reads workspace members from the Resana PHP portal."""
+"""Tests for ResanaMembersClient — reads workspace members from the Resana PHP portal.
 
-# pylint: disable=protected-access
-import base64
-import json
+The access token, PHPSESSID and CSRF token are all sourced from the resana-migrator
+bridge response (see ResanaTokenManager), not scraped from JWT claims or HTML pages.
+"""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.sources.resana.resana_members_client import (
-    MissingPhpSessionId,
-    ResanaMembersClient,
-)
+from core.sources.resana.resana_members_client import ResanaMembersClient
 
 BASE_URL = "https://resana-web.example.test"
 SLUG = "2137419"
 PHP_SESSION_ID = "fdbcdafa71a19f7ef05c7562aef9cd29"
-
-_CSRF_HTML = "<script>var CSRFToken = 'abc123def';</script>"
+CSRF_TOKEN = "abc123def"
+ACCESS_TOKEN = "the-interstis-access-token"
 
 _ONGLET_TRIE_RESPONSE = {
     "tabData": [
@@ -32,21 +30,15 @@ _ONGLET_TRIE_RESPONSE = {
 }
 
 
-def _make_jwt(payload: dict) -> str:
-    """Build a fake JWT with the given payload — signature is not verified by the client."""
-
-    def _b64(data: dict) -> str:
-        return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
-
-    return f"{_b64({'alg': 'RS512'})}.{_b64(payload)}.signature"
-
-
-TOKEN = _make_jwt({"phpSessionId": PHP_SESSION_ID})
-
-
-def _make_client(token=TOKEN):
+def _make_client():
+    """Build a ResanaMembersClient with a mocked underlying requests.Session."""
     with patch("core.sources.resana.resana_members_client.requests.Session"):
-        client = ResanaMembersClient(token, BASE_URL)
+        client = ResanaMembersClient(
+            access_token=ACCESS_TOKEN,
+            session_id=PHP_SESSION_ID,
+            csrf_token=CSRF_TOKEN,
+            base_url=BASE_URL,
+        )
     client.session = MagicMock()
     return client
 
@@ -61,27 +53,31 @@ def test_init_sets_access_token_cookie():
     with patch(
         "core.sources.resana.resana_members_client.requests.Session"
     ) as mock_session:
-        ResanaMembersClient(TOKEN, BASE_URL)
+        ResanaMembersClient(
+            access_token=ACCESS_TOKEN,
+            session_id=PHP_SESSION_ID,
+            csrf_token=CSRF_TOKEN,
+            base_url=BASE_URL,
+        )
 
-    mock_session.return_value.cookies.set.assert_any_call("interstis_access", TOKEN)
+    mock_session.return_value.cookies.set.assert_any_call(
+        "interstis_access", ACCESS_TOKEN
+    )
 
 
-def test_init_sets_php_session_id_cookie_from_token_claim():
-    """Constructor extracts phpSessionId from the JWT and sets it as PHPSESSID."""
+def test_init_sets_php_session_id_cookie_from_argument():
+    """Constructor sets PHPSESSID from the session_id argument, not a decoded JWT."""
     with patch(
         "core.sources.resana.resana_members_client.requests.Session"
     ) as mock_session:
-        ResanaMembersClient(TOKEN, BASE_URL)
+        ResanaMembersClient(
+            access_token=ACCESS_TOKEN,
+            session_id=PHP_SESSION_ID,
+            csrf_token=CSRF_TOKEN,
+            base_url=BASE_URL,
+        )
 
     mock_session.return_value.cookies.set.assert_any_call("PHPSESSID", PHP_SESSION_ID)
-
-
-def test_init_raises_when_token_has_no_php_session_id():
-    """Constructor raises MissingPhpSessionId when the JWT lacks the phpSessionId claim."""
-    token_without_claim = _make_jwt({"sub": 123})
-
-    with pytest.raises(MissingPhpSessionId):
-        ResanaMembersClient(token_without_claim, BASE_URL)
 
 
 def test_init_sets_xhr_header():
@@ -89,12 +85,42 @@ def test_init_sets_xhr_header():
     with patch(
         "core.sources.resana.resana_members_client.requests.Session"
     ) as mock_session:
-        ResanaMembersClient(TOKEN, BASE_URL)
+        ResanaMembersClient(
+            access_token=ACCESS_TOKEN,
+            session_id=PHP_SESSION_ID,
+            csrf_token=CSRF_TOKEN,
+            base_url=BASE_URL,
+        )
 
-    assert (
-        mock_session.return_value.headers.__setitem__.call_args_list[0][0][1]
-        == "XMLHttpRequest"
+    mock_session.return_value.headers.__setitem__.assert_any_call(
+        "X-Requested-With", "XMLHttpRequest"
     )
+
+
+def test_init_sets_csrf_header_from_argument():
+    """Constructor sets X-CSRF-TOKEN from the csrf_token argument, no HTML scraping involved."""
+    with patch(
+        "core.sources.resana.resana_members_client.requests.Session"
+    ) as mock_session:
+        ResanaMembersClient(
+            access_token=ACCESS_TOKEN,
+            session_id=PHP_SESSION_ID,
+            csrf_token=CSRF_TOKEN,
+            base_url=BASE_URL,
+        )
+
+    mock_session.return_value.headers.__setitem__.assert_any_call(
+        "X-CSRF-TOKEN", CSRF_TOKEN
+    )
+
+
+def test_init_requires_keyword_arguments():
+    """Positional args are rejected: four same-typed strings are too easy to transpose."""
+    with patch("core.sources.resana.resana_members_client.requests.Session"):
+        with pytest.raises(TypeError):
+            ResanaMembersClient(  # pylint: disable=missing-kwoa,too-many-function-args
+                ACCESS_TOKEN, PHP_SESSION_ID, CSRF_TOKEN, BASE_URL
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -102,27 +128,22 @@ def test_init_sets_xhr_header():
 # ---------------------------------------------------------------------------
 
 
-def test_get_workspaces_fetches_csrf_from_generic_page():
-    """get_workspaces() fetches the CSRF token from the slug-less /public/perimetre page."""
+def test_get_workspaces_posts_to_get_onglet_trie_without_a_prior_get():
+    """get_workspaces() POSTs directly to getOngletTrie, no CSRF page fetch beforehand."""
     client = _make_client()
-    client.session.get.return_value.text = _CSRF_HTML
     client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
 
     client.get_workspaces()
 
-    client.session.get.assert_called_once_with(
-        f"{BASE_URL}/public/perimetre", timeout=30
-    )
-    assert client.session.headers.__setitem__.call_args_list[-1][0] == (
-        "X-CSRF-Token",
-        "abc123def",
+    client.session.get.assert_not_called()
+    client.session.post.assert_called_once_with(
+        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30
     )
 
 
 def test_get_workspaces_flattens_tabs_into_slug_name_pairs():
     """get_workspaces() flattens all tabData[].tabPerimetres into {slug, name} dicts."""
     client = _make_client()
-    client.session.get.return_value.text = _CSRF_HTML
     client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
 
     result = client.get_workspaces()
@@ -134,19 +155,6 @@ def test_get_workspaces_flattens_tabs_into_slug_name_pairs():
     ]
 
 
-def test_get_workspaces_posts_to_get_onglet_trie():
-    """get_workspaces() POSTs to /public/perimetre/getOngletTrie with no body params."""
-    client = _make_client()
-    client.session.get.return_value.text = _CSRF_HTML
-    client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
-
-    client.get_workspaces()
-
-    client.session.post.assert_called_once_with(
-        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30
-    )
-
-
 # ---------------------------------------------------------------------------
 # find_slug_by_workspace_name()
 # ---------------------------------------------------------------------------
@@ -155,7 +163,6 @@ def test_get_workspaces_posts_to_get_onglet_trie():
 def test_find_slug_by_workspace_name_returns_matching_slug():
     """find_slug_by_workspace_name() returns the PHP slug for an exact name match."""
     client = _make_client()
-    client.session.get.return_value.text = _CSRF_HTML
     client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
 
     result = client.find_slug_by_workspace_name("TEST Worskspace")
@@ -166,7 +173,6 @@ def test_find_slug_by_workspace_name_returns_matching_slug():
 def test_find_slug_by_workspace_name_returns_none_when_not_found():
     """find_slug_by_workspace_name() returns None when no workspace matches the name."""
     client = _make_client()
-    client.session.get.return_value.text = _CSRF_HTML
     client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
 
     result = client.find_slug_by_workspace_name("Unknown")
@@ -180,9 +186,8 @@ def test_find_slug_by_workspace_name_returns_none_when_not_found():
 
 
 def test_list_workspace_members_visits_consulter_page_first():
-    """list_workspace_members() visits consulter/{slug} first to prime the server-side context."""
+    """list_workspace_members() still visits consulter/{slug} first (mandatory legacy constraint)."""
     client = _make_client()
-    client.session.get.return_value.text = _CSRF_HTML
     client.session.post.return_value.json.return_value = {}
 
     client.list_workspace_members(SLUG)
@@ -195,7 +200,6 @@ def test_list_workspace_members_visits_consulter_page_first():
 def test_list_workspace_members_posts_perimetre_id():
     """list_workspace_members() POSTs perimetre_id=slug to listerUtilisateursAdminDroits."""
     client = _make_client()
-    client.session.get.return_value.text = _CSRF_HTML
     client.session.post.return_value.json.return_value = {}
 
     client.list_workspace_members(SLUG)
@@ -210,7 +214,6 @@ def test_list_workspace_members_posts_perimetre_id():
 def test_list_workspace_members_extracts_name_firstname_email():
     """list_workspace_members() maps each entry's nested utilisateur to {name, firstName, email}."""
     client = _make_client()
-    client.session.get.return_value.text = _CSRF_HTML
     client.session.post.return_value.json.return_value = {
         "DUPONT_Jean_1234567": {
             "utilisateur": {
@@ -236,7 +239,6 @@ def test_list_workspace_members_extracts_name_firstname_email():
 def test_list_workspace_members_empty_when_no_members():
     """list_workspace_members() returns an empty list when the API returns no entries."""
     client = _make_client()
-    client.session.get.return_value.text = _CSRF_HTML
     client.session.post.return_value.json.return_value = {}
 
     result = client.list_workspace_members(SLUG)

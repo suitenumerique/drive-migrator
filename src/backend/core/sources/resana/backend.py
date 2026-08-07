@@ -53,8 +53,13 @@ class ResanaSourceBackend(AbstractSourceBackend):
         client.download_file(file.download_url, destination_path)
 
     def prepare_export(self, workspace, local_folder_path: str) -> None:
-        token = ResanaTokenManager(workspace.migration_user).get_valid_token()
-        client = ResanaMembersClient(token, settings.RESANA_WEB_ENDPOINT)
+        manager = ResanaTokenManager(workspace.migration_user)
+        client = ResanaMembersClient(
+            access_token=manager.get_valid_token(),
+            session_id=manager.get_session_id(),
+            csrf_token=manager.get_csrf_token(),
+            base_url=settings.RESANA_WEB_ENDPOINT,
+        )
         slug = client.find_slug_by_workspace_name(workspace.title)
         if slug is None:
             return

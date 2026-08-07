@@ -458,9 +458,16 @@ def test_prepare_export_uses_migration_user_token(settings):
 
     with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
         mock_tm.return_value.get_valid_token.return_value = "tok"
+        mock_tm.return_value.get_session_id.return_value = "sess-id"
+        mock_tm.return_value.get_csrf_token.return_value = "csrf-value"
         with patch("core.sources.resana.backend.ResanaMembersClient") as mock_client:
             _patch_members_client(mock_client)
             ResanaSourceBackend().prepare_export(workspace, "/tmp/workdir")
 
     mock_tm.assert_called_once_with(user)
-    mock_client.assert_called_once_with("tok", "https://resana-web.example.test")
+    mock_client.assert_called_once_with(
+        access_token="tok",
+        session_id="sess-id",
+        csrf_token="csrf-value",
+        base_url="https://resana-web.example.test",
+    )
