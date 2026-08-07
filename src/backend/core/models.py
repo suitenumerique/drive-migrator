@@ -216,14 +216,23 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
     )
 
     # Resana tokens stored for async Celery tasks (source Resana migration).
-    # Populated via the /api/v1.0/resana/auth/connect endpoint (Keycloak flow).
+    # Populated via the /api/v1.0/resana/auth/connect + callback endpoints
+    # (resana-migrator Keycloak client, PKCE flow).
+    # resana_refresh_token holds the Keycloak *offline* token (48h max / 1h
+    # idle), used to renew the bridge session without user interaction.
+    # resana_access_token holds the bridge's interstis_access (bearer for the
+    # GED API v1), short-lived and recreated on each refresh via the bridge.
     resana_access_token = models.TextField(blank=True, default="")
     resana_refresh_token = models.TextField(blank=True, default="")
     resana_token_expires_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text=_("Expiry datetime of the stored Resana access token (3h lifetime)."),
+        help_text=_("Expiry datetime of the stored Resana access token."),
     )
+    # PHPSESSID and CSRF token for the legacy portal routes, also returned by
+    # the bridge alongside interstis_access.
+    resana_session_id = models.TextField(blank=True, default="")
+    resana_csrf_token = models.TextField(blank=True, default="")
 
     objects = auth_models.UserManager()
 

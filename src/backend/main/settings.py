@@ -177,8 +177,14 @@ class Base(Configuration):
     RESANA_KEYCLOAK_ENDPOINT = values.Value(
         environ_name="RESANA_KEYCLOAK_ENDPOINT", environ_prefix=None
     )
-    RESANA_AUTHSERVICE_ENDPOINT = values.Value(
-        environ_name="RESANA_AUTHSERVICE_ENDPOINT", environ_prefix=None
+    RESANA_MIGRATOR_CLIENT_ID = values.Value(
+        "resana-migrator", environ_name="RESANA_MIGRATOR_CLIENT_ID", environ_prefix=None
+    )
+    RESANA_MIGRATOR_CLIENT_SECRET = values.Value(
+        environ_name="RESANA_MIGRATOR_CLIENT_SECRET", environ_prefix=None
+    )
+    RESANA_MIGRATOR_REDIRECT_URI = values.Value(
+        environ_name="RESANA_MIGRATOR_REDIRECT_URI", environ_prefix=None
     )
     RESANA_OTP_CHALLENGE_TTL = values.IntegerValue(
         120, environ_name="RESANA_OTP_CHALLENGE_TTL", environ_prefix=None
