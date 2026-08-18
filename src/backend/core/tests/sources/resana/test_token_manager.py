@@ -554,6 +554,49 @@ def test_refresh_raises_token_expired_when_bridge_response_is_malformed(settings
 
 
 # ---------------------------------------------------------------------------
+# get_valid_token() — concurrent refreshes for the same user
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_refresh_loser_must_not_clobber_the_winners_tokens(settings):
+    """Two workers refreshing the same user's expired token (e.g. two workspace
+    exports) each hold their own in-memory User. Worker A refreshes first and
+    Keycloak rotates the offline token; worker B then submits the now-stale
+    offline token, gets a 400, and must NOT wipe the fresh tokens A just stored.
+    """
+    settings.RESANA_KEYCLOAK_ENDPOINT = "https://kc.example.com/realms/ONHEXAGONE"
+    settings.RESANA_MIGRATOR_CLIENT_ID = "resana-migrator"
+    settings.RESANA_MIGRATOR_CLIENT_SECRET = "s3cr3t"
+    settings.RESANA_WEB_ENDPOINT = "https://resana.example.com"
+    user_a = _make_user_with_migrator_tokens(settings)
+    user_b = type(user_a).objects.get(pk=user_a.pk)  # stale copy, as another worker
+    new_access = _make_access_jwt()
+
+    rotated = requests.HTTPError("400 Bad Request")
+    rotated.response = MagicMock(status_code=400)
+
+    with patch(
+        "core.sources.resana.token_manager.refresh_offline_token",
+        side_effect=[
+            {"access_token": _make_access_jwt(), "refresh_token": "new-off"},
+            rotated,
+        ],
+    ), patch("core.sources.resana.token_manager.create_bridge_session") as mock_bridge:
+        mock_bridge.return_value = {
+            "plateformeSessionId": "new-sess",
+            "interstis_access": new_access,
+            "csrfToken": "new-csrf",
+        }
+        assert ResanaTokenManager(user_a).get_valid_token() == new_access
+        assert ResanaTokenManager(user_b).get_valid_token() == new_access
+
+    user_a.refresh_from_db()
+    assert decrypt_token(user_a.resana_refresh_token) == "new-off"
+    assert decrypt_token(user_a.resana_session_id) == "new-sess"
+    assert ResanaTokenManager(user_a).is_connected()
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

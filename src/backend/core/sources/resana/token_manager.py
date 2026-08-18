@@ -4,6 +4,7 @@ import datetime
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 
 import jwt
@@ -18,6 +19,16 @@ from core.sources.resana.migrator_auth import (
 )
 
 REFRESH_BUFFER_SECONDS = 60
+# Upper bound on how long one worker may hold the per-user refresh lock: covers
+# the two upstream calls (Keycloak + bridge, 30s timeout each) with margin.
+REFRESH_LOCK_TIMEOUT_SECONDS = 90
+RESANA_TOKEN_FIELDS = (
+    "resana_access_token",
+    "resana_refresh_token",
+    "resana_session_id",
+    "resana_csrf_token",
+    "resana_token_expires_at",
+)
 
 
 class ResanaTokenExpired(Exception):
@@ -58,7 +69,7 @@ class ResanaTokenManager:
         self.user.resana_session_id = ""
         self.user.resana_csrf_token = ""
         self.user.resana_token_expires_at = None
-        self.user.save()
+        self.user.save(update_fields=RESANA_TOKEN_FIELDS)
 
     def store_tokens(
         self,
@@ -77,7 +88,7 @@ class ResanaTokenManager:
         self.user.resana_session_id = encrypt_token(session_id)
         self.user.resana_csrf_token = encrypt_token(csrf_token)
         self.user.resana_token_expires_at = _token_expires_at(access_token)
-        self.user.save()
+        self.user.save(update_fields=RESANA_TOKEN_FIELDS)
 
     def get_session_id(self) -> str:
         """Return the decrypted PHPSESSID for the legacy portal routes."""
@@ -91,19 +102,32 @@ class ResanaTokenManager:
         """Return a valid decrypted access token, refreshing proactively if near expiry.
 
         Raises ResanaTokenExpired if expired and no refresh token is stored.
-        """
-        expires_at = self.user.resana_token_expires_at
-        buffer = timedelta(seconds=REFRESH_BUFFER_SECONDS)
-        token_is_fresh = expires_at is not None and timezone.now() < expires_at - buffer
 
-        if not token_is_fresh:
-            if not self.user.resana_refresh_token:
-                raise ResanaTokenExpired(
-                    "Resana access token expired and no refresh token is stored."
-                )
-            self._refresh()
+        Refreshes are serialized per user: concurrent workers (e.g. several
+        workspace exports) would otherwise each submit the same offline token,
+        and the loser would clear the tokens the winner just stored.
+        """
+        if self._token_is_fresh():
+            return decrypt_token(self.user.resana_access_token)
+
+        with cache.lock(
+            f"resana:refresh:{self.user.pk}", timeout=REFRESH_LOCK_TIMEOUT_SECONDS
+        ):
+            # Another worker may have refreshed while we waited for the lock.
+            self.user.refresh_from_db(fields=RESANA_TOKEN_FIELDS)
+            if not self._token_is_fresh():
+                if not self.user.resana_refresh_token:
+                    raise ResanaTokenExpired(
+                        "Resana access token expired and no refresh token is stored."
+                    )
+                self._refresh()
 
         return decrypt_token(self.user.resana_access_token)
+
+    def _token_is_fresh(self) -> bool:
+        expires_at = self.user.resana_token_expires_at
+        buffer = timedelta(seconds=REFRESH_BUFFER_SECONDS)
+        return expires_at is not None and timezone.now() < expires_at - buffer
 
     def _refresh(self) -> None:
         """Renew the stored access token and Resana session from the offline token.
