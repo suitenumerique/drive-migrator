@@ -48,6 +48,7 @@ and this project adheres to
 
 ### Changed
 
+- update zip archive download journey
 - update cunningham tokens
 - replace unmaintained retry package with tenacity
 - switch Resana source auth to PKCE + bridge flow #190

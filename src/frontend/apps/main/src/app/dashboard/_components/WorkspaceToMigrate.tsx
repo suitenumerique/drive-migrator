@@ -5,7 +5,6 @@ import {
   Button,
   Loader,
   VariantType,
-  useToastProvider,
 } from '@gouvfr-lasuite/cunningham-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -45,7 +44,6 @@ export const WorkspacesToMigrate = ({
   const router = useRouter();
   const { t } = useTranslation();
   const { fetchApi } = useApi();
-  const { toast } = useToastProvider();
   const [isDownloading, setIsDownloading] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
   const [isSharedAccessModalOpen, setIsSharedAccessModalOpen] = useState(false);
@@ -148,16 +146,7 @@ export const WorkspacesToMigrate = ({
         { closableError: true },
       );
 
-      toast(
-        t(
-          'Demande de téléchargement prise en compte. Un e-mail vous sera envoyé lorsque votre téléchargement sera prêt.',
-        ),
-        VariantType.INFO,
-        {
-          primaryLabel: t('OK'),
-          icon: <span className="material-icons">mail</span>,
-        },
-      );
+      router.push('/finish');
     } finally {
       setIsDownloading(false);
     }
