@@ -48,6 +48,7 @@ and this project adheres to
 
 ### Changed
 
+- add tooltip for cropped title
 - update zip archive download journey
 - specify logo fichiers
 - update cunningham tokens
