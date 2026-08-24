@@ -44,6 +44,7 @@ and this project adheres to
 - add optional setting to cap migrated files per workspace.
 - add MFA/OTP support to Resana Keycloak login flow
 - add migration user email/name columns and search to workspace admin #143
+- add admin actions to reset a user's Resana or Drive connection #198
 
 ### Changed
 

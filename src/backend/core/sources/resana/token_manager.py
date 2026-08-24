@@ -29,6 +29,7 @@ RESANA_TOKEN_FIELDS = (
     "resana_csrf_token",
     "resana_token_expires_at",
 )
+RESANA_TOKEN_CLEAR_FIELDS = RESANA_TOKEN_FIELDS + ("updated_at",)
 
 
 class ResanaTokenExpired(Exception):
@@ -69,7 +70,7 @@ class ResanaTokenManager:
         self.user.resana_session_id = ""
         self.user.resana_csrf_token = ""
         self.user.resana_token_expires_at = None
-        self.user.save(update_fields=RESANA_TOKEN_FIELDS)
+        self.user.save(update_fields=RESANA_TOKEN_CLEAR_FIELDS)
 
     def store_tokens(
         self,

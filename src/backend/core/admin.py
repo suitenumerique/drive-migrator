@@ -9,7 +9,9 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from core.api.views.workspaces_process import push_workspace_task
+from core.destinations.drive.drive_backend import clear_drive_tokens
 from core.destinations.resana.resana_backend import ResanaBackend
+from core.sources.resana.token_manager import ResanaTokenManager
 
 from . import models
 from .models import ExtraTaskInfo, Workspace
@@ -81,6 +83,25 @@ class UserAdmin(auth_admin.UserAdmin):
     list_filter = ("is_staff", "is_superuser", "is_device", "is_active")
     ordering = ("is_active", "-is_superuser", "-is_staff", "-is_device", "-updated_at")
     search_fields = ("id", "sub", "admin_email", "email")
+    actions = ["reset_resana_connection", "reset_drive_connection"]
+
+    def reset_resana_connection(self, request, queryset):
+        for user in queryset:
+            ResanaTokenManager(user).clear_tokens()
+        self.message_user(
+            request, f"Resana connection reset for {queryset.count()} user(s)."
+        )
+
+    reset_resana_connection.short_description = "Reset Resana connection"
+
+    def reset_drive_connection(self, request, queryset):
+        for user in queryset:
+            clear_drive_tokens(user)
+        self.message_user(
+            request, f"Drive connection reset for {queryset.count()} user(s)."
+        )
+
+    reset_drive_connection.short_description = "Reset Drive connection"
 
     def get_readonly_fields(self, request, obj=None):
         fields = (

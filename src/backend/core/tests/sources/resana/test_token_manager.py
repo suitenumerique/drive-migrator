@@ -230,6 +230,7 @@ def test_clear_tokens_clears_the_bridge_session_fields_too(settings):
         csrf_token="csrf-value",
     )
 
+    previous_updated_at = user.updated_at
     ResanaTokenManager(user).clear_tokens()
 
     user.refresh_from_db()
@@ -238,6 +239,7 @@ def test_clear_tokens_clears_the_bridge_session_fields_too(settings):
     assert user.resana_session_id == ""
     assert user.resana_csrf_token == ""
     assert user.resana_token_expires_at is None
+    assert user.updated_at > previous_updated_at
 
 
 # ---------------------------------------------------------------------------

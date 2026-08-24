@@ -72,6 +72,21 @@ def _is_upload_already_processed(error: HTTPError) -> bool:
     )
 
 
+def clear_drive_tokens(user) -> None:
+    """Remove the stored Drive (ProConnect) tokens, forcing the user to log in again."""
+    user.oidc_access_token = ""
+    user.oidc_refresh_token = ""
+    user.oidc_token_expires_at = None
+    user.save(
+        update_fields=[
+            "oidc_access_token",
+            "oidc_refresh_token",
+            "oidc_token_expires_at",
+            "updated_at",
+        ]
+    )
+
+
 def user_has_usable_drive_token(user) -> bool:
     """Return True if user has a Drive token that can be used or refreshed."""
     has_access = bool(user.oidc_access_token)
