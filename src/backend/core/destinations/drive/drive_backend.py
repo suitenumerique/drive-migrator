@@ -165,8 +165,13 @@ class DriveBackend:
     def upload_to_s3(self, policy_url: str, file_path: str) -> None:
         """Step 2: Upload file content directly to the S3 presigned URL (no Drive token)."""
         with open(file_path, "rb") as f:
-            response = requests.put(
-                policy_url, data=f.read(), headers={"x-amz-acl": "private"}, timeout=300
+            response = requests.put(policy_url, data=f.read(), timeout=300)
+        if not response.ok:
+            logger.error(
+                "S3 upload failed (%s) for %s: %s",
+                response.status_code,
+                file_path,
+                response.text[:2000],
             )
         response.raise_for_status()
 

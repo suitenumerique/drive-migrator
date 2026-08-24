@@ -280,9 +280,30 @@ def test_service_account_upload_to_s3_puts_file_content():
     mock_requests.put.assert_called_once_with(
         policy_url,
         data=file_content,
-        headers={"x-amz-acl": "private"},
         timeout=300,
     )
+
+
+def test_service_account_upload_to_s3_logs_response_body_on_error():
+    """A failed S3 PUT logs the error response body before raising."""
+    policy_url = "https://s3.example.com/file.pdf?sig=x"
+    error_response = MagicMock()
+    error_response.ok = False
+    error_response.status_code = 400
+    error_response.text = "<Error><Code>SignatureDoesNotMatch</Code></Error>"
+    error_response.raise_for_status.side_effect = HTTPError(response=error_response)
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch("core.destinations.drive.drive_backend.logger") as mock_logger,
+        patch("builtins.open", mock_open(read_data=b"binary content")),
+        pytest.raises(HTTPError),
+    ):
+        mock_requests.put.return_value = error_response
+        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
+
+    mock_logger.error.assert_called_once()
+    assert "SignatureDoesNotMatch" in mock_logger.error.call_args[0][3]
 
 
 def test_service_account_upload_to_s3_retries_on_connection_error_then_succeeds():
