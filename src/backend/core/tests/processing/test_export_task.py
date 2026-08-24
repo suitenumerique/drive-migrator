@@ -226,6 +226,38 @@ def test_export_saves_download_errors_with_update_fields(workspace, user, settin
     workspace.save.assert_called_once_with(update_fields=["download_errors"])
 
 
+def test_export_fails_when_all_downloads_fail(workspace, user):
+    """export() raises instead of returning True when every download failed,
+    and no destination export runs."""
+    failed_files = [
+        {"name": "a.docx", "error": "boom"},
+        {"name": "b.docx", "error": "boom"},
+    ]
+    dest_backend = MagicMock()
+    dest_backend.name = "archive"
+
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator") as mock_fc,
+        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
+    ):
+        mock_sm.return_value.get_backend.return_value.get_workspace_structure.return_value = SourceFolder(
+            name="root"
+        )
+        mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
+        mock_fc.return_value.failed_files = failed_files
+        mock_fc.return_value.files_count = 2
+        mock_fc.return_value.files_success = 0
+        mock_dr.get_all.return_value = [dest_backend]
+
+        with pytest.raises(RuntimeError):
+            export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+
+    dest_backend.export.assert_not_called()
+
+
 def test_export_calls_each_pending_destination(workspace, user):
     """export() calls export() on each destination backend whose status is PENDING."""
     workspace.get_destination_status.return_value = Workspace.Status.PENDING

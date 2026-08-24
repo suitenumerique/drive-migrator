@@ -114,6 +114,12 @@ def export(self, data):  # pylint: disable=unused-argument
             creator.failed_files,
         )
 
+    if creator.files_count and creator.files_success == 0:
+        raise RuntimeError(
+            f"All {creator.files_count} file(s) failed to download for "
+            f"workspace {workspace.id}"
+        )
+
     list_workspace_dir(workspace)
 
     logger.info("Calling prepare_export ...")
