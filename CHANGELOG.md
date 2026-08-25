@@ -51,6 +51,7 @@ and this project adheres to
 - add tooltip for cropped title
 - update zip archive download journey
 - specify logo fichiers
+- derive DRIVE_API_BASE_URL and DRIVE_FRONTEND_URL from DRIVE_BASE_URL #103
 - update cunningham tokens
 - replace unmaintained retry package with tenacity
 - switch Resana source auth to PKCE + bridge flow #190

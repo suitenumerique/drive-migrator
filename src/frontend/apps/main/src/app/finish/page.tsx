@@ -13,6 +13,7 @@ import {
   MigrationTarget,
   isMigrationTarget,
 } from '@/core/migrationTarget';
+import { useMigrationConfig } from '@/hooks/useMigrationConfig';
 
 import './page.scss';
 
@@ -20,7 +21,6 @@ enum MigrationTargetKind {
   ArchiveZip = 'archive-zip',
 }
 
-const FICHIERS_URL = 'https://fichiers.numerique.gouv.fr';
 const LASUITE_URL = 'https://lasuite.numerique.gouv.fr';
 
 export default function Finish() {
@@ -37,6 +37,7 @@ export default function Finish() {
   }, []);
 
   const isArchiveZipTarget = migrationTarget === MigrationTargetKind.ArchiveZip;
+  const { driveFrontendUrl } = useMigrationConfig();
 
   return (
     <div className="container">
@@ -93,7 +94,8 @@ export default function Finish() {
                   variant="secondary"
                   fullWidth
                   color="brand"
-                  href={FICHIERS_URL}
+                  href={driveFrontendUrl}
+                  disabled={!driveFrontendUrl}
                   target="_blank"
                 >
                   {t('Accéder à Fichiers')}

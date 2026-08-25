@@ -253,10 +253,20 @@ class Base(Configuration):
         environ_name="FILESYSTEM_SOURCE_ROOT", environ_prefix=None, default="/demo-data"
     )
 
-    # La Suite Drive
-    DRIVE_API_BASE_URL = values.Value(
-        environ_name="DRIVE_API_BASE_URL", environ_prefix=None, default=""
+    # La Suite Drive base URL, used both for backend API calls and as the public
+    # URL linked to from the frontend (e.g. end of migration screen).
+    DRIVE_BASE_URL = values.Value(
+        "", environ_name="DRIVE_BASE_URL", environ_prefix=None
     )
+    # Optional overrides when the API and the public frontend are not reachable
+    # at the same URL (e.g. an internal network address for backend calls).
+    DRIVE_API_BASE_URL = values.Value(
+        DRIVE_BASE_URL, environ_name="DRIVE_API_BASE_URL", environ_prefix=None
+    )
+    DRIVE_FRONTEND_URL = values.Value(
+        DRIVE_BASE_URL, environ_name="DRIVE_FRONTEND_URL", environ_prefix=None
+    )
+
     DRIVE_OIDC_TOKEN_ENDPOINT = values.Value(
         environ_name="DRIVE_OIDC_TOKEN_ENDPOINT", environ_prefix=None, default=""
     )

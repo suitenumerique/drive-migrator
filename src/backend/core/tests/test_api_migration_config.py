@@ -17,7 +17,10 @@ def test_migration_config_anonymous():
     assert response.status_code == 401
 
 
-@override_settings(MIGRATION_FILE_LIMIT_PER_WORKSPACE=0)
+@override_settings(
+    MIGRATION_FILE_LIMIT_PER_WORKSPACE=0,
+    DRIVE_FRONTEND_URL="https://drive.example.com",
+)
 def test_migration_config_reports_unlimited():
     """When the limit setting is 0, the endpoint reports it as-is."""
     user = factories.UserFactory()
@@ -26,10 +29,16 @@ def test_migration_config_reports_unlimited():
 
     response = client.get("/api/v1.0/migration-config")
     assert response.status_code == 200
-    assert response.json() == {"file_limit_per_workspace": 0}
+    assert response.json() == {
+        "file_limit_per_workspace": 0,
+        "drive_frontend_url": "https://drive.example.com",
+    }
 
 
-@override_settings(MIGRATION_FILE_LIMIT_PER_WORKSPACE=10)
+@override_settings(
+    MIGRATION_FILE_LIMIT_PER_WORKSPACE=10,
+    DRIVE_FRONTEND_URL="https://drive.example.com",
+)
 def test_migration_config_reports_configured_limit():
     """When the limit setting is set, the endpoint reports its value."""
     user = factories.UserFactory()
@@ -38,4 +47,19 @@ def test_migration_config_reports_configured_limit():
 
     response = client.get("/api/v1.0/migration-config")
     assert response.status_code == 200
-    assert response.json() == {"file_limit_per_workspace": 10}
+    assert response.json() == {
+        "file_limit_per_workspace": 10,
+        "drive_frontend_url": "https://drive.example.com",
+    }
+
+
+@override_settings(DRIVE_FRONTEND_URL="https://drive.example.com/custom")
+def test_migration_config_reports_drive_frontend_url():
+    """The endpoint reports the configured Drive frontend URL."""
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    response = client.get("/api/v1.0/migration-config")
+    assert response.status_code == 200
+    assert response.json()["drive_frontend_url"] == "https://drive.example.com/custom"

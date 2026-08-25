@@ -14,5 +14,6 @@ class MigrationConfigApiView(APIView):
         return Response(
             {
                 "file_limit_per_workspace": settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE,
+                "drive_frontend_url": settings.DRIVE_FRONTEND_URL,
             }
         )

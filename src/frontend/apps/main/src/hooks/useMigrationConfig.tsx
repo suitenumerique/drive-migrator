@@ -4,6 +4,7 @@ import { useApi } from '@/hooks/useApi';
 
 interface MigrationConfig {
   file_limit_per_workspace: number;
+  drive_frontend_url: string;
 }
 
 export const useMigrationConfig = () => {
@@ -22,5 +23,6 @@ export const useMigrationConfig = () => {
 
   return {
     fileLimitPerWorkspace: config?.file_limit_per_workspace ?? 0,
+    driveFrontendUrl: config?.drive_frontend_url,
   };
 };
