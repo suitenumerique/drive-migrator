@@ -1,4 +1,4 @@
-FROM node:20-alpine as frontend-deps
+FROM node:24-alpine AS frontend-deps
 
 WORKDIR /home/frontend/
 
@@ -13,11 +13,11 @@ COPY .dockerignore ./.dockerignore
 COPY ./src/frontend/ .
 
 ### ---- Front-end builder image ----
-FROM frontend-deps as main
+FROM frontend-deps AS main
 
 WORKDIR /home/frontend/apps/main
 
-FROM frontend-deps as main-dev
+FROM frontend-deps AS main-dev
 
 WORKDIR /home/frontend/apps/main
 
@@ -27,7 +27,7 @@ CMD [ "yarn", "dev"]
 
 # Tilt will rebuild main target so, we dissociate main and main-builder
 # to avoid rebuilding the app at every changes.
-FROM main as main-builder
+FROM main AS main-builder
 
 ARG NEXT_PUBLIC_API_ORIGIN
 ENV NEXT_PUBLIC_API_ORIGIN=${NEXT_PUBLIC_API_ORIGIN}
@@ -40,7 +40,7 @@ WORKDIR /home/frontend/apps/main
 RUN yarn build
 
 # ---- Front-end image ----
-FROM nginxinc/nginx-unprivileged:alpine3.21 as frontend-production
+FROM nginxinc/nginx-unprivileged:alpine3.21 AS frontend-production
 
 # Un-privileged user running the application
 ARG DOCKER_USER
