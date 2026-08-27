@@ -1,14 +1,14 @@
-"""Tests for the UserAdmin token-reset actions."""
+"""Tests for the UserAdmin token-reset actions and the Workspace changelist."""
 
 from django.contrib import admin
 from django.contrib.messages.storage.fallback import FallbackStorage
-from django.test import RequestFactory
+from django.test import Client, RequestFactory
 from django.utils import timezone
 
 import pytest
 
 from core.admin import UserAdmin
-from core.factories import UserFactory
+from core.factories import UserFactory, WorkspaceFactory
 from core.models import User
 
 pytestmark = pytest.mark.django_db
@@ -87,3 +87,15 @@ def test_reset_resana_connection_applies_to_every_selected_user():
     for user in users:
         user.refresh_from_db()
         assert user.resana_access_token == ""
+
+
+def test_workspace_changelist_renders_with_migration_user():
+    """The Workspace changelist must render without crashing on User field lookups."""
+    admin_user = UserFactory(is_staff=True, is_superuser=True)
+    WorkspaceFactory(migration_user=UserFactory())
+    client = Client()
+    client.force_login(admin_user)
+
+    response = client.get("/admin/core/workspace/")
+
+    assert response.status_code == 200
