@@ -115,6 +115,7 @@ class Base(Configuration):
             "BACKEND": values.Value(
                 "whitenoise.storage.CompressedManifestStaticFilesStorage",
                 environ_name="STORAGES_STATICFILES_BACKEND",
+                environ_prefix=None,
             ),
         },
     }
