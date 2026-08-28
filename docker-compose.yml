@@ -1,4 +1,4 @@
-version: "3.8"
+name: drive-migrator
 
 services:
   postgresql:
@@ -161,7 +161,7 @@ services:
     image: jwilder/dockerize
 
   node:
-    image: node:18
+    image: node:24
     user: "${DOCKER_USER:-1000}"
     environment:
       HOME: /tmp

@@ -16,7 +16,11 @@
     "app:build": "yarn APP_MAIN run build",
     "app:test": "yarn APP_MAIN run test",
     "ci:build": "yarn APP_MAIN run build:ci",
-    "lint": "yarn APP_MAIN run lint && yarn workspace eslint-config-main run lint"
+    "lint": "yarn APP_MAIN run lint && yarn workspace eslint-config-main run lint",
+    "lint-fix": "yarn APP_MAIN run lint --fix && yarn workspace eslint-config-main run lint --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "format:fix": "prettier --write ."
   },
   "resolutions": {
     "@types/node": "20.14.2",
@@ -27,7 +31,6 @@
     "react": "19.1.2",
     "react-dom": "19.1.2",
     "react-aria-components": "1.16.0",
-    "typescript": "5.4.5",
-    "yjs": "13.6.16"
+    "typescript": "5.4.5"
   }
 }

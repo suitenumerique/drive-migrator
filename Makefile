@@ -47,12 +47,12 @@ WAIT_DB             = @$(COMPOSE_RUN) dockerize -wait tcp://$(DB_HOST):$(DB_PORT
 
 # -- Backend
 MANAGE              = $(COMPOSE_RUN_APP) python manage.py
+FRONT_YARN          = $(COMPOSE_RUN) -w //app/src/frontend node yarn
 MAIL_YARN           = $(COMPOSE_RUN) -w /app/src/mail node yarn
 TSCLIENT_YARN       = $(COMPOSE_RUN) -w /app/src/tsclient node yarn
 
 # -- Frontend
 PATH_FRONT          = ./src/frontend
-FRONTEND_YARN       = $(COMPOSE_RUN) frontend-dev yarn
 
 # ==============================================================================
 # RULES
@@ -143,7 +143,6 @@ stop-celery-flower:
 demo: ## flush db then create a demo for load testing purpose
 	@$(MAKE) resetdb
 	@$(MANAGE) create_demo
-	@python3 src/backend/demo/generate_demo_data.py --force
 .PHONY: demo
 
 # Nota bene: Black should come after isort just in case they don't agree...
@@ -267,8 +266,8 @@ help:
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(GREEN)%-30s$(RESET) %s\n", $$1, $$2}'
 .PHONY: help
 
-# Front
-run-frontend-dev: ## Install and run the frontend dev
+# Front 
+run-frontend-dev: ## Install and run the frontend dev  
 	@$(COMPOSE) up --force-recreate -d frontend-dev
 .PHONY: run-frontend-dev
 
@@ -276,9 +275,21 @@ run-frontend-prod: ## Install and run the frontend dev
 	@$(COMPOSE) up --force-recreate -d frontend-prod
 .PHONY: run-frontend-prod
 
-frontend-lint: ## lint front-end sources
-	@$(FRONTEND_YARN) lint
+frontend-lint: ## run the frontend linter
+	@$(FRONT_YARN) lint
 .PHONY: frontend-lint
+
+frontend-lint-fix: ## run the frontend linter with auto-fix option
+	@$(FRONT_YARN) lint-fix
+.PHONY: frontend-lint-fix
+
+frontend-format: ## run the frontend formatter (prettier --write)
+	@$(FRONT_YARN) format
+.PHONY: frontend-format
+
+frontend-format-check: ## check the frontend formatting (prettier --check)
+	@$(FRONT_YARN) format:check
+.PHONY: frontend-format-check
 
 # -- K8S
 build-k8s-cluster: ## build the kubernetes cluster using kind

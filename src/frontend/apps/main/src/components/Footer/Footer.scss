@@ -62,7 +62,8 @@
         color: var(--c--theme--colors--greyscale-600);
         display: flex;
         padding-right: 1rem;
-        box-shadow: inset -1px 0px 0px 0px var(--c--theme--colors--greyscale-200);
+        box-shadow: inset -1px 0px 0px 0px
+          var(--c--theme--colors--greyscale-200);
       }
     }
 
