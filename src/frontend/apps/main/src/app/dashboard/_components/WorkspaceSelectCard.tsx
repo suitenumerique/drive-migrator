@@ -1,11 +1,13 @@
 'use client';
 
-import { VariantType } from '@gouvfr-lasuite/cunningham-react';
+import { Tooltip, VariantType } from '@gouvfr-lasuite/cunningham-react';
+import { useEffect, useRef, useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/Badge/Badge';
 import { Workspace } from '@/components/Workspace/Workspace';
+import { getFrontendTheme, tokens } from '@/cunningham';
 
 import './WorkspaceSelectCard.scss';
 
@@ -28,10 +30,32 @@ export const WorkspaceSelectCard = ({
     name: workspace.id,
     defaultValue: false,
   });
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
 
   const locked = migrated || pending || failed;
   const checked = Boolean(field.value);
   const showCheck = locked || checked;
+
+  useEffect(() => {
+    const el = titleRef.current;
+    const mobileBreakpoint =
+      tokens.themes[getFrontendTheme()].globals.breakpoints.mobile;
+    const isMobile = window.matchMedia(
+      `(max-width: ${mobileBreakpoint})`,
+    ).matches;
+    setIsOverflowing(!isMobile && !!el && el.scrollWidth > el.clientWidth);
+  }, [workspace.title]);
+
+  const title = (
+    <span
+      ref={titleRef}
+      className="workspace-select-card__title"
+      aria-label={isOverflowing ? workspace.title : undefined}
+    >
+      {workspace.title}
+    </span>
+  );
 
   return (
     <button
@@ -77,7 +101,17 @@ export const WorkspaceSelectCard = ({
           </svg>
         )}
       </span>
-      <span className="workspace-select-card__title">{workspace.title}</span>
+      {isOverflowing ? (
+        <Tooltip
+          className="workspace-select-card__tooltip"
+          content={workspace.title}
+          placement="bottom"
+        >
+          {title}
+        </Tooltip>
+      ) : (
+        title
+      )}
       {migrated && workspace.is_truncated && (
         <Badge variant={VariantType.WARNING}>{t('Migration partielle')}</Badge>
       )}

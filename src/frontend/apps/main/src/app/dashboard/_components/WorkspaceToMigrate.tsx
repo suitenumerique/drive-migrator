@@ -286,6 +286,7 @@ export const WorkspacesToMigrate = ({
 
         {selectableWorkspaces.length > 0 && (
           <Button
+            className="workspaces-to-migrate__select-all"
             variant="tertiary"
             color="brand"
             size="medium"

@@ -12,11 +12,23 @@
     justify-content: space-between;
     margin-bottom: 1.5rem;
     margin-top: 1.5rem;
+
+    @media (max-width: var(--c--globals--breakpoints--mobile)) {
+      flex-direction: column;
+      gap: 1rem;
+      align-items: stretch;
+    }
   }
 
   &__intro {
     flex: 1;
     min-width: 0;
+    width: 100%;
+
+    .workspaces-to-migrate__alert {
+      margin-top: 0.75rem;
+      margin-bottom: 0;
+    }
   }
 
   &__title {
@@ -36,22 +48,15 @@
 
   &__select-all {
     flex-shrink: 0;
-    padding: 0.25rem 0 0;
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--c--contextuals--content--semantic--brand--primary);
-    cursor: pointer;
-    background: none;
-    border: none;
-    text-decoration: underline;
-    text-underline-offset: 2px;
 
-    &:hover {
-      color: var(--c--contextuals--content--semantic--brand--secondary);
+    @media (max-width: var(--c--globals--breakpoints--mobile)) {
+      width: 100%;
+      justify-content: center;
     }
   }
 
   &__alert {
+    width: 100%;
     margin-bottom: 1rem;
   }
 

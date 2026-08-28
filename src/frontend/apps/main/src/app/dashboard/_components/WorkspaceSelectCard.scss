@@ -80,6 +80,23 @@
     white-space: nowrap;
   }
 
+  @media (max-width: var(--c--globals--breakpoints--mobile)) {
+    align-items: flex-start;
+
+    &__title {
+      overflow: visible;
+      text-overflow: unset;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  &__tooltip {
+    max-width: min(28rem, 90vw);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   &__status {
     flex-shrink: 0;
     display: inline-flex;
