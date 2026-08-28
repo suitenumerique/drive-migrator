@@ -48,6 +48,7 @@ and this project adheres to
 
 ### Changed
 
+- update zip archive download journey
 - specify logo fichiers
 - update cunningham tokens
 - replace unmaintained retry package with tenacity

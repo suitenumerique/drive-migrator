@@ -3,12 +3,22 @@
 import { Button } from '@gouvfr-lasuite/cunningham-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import migrationResanaIllustration from '@/assets/images/migrator-illustration.svg?url';
 import { ArrowLeftIcon } from '@/components/icons/ArrowLeftIcon';
+import {
+  MIGRATION_TARGET_STORAGE_KEY,
+  MigrationTarget,
+  isMigrationTarget,
+} from '@/core/migrationTarget';
 
 import './page.scss';
+
+enum MigrationTargetKind {
+  ArchiveZip = 'archive-zip',
+}
 
 const FICHIERS_URL = 'https://fichiers.numerique.gouv.fr';
 const LASUITE_URL = 'https://lasuite.numerique.gouv.fr';
@@ -16,6 +26,17 @@ const LASUITE_URL = 'https://lasuite.numerique.gouv.fr';
 export default function Finish() {
   const { t } = useTranslation();
   const router = useRouter();
+  const [migrationTarget, setMigrationTarget] =
+    useState<MigrationTarget>('lasuite-fichiers');
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem(MIGRATION_TARGET_STORAGE_KEY);
+    if (isMigrationTarget(stored)) {
+      setMigrationTarget(stored);
+    }
+  }, []);
+
+  const isArchiveZipTarget = migrationTarget === MigrationTargetKind.ArchiveZip;
 
   return (
     <div className="container">
@@ -38,35 +59,58 @@ export default function Finish() {
             priority
           />
 
-          <h1 className="page-finish__title">{t('Migration en cours')}</h1>
+          <h1 className="page-finish__title">
+            {isArchiveZipTarget
+              ? t('Téléchargement en préparation')
+              : t('Migration en cours')}
+          </h1>
 
           <p className="page-finish__description">
-            {t(
-              'Vos espaces sont en cours de migration. Vous recevrez un e-mail quand tout sera prêt.',
-            )}
+            {isArchiveZipTarget
+              ? t(
+                  'Vos espaces sont en cours de préparation pour être migrés. Vous recevrez un e-mail quand tout sera prêt. Vous pouvez fermer cette page.',
+                )
+              : t(
+                  'Vos espaces sont en cours de migration. Vous recevrez un e-mail quand tout sera prêt.',
+                )}
           </p>
 
           <div className="page-finish__actions">
-            <Button
-              variant="secondary"
-              fullWidth
-              color="brand"
-              href={FICHIERS_URL}
-              target="_blank"
-            >
-              {t('Accéder à Fichiers')}
-            </Button>
+            {isArchiveZipTarget ? (
+              <Button
+                variant="tertiary"
+                fullWidth
+                color="neutral"
+                href={LASUITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t('Démarrer avec LaSuite')}
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="secondary"
+                  fullWidth
+                  color="brand"
+                  href={FICHIERS_URL}
+                  target="_blank"
+                >
+                  {t('Accéder à Fichiers')}
+                </Button>
 
-            <Button
-              variant="tertiary"
-              fullWidth
-              color="neutral"
-              href={LASUITE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t('Démarrer avec LaSuite')}
-            </Button>
+                <Button
+                  variant="tertiary"
+                  fullWidth
+                  color="neutral"
+                  href={LASUITE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {t('Démarrer avec LaSuite')}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>
