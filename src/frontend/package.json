@@ -23,14 +23,14 @@
     "format:fix": "prettier --write ."
   },
   "resolutions": {
-    "@types/node": "20.14.2",
-    "@types/react": "19.1.8",
-    "@types/react-dom": "19.1.6",
-    "@gouvfr-lasuite/cunningham-react": "4.3.0",
-    "cross-env": "7.0.3",
+    "@types/node": "24.13.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@gouvfr-lasuite/cunningham-react": "4.4.0",
+    "cross-env": "10.1.0",
     "react": "19.1.2",
     "react-dom": "19.1.2",
-    "react-aria-components": "1.16.0",
-    "typescript": "5.4.5"
+    "react-aria-components": "1.20.0",
+    "typescript": "7.0.2"
   }
 }
