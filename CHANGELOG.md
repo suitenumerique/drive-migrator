@@ -67,6 +67,7 @@ and this project adheres to
 - fix lint-git print() check matching removed lines instead of only added ones
 - fix error modal looping infinitely on connect page #138
 - retry Drive upload-ended notification on transient network timeouts #176
+- retry Drive API calls on transient 5xx errors instead of failing #208
 - retry Resana file download and skip failing files instead of aborting #175
 
 ### Removed
