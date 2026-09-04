@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import migrationResanaIllustration from '@/assets/images/migrator-illustration.svg?url';
 import { ArrowLeftIcon } from '@/components/icons/ArrowLeftIcon';
 import {
   MIGRATION_TARGET_STORAGE_KEY,
@@ -22,6 +21,7 @@ enum MigrationTargetKind {
 }
 
 const LASUITE_URL = 'https://lasuite.numerique.gouv.fr';
+const MIGRATION_ILLUSTRATION_SRC = '/assets/migrator-illustration.svg';
 
 export default function Finish() {
   const { t } = useTranslation();
@@ -52,7 +52,7 @@ export default function Finish() {
       <div className="container--center page-finish">
         <div className="page-finish__content">
           <Image
-            src={migrationResanaIllustration}
+            src={MIGRATION_ILLUSTRATION_SRC}
             alt=""
             className="page-finish__illustration"
             width={400}
