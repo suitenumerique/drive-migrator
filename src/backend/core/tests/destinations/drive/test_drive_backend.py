@@ -2,6 +2,7 @@
 
 # pylint: disable=protected-access
 
+import uuid
 from datetime import timedelta
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -20,6 +21,20 @@ from core.destinations.drive.drive_backend import (
 from core.encryption import decrypt_token, encrypt_token
 
 TEST_KEY = Fernet.generate_key().decode()
+
+# Item id generated client-side by create_folder/create_subfolder/create_file_item,
+# so the tests below can assert on it and simulate Drive's /items/{id}/ lookup.
+FAKE_ITEM_ID = "11111111-1111-1111-1111-111111111111"
+
+
+@pytest.fixture(autouse=True)
+def fixed_item_id():
+    """Make the client-generated item id deterministic for assertions."""
+    with patch(
+        "core.destinations.drive.drive_backend.uuid.uuid4",
+        return_value=uuid.UUID(FAKE_ITEM_ID),
+    ):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -205,7 +220,7 @@ def test_service_account_create_folder_uses_external_api(settings):
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/",
-        json={"type": "folder", "title": "My Workspace"},
+        json={"id": FAKE_ITEM_ID, "type": "folder", "title": "My Workspace"},
         headers={"Authorization": "Bearer tok"},
         timeout=30,
     )
@@ -227,7 +242,7 @@ def test_service_account_create_subfolder(settings):
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/parent-uuid/children/",
-        json={"type": "folder", "title": "docs"},
+        json={"id": FAKE_ITEM_ID, "type": "folder", "title": "docs"},
         headers={"Authorization": "Bearer tok"},
         timeout=30,
     )
@@ -257,7 +272,7 @@ def test_service_account_create_file_item(settings):
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/folder-uuid/children/",
-        json={"type": "file", "filename": "doc.pdf"},
+        json={"id": FAKE_ITEM_ID, "type": "file", "filename": "doc.pdf"},
         headers={"Authorization": "Bearer tok"},
         timeout=30,
     )
@@ -712,7 +727,7 @@ def test_user_token_create_folder_uses_api_v1(settings):
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/api/v1.0/items/",
-        json={"type": "folder", "title": "My Workspace"},
+        json={"id": FAKE_ITEM_ID, "type": "folder", "title": "My Workspace"},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
     )
@@ -731,7 +746,7 @@ def test_user_token_create_subfolder_uses_api_v1(settings):
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/api/v1.0/items/parent-uuid/children/",
-        json={"type": "folder", "title": "docs"},
+        json={"id": FAKE_ITEM_ID, "type": "folder", "title": "docs"},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
     )
@@ -755,7 +770,7 @@ def test_user_token_create_file_item_uses_api_v1(settings):
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/api/v1.0/items/folder-uuid/children/",
-        json={"type": "file", "filename": "doc.pdf"},
+        json={"id": FAKE_ITEM_ID, "type": "file", "filename": "doc.pdf"},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
     )
