@@ -4,6 +4,7 @@ Split out of test_drive_backend.py to stay under pylint's max-module-lines.
 """
 
 import logging
+import uuid
 from datetime import timedelta
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -19,6 +20,10 @@ from core.destinations.drive.drive_backend import DriveServiceAccountBackend
 
 TEST_KEY = Fernet.generate_key().decode()
 
+# Item id generated client-side by create_folder/create_subfolder/create_file_item,
+# so tests can assert on it and simulate Drive's GET /items/{id}/ existence check.
+FAKE_ITEM_ID = "11111111-1111-1111-1111-111111111111"
+
 
 def _server_error(status_code=500):
     """Build the HTTPError Drive raises on a transient 5xx, e.g. issue #208."""
@@ -27,6 +32,52 @@ def _server_error(status_code=500):
     error = HTTPError(f"{status_code} Server Error")
     error.response = response
     return error
+
+
+def _duplicate_id_error():
+    """Build the HTTPError Drive raises when a create POST reuses an id an earlier,
+    ambiguously-failed attempt already used - i.e. that attempt actually succeeded."""
+    response = MagicMock()
+    response.status_code = 400
+    response.json.return_value = {
+        "type": "validation_error",
+        "errors": [
+            {
+                "code": "item_create_existing_id",
+                "detail": "An item with this ID already exists. You cannot override it.",
+                "attr": "id",
+            }
+        ],
+    }
+    error = HTTPError("400 Client Error")
+    error.response = response
+    return error
+
+
+def _not_found_response():
+    """A GET /items/{id}/ response for an id Drive never created."""
+    response = MagicMock()
+    response.status_code = 404
+    return response
+
+
+def _found_response(data):
+    """A GET /items/{id}/ response for an id Drive did create despite the error."""
+    response = MagicMock()
+    response.status_code = 200
+    response.raise_for_status = MagicMock()
+    response.json.return_value = data
+    return response
+
+
+@pytest.fixture(autouse=True)
+def fixed_item_id():
+    """Make the client-generated item id deterministic for assertions."""
+    with patch(
+        "core.destinations.drive.drive_backend.uuid.uuid4",
+        return_value=uuid.UUID(FAKE_ITEM_ID),
+    ):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -138,14 +189,42 @@ def test_service_account_create_subfolder_retries_on_server_error_then_succeeds(
 
     success_response = MagicMock()
     success_response.raise_for_status = MagicMock()
-    success_response.json.return_value = {"id": "child-uuid"}
+    success_response.json.return_value = {"id": FAKE_ITEM_ID}
 
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.post.side_effect = [error_response, success_response]
+        mock_requests.get.return_value = _not_found_response()
         result = backend.create_subfolder("docs", parent_id="parent-uuid")
 
     assert mock_requests.post.call_count == 2
-    assert result["id"] == "child-uuid"
+    assert result["id"] == FAKE_ITEM_ID
+
+
+def test_service_account_create_subfolder_checks_existence_before_retrying(settings):
+    """Between attempts, the item is looked up by its client-generated id."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {"id": FAKE_ITEM_ID}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [error_response, success_response]
+        mock_requests.get.return_value = _not_found_response()
+        backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    mock_requests.get.assert_called_once_with(
+        f"https://drive.example.com/external_api/v1.0/items/{FAKE_ITEM_ID}/",
+        headers={"Authorization": "Bearer tok"},
+        timeout=30,
+    )
 
 
 def test_service_account_create_subfolder_does_not_retry_on_client_error(settings):
@@ -167,6 +246,442 @@ def test_service_account_create_subfolder_does_not_retry_on_client_error(setting
         backend.create_subfolder("docs", parent_id="parent-uuid")
 
     assert mock_requests.post.call_count == 1
+    mock_requests.get.assert_not_called()
+
+
+def test_service_account_create_subfolder_returns_existing_item_after_server_error(
+    settings,
+):
+    """If Drive actually created the item before the 500, don't create a duplicate sibling.
+
+    Drive silently renames a same-title duplicate (e.g. "docs_01") instead of rejecting
+    it, so blindly retrying the POST would leave two folders instead of a clean error.
+    """
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    existing_item = {"id": FAKE_ITEM_ID, "title": "docs"}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value = error_response
+        mock_requests.get.return_value = _found_response(existing_item)
+        result = backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    assert result == existing_item
+    assert mock_requests.post.call_count == 1
+
+
+def test_service_account_create_subfolder_recovers_on_duplicate_id_conflict(settings):
+    """A 400 item_create_existing_id means an earlier ambiguous attempt actually
+    succeeded: recover the existing item instead of treating this as a permanent
+    failure and aborting the migration (#208 review)."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _duplicate_id_error()
+
+    existing_item = {"id": FAKE_ITEM_ID, "title": "docs"}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.return_value = error_response
+        mock_requests.get.return_value = _found_response(existing_item)
+        result = backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    assert result == existing_item
+    assert mock_requests.post.call_count == 1
+
+
+def test_service_account_create_subfolder_duplicate_id_conflict_not_found_raises(
+    settings,
+):
+    """If the existence check can't confirm recovery, the original 400 propagates:
+    there's nothing to recover, and this id conflict would never resolve itself on
+    a blind retry."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _duplicate_id_error()
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(HTTPError),
+    ):
+        mock_requests.post.return_value = error_response
+        mock_requests.get.return_value = _not_found_response()
+        backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    assert mock_requests.post.call_count == 1
+
+
+def test_service_account_create_subfolder_wait_uses_configured_timing(settings):
+    """create_subfolder()'s retry now shares the same wait_exponential config as every
+    other retried call, instead of a hand-rolled multiplier**attempt formula that
+    ignored DRIVE_RETRY_WAIT_MIN (#208 review)."""
+    settings.DRIVE_RETRY_WAIT_MULTIPLIER = 5
+    settings.DRIVE_RETRY_WAIT_MIN = 7
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {"id": FAKE_ITEM_ID}
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch("tenacity.nap.time.sleep") as mock_sleep,
+    ):
+        mock_requests.post.side_effect = [error_response, success_response]
+        mock_requests.get.return_value = _not_found_response()
+        backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    mock_sleep.assert_called_once()
+    assert mock_sleep.call_args[0][0] >= 7
+
+
+def test_service_account_create_subfolder_propagates_permanent_existence_check_error(
+    settings,
+):
+    """A permanent failure (401/403) from the existence check surfaces directly,
+    instead of being swallowed and making the caller blindly replay the write with
+    the same broken auth (#208 review)."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    create_error_response = MagicMock()
+    create_error_response.raise_for_status.side_effect = _server_error()
+
+    check_error_response = MagicMock()
+    check_error_response.raise_for_status.side_effect = _server_error(401)
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(HTTPError),
+    ):
+        mock_requests.post.return_value = create_error_response
+        mock_requests.get.return_value = check_error_response
+        backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    assert mock_requests.post.call_count == 1
+
+
+def test_service_account_create_subfolder_server_error_exhausts_attempts(settings):
+    """A persistent 500 with the item never found is given up on after max attempts."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+    settings.DRIVE_RETRY_MAX_ATTEMPTS = 2
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(HTTPError),
+    ):
+        mock_requests.post.return_value = error_response
+        mock_requests.get.return_value = _not_found_response()
+        backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    assert mock_requests.post.call_count == 2
+    assert mock_requests.get.call_count == 2
+
+
+def test_service_account_create_subfolder_retries_when_existence_check_itself_fails(
+    settings,
+):
+    """A failing existence check must not abort the whole retry loop (#208).
+
+    If the GET used to check for a partially-applied write is itself hit by the
+    same transient outage as the original POST, we don't know whether the item
+    exists - but we must still get to retry the creation POST rather than giving
+    up on attempt 1 while retry budget remains.
+    """
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    create_error_response = MagicMock()
+    create_error_response.raise_for_status.side_effect = _server_error()
+
+    check_error_response = MagicMock()
+    check_error_response.status_code = 500
+    check_error_response.raise_for_status.side_effect = _server_error()
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {"id": FAKE_ITEM_ID}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [create_error_response, success_response]
+        mock_requests.get.return_value = check_error_response
+        result = backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    assert mock_requests.post.call_count == 2
+    assert result["id"] == FAKE_ITEM_ID
+
+
+def test_service_account_create_folder_retries_on_server_error_then_succeeds(settings):
+    """create_folder() shares the same retry-with-existence-check helper (#208)."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {"id": FAKE_ITEM_ID}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [error_response, success_response]
+        mock_requests.get.return_value = _not_found_response()
+        result = backend.create_folder("My Workspace")
+
+    assert mock_requests.post.call_count == 2
+    assert result["id"] == FAKE_ITEM_ID
+
+
+def test_service_account_create_file_item_retries_on_server_error_then_succeeds(
+    settings,
+):
+    """create_file_item() shares the same retry-with-existence-check helper (#208)."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {"id": FAKE_ITEM_ID, "policy": "https://s3.x"}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [error_response, success_response]
+        mock_requests.get.return_value = _not_found_response()
+        result = backend.create_file_item("doc.pdf", parent_id="folder-uuid")
+
+    assert mock_requests.post.call_count == 2
+    assert result["id"] == FAKE_ITEM_ID
+
+
+def test_service_account_create_file_item_replaces_recovered_pending_file(settings):
+    """A file item recovered via GET has no upload policy (only the create response
+    carries one, and Drive has no endpoint to regenerate it for an existing item).
+    Since it's still pending, delete the orphan and create a fresh item so the
+    3-step upload can actually proceed instead of crashing on a missing policy
+    (#208 review)."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    recovered_item = {"id": FAKE_ITEM_ID, "upload_state": "pending"}
+
+    fresh_item_id = "22222222-2222-2222-2222-222222222222"
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {
+        "id": fresh_item_id,
+        "policy": "https://s3.example.com/fresh",
+    }
+
+    delete_response = MagicMock()
+    delete_response.raise_for_status = MagicMock()
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch(
+            "core.destinations.drive.drive_backend.uuid.uuid4",
+            side_effect=[uuid.UUID(FAKE_ITEM_ID), uuid.UUID(fresh_item_id)],
+        ),
+    ):
+        mock_requests.post.side_effect = [error_response, success_response]
+        mock_requests.get.return_value = _found_response(recovered_item)
+        mock_requests.delete.return_value = delete_response
+        result = backend.create_file_item("doc.pdf", parent_id="folder-uuid")
+
+    mock_requests.delete.assert_called_once_with(
+        f"https://drive.example.com/external_api/v1.0/items/{FAKE_ITEM_ID}/",
+        headers={"Authorization": "Bearer tok"},
+        timeout=30,
+    )
+    assert result["id"] == fresh_item_id
+    assert result["policy"] == "https://s3.example.com/fresh"
+
+
+def test_service_account_create_file_item_refuses_to_replace_non_pending_recovery(
+    settings,
+):
+    """If a recovered file item isn't pending (unexpected), refuse to delete it:
+    a clear error beats silently destroying something it shouldn't."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    recovered_item = {"id": FAKE_ITEM_ID, "upload_state": "ready"}
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(RuntimeError, match="not pending upload"),
+    ):
+        mock_requests.post.return_value = error_response
+        mock_requests.get.return_value = _found_response(recovered_item)
+        backend.create_file_item("doc.pdf", parent_id="folder-uuid")
+
+    assert mock_requests.post.call_count == 1
+    mock_requests.delete.assert_not_called()
+
+
+def test_service_account_get_item_if_exists_returns_item_when_found(settings):
+    """_get_item_if_exists() returns the parsed item on a 200."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    item = {"id": FAKE_ITEM_ID, "title": "docs"}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.get.return_value = _found_response(item)
+        result = backend._get_item_if_exists(FAKE_ITEM_ID)  # pylint: disable=protected-access
+
+    assert result == item
+
+
+def test_service_account_get_item_if_exists_returns_none_on_404(settings):
+    """_get_item_if_exists() returns None when Drive never created the item."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.get.return_value = _not_found_response()
+        result = backend._get_item_if_exists(FAKE_ITEM_ID)  # pylint: disable=protected-access
+
+    assert result is None
+
+
+def test_service_account_get_item_if_exists_raises_on_other_error(settings):
+    """_get_item_if_exists() doesn't swallow errors unrelated to a plain 404."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.status_code = 500
+    error_response.raise_for_status.side_effect = _server_error()
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(HTTPError),
+    ):
+        mock_requests.get.return_value = error_response
+        backend._get_item_if_exists(FAKE_ITEM_ID)  # pylint: disable=protected-access
+
+
+def test_service_account_get_item_if_exists_or_none_returns_item_when_found(settings):
+    """_get_item_if_exists_or_none() returns the item on a 200, like the strict version."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    item = {"id": FAKE_ITEM_ID, "title": "docs"}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.get.return_value = _found_response(item)
+        result = backend._get_item_if_exists_or_none(FAKE_ITEM_ID)  # pylint: disable=protected-access
+
+    assert result == item
+
+
+def test_service_account_get_item_if_exists_or_none_swallows_check_errors(settings):
+    """Unlike _get_item_if_exists(), the check failing itself must not raise: the
+    caller (the creation retry loop) needs to fall back to retrying the POST."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.status_code = 500
+    error_response.raise_for_status.side_effect = _server_error()
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.get.return_value = error_response
+        result = backend._get_item_if_exists_or_none(FAKE_ITEM_ID)  # pylint: disable=protected-access
+
+    assert result is None
+
+
+def test_service_account_get_item_if_exists_or_none_reraises_permanent_error(settings):
+    """A 401/403 from the existence check is a permanent failure, not a transient
+    one: it must not be treated as 'not found', or the caller would blindly replay
+    the write with the same broken auth (#208 review)."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error(401)
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(HTTPError),
+    ):
+        mock_requests.get.return_value = error_response
+        backend._get_item_if_exists_or_none(FAKE_ITEM_ID)  # pylint: disable=protected-access
 
 
 def test_service_account_notify_upload_ended_retries_configured_max_attempts(settings):

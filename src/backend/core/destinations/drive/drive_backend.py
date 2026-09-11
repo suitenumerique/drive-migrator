@@ -2,6 +2,7 @@
 
 import logging
 import time
+import uuid
 from datetime import timedelta
 
 from django.conf import settings
@@ -25,6 +26,7 @@ from core.retry_utils import log_final_failure_and_reraise
 logger = get_task_logger(__name__)
 
 _UPLOAD_STATE_NOT_PENDING = "item_upload_state_not_pending"
+_EXISTING_ID = "item_create_existing_id"
 
 
 def _stop_after_configured_attempts(retry_state) -> bool:
@@ -63,24 +65,31 @@ _retry_on_transient_error = retry(
 )
 
 
-def _is_upload_already_processed(error: HTTPError) -> bool:
-    """Detect the item_upload_state_not_pending error.
-
-    A ReadTimeout can happen after Drive already processed the request but before
-    we received the response. Retrying then hits this 400 error, which means the
-    original call actually succeeded and should be treated as such.
-    """
+def _has_error_code(error: HTTPError, status_code: int, code: str) -> bool:
+    """Check whether error's response is a standardized-error payload carrying
+    the given error code (drf-standardized-errors' {"errors": [{"code": ...}]})."""
     response = error.response
-    if response is None or response.status_code != 400:
+    if response is None or response.status_code != status_code:
         return False
     try:
         payload = response.json()
     except ValueError:
         return False
     return any(
-        error_detail.get("code") == _UPLOAD_STATE_NOT_PENDING
-        for error_detail in payload.get("errors", [])
+        error_detail.get("code") == code for error_detail in payload.get("errors", [])
     )
+
+
+def _is_upload_already_processed(error: HTTPError) -> bool:
+    """A retried ReadTimeout can hit this 400 if the original call actually
+    already succeeded."""
+    return _has_error_code(error, 400, _UPLOAD_STATE_NOT_PENDING)
+
+
+def _is_duplicate_id_conflict(error: HTTPError) -> bool:
+    """Drive rejects reusing an id an earlier, ambiguously-failed attempt already
+    committed with."""
+    return _has_error_code(error, 400, _EXISTING_ID)
 
 
 def clear_drive_tokens(user) -> None:
@@ -152,43 +161,117 @@ class DriveBackend:
 
     # --- Folder operations ---
 
-    @_retry_on_transient_error
     def create_folder(self, title: str) -> dict:
         """Create a root folder in Drive. Returns the item dict (includes 'id')."""
-        response = requests.post(
-            f"{self._base_url()}{self._api_prefix()}/items/",
-            json={"type": "folder", "title": title},
-            headers=self._headers(),
-            timeout=30,
-        )
-        response.raise_for_status()
-        return response.json()
+        url = f"{self._base_url()}{self._api_prefix()}/items/"
+        payload = {"type": "folder", "title": title}
+        return self._create_item(url, payload)
 
-    @_retry_on_transient_error
     def create_subfolder(self, title: str, parent_id: str) -> dict:
         """Create a child folder inside an existing Drive folder."""
-        response = requests.post(
-            f"{self._base_url()}{self._api_prefix()}/items/{parent_id}/children/",
-            json={"type": "folder", "title": title},
-            headers=self._headers(),
-            timeout=30,
-        )
-        response.raise_for_status()
-        return response.json()
+        url = f"{self._base_url()}{self._api_prefix()}/items/{parent_id}/children/"
+        payload = {"type": "folder", "title": title}
+        return self._create_item(url, payload)
 
     # --- File upload (3-step) ---
 
-    @_retry_on_transient_error
     def create_file_item(self, filename: str, parent_id: str) -> dict:
         """Step 1: Create a file item. Returns item dict including S3 presigned URL in 'policy'."""
-        response = requests.post(
-            f"{self._base_url()}{self._api_prefix()}/items/{parent_id}/children/",
-            json={"type": "file", "filename": filename},
-            headers=self._headers(),
-            timeout=30,
-        )
+        url = f"{self._base_url()}{self._api_prefix()}/items/{parent_id}/children/"
+        payload = {"type": "file", "filename": filename}
+        item = self._create_item(url, payload)
+        if "policy" not in item:
+            item = self._replace_recovered_pending_file(item, url, payload)
+        return item
+
+    def _replace_recovered_pending_file(
+        self, existing_item: dict, url: str, payload: dict
+    ) -> dict:
+        """A recovered file item has no upload policy (only the create response
+        carries one, and Drive can't regenerate it). Still pending, so delete the
+        orphan and create a fresh item instead of getting stuck."""
+        if existing_item.get("upload_state") != "pending":
+            raise RuntimeError(
+                f"Recovered Drive item {existing_item.get('id')} is not pending "
+                f"upload (upload_state={existing_item.get('upload_state')!r}); "
+                "can't safely replace it with a fresh create."
+            )
+        self._delete_item(existing_item["id"])
+        return self._create_item(url, payload)
+
+    @_retry_on_transient_error
+    def _delete_item(self, item_id: str) -> None:
+        """DELETE /items/{id}/ (soft delete)."""
+        url = f"{self._base_url()}{self._api_prefix()}/items/{item_id}/"
+        response = requests.delete(url, headers=self._headers(), timeout=30)
+        response.raise_for_status()
+
+    def _create_item(self, url: str, payload: dict) -> dict:
+        """POST with a client-generated id, retried via tenacity on 5xx/network
+        errors or a Drive id conflict: creation isn't idempotent (Drive silently
+        renames title duplicates), so on a retryable failure we check for the item
+        by id before giving up, instead of duplicating it or failing a write that
+        actually succeeded. See #208."""
+        item_id = str(uuid.uuid4())
+        payload = {**payload, "id": item_id}
+
+        @_retry_on_transient_error
+        def do_create_item():
+            try:
+                response = requests.post(
+                    url, json=payload, headers=self._headers(), timeout=30
+                )
+                response.raise_for_status()
+                return response.json()
+            except HTTPError as http_error:
+                if not (
+                    _is_server_error(http_error)
+                    or _is_duplicate_id_conflict(http_error)
+                ):
+                    raise
+                existing_item = self._get_item_if_exists_or_none(item_id)
+                if existing_item is not None:
+                    return existing_item
+                raise
+            except (Timeout, RequestsConnectionError):
+                existing_item = self._get_item_if_exists_or_none(item_id)
+                if existing_item is not None:
+                    return existing_item
+                raise
+
+        return do_create_item()
+
+    def _get_item_if_exists(self, item_id: str) -> dict | None:
+        """GET /items/{id}/, treating a 404 as 'not created yet' rather than an error."""
+        url = f"{self._base_url()}{self._api_prefix()}/items/{item_id}/"
+        response = requests.get(url, headers=self._headers(), timeout=30)
+        if response.status_code == 404:
+            return None
         response.raise_for_status()
         return response.json()
+
+    def _get_item_if_exists_or_none(self, item_id: str) -> dict | None:
+        """Like _get_item_if_exists(), but only swallows a transient failure (5xx,
+        network) of the check itself, so the caller retries the POST. A permanent
+        failure (401/403) is re-raised instead of masked."""
+        try:
+            return self._get_item_if_exists(item_id)
+        except HTTPError as http_error:
+            if not _is_server_error(http_error):
+                raise
+            logger.info(
+                "existence check for item %s failed (%s), will retry",
+                item_id,
+                http_error,
+            )
+            return None
+        except (Timeout, RequestsConnectionError) as network_error:
+            logger.info(
+                "existence check for item %s failed (%s), will retry",
+                item_id,
+                network_error,
+            )
+            return None
 
     @_retry_on_transient_error
     def upload_to_s3(self, policy_url: str, file_path: str) -> None:
