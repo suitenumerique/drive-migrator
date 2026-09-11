@@ -12,12 +12,21 @@ from django.utils import timezone
 import pytest
 from cryptography.fernet import Fernet
 from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import Timeout
+from requests.exceptions import HTTPError, Timeout
 
 from core.destinations.drive import drive_backend
 from core.destinations.drive.drive_backend import DriveServiceAccountBackend
 
 TEST_KEY = Fernet.generate_key().decode()
+
+
+def _server_error(status_code=500):
+    """Build the HTTPError Drive raises on a transient 5xx, e.g. issue #208."""
+    response = MagicMock()
+    response.status_code = status_code
+    error = HTTPError(f"{status_code} Server Error")
+    error.response = response
+    return error
 
 
 @pytest.fixture(autouse=True)
@@ -114,6 +123,52 @@ def test_service_account_upload_to_s3_logs_error_on_final_failure(settings):
     mock_error.assert_called_once()
 
 
+def test_service_account_create_subfolder_retries_on_server_error_then_succeeds(
+    settings,
+):
+    """A transient 500 from Drive on subfolder creation is retried and succeeds (#208)."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+    success_response.json.return_value = {"id": "child-uuid"}
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [error_response, success_response]
+        result = backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    assert mock_requests.post.call_count == 2
+    assert result["id"] == "child-uuid"
+
+
+def test_service_account_create_subfolder_does_not_retry_on_client_error(settings):
+    """A 4xx from Drive is a permanent error and must fail immediately, not be retried."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error(400)
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(HTTPError),
+    ):
+        mock_requests.post.return_value = error_response
+        backend.create_subfolder("docs", parent_id="parent-uuid")
+
+    assert mock_requests.post.call_count == 1
+
+
 def test_service_account_notify_upload_ended_retries_configured_max_attempts(settings):
     """The manual retry loop's attempt count follows DRIVE_RETRY_MAX_ATTEMPTS."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
@@ -128,6 +183,51 @@ def test_service_account_notify_upload_ended_retries_configured_max_attempts(set
         pytest.raises(Timeout),
     ):
         mock_requests.post.side_effect = Timeout("timed out")
+        backend.notify_upload_ended("file-uuid")
+
+    assert mock_requests.post.call_count == 2
+
+
+def test_service_account_notify_upload_ended_retries_on_server_error_then_succeeds(
+    settings,
+):
+    """A transient 5xx from Drive is retried by the manual loop and succeeds (#208)."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    success_response = MagicMock()
+    success_response.raise_for_status = MagicMock()
+
+    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+        mock_requests.post.side_effect = [error_response, success_response]
+        backend.notify_upload_ended("file-uuid")  # must not raise
+
+    assert mock_requests.post.call_count == 2
+
+
+def test_service_account_notify_upload_ended_server_error_exhausts_attempts(settings):
+    """A persistent 5xx from Drive is given up on after DRIVE_RETRY_MAX_ATTEMPTS."""
+    settings.DRIVE_API_BASE_URL = "https://drive.example.com"
+    settings.DRIVE_RETRY_MAX_ATTEMPTS = 2
+
+    backend = DriveServiceAccountBackend()
+    backend._access_token = "tok"  # pylint: disable=protected-access
+    backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
+
+    error_response = MagicMock()
+    error_response.raise_for_status.side_effect = _server_error()
+
+    with (
+        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        pytest.raises(HTTPError),
+    ):
+        mock_requests.post.return_value = error_response
         backend.notify_upload_ended("file-uuid")
 
     assert mock_requests.post.call_count == 2
