@@ -29,6 +29,16 @@ _ONGLET_TRIE_RESPONSE = {
     ]
 }
 
+_LISTER_MES_ESPACES_LOCKED_RESPONSE = {
+    "tabData": [
+        {
+            "tabPerimetres": [
+                {"id": "2137454", "nom": "TEST Worskspace[1]"},
+            ]
+        }
+    ]
+}
+
 
 def _make_client():
     """Build a ResanaMembersClient with a mocked underlying requests.Session."""
@@ -156,6 +166,39 @@ def test_get_workspaces_flattens_tabs_into_slug_name_pairs():
 
 
 # ---------------------------------------------------------------------------
+# get_locked_workspaces() — Endpoint 0bis (listerMesEspaces, archiveUnique)
+# ---------------------------------------------------------------------------
+
+
+def test_get_locked_workspaces_posts_to_lister_mes_espaces_with_archive_unique():
+    """get_locked_workspaces() POSTs archiveUnique=1 to listerMesEspaces."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = (
+        _LISTER_MES_ESPACES_LOCKED_RESPONSE
+    )
+
+    client.get_locked_workspaces()
+
+    client.session.post.assert_called_once_with(
+        f"{BASE_URL}/public/perimetre/listerMesEspaces",
+        data={"archiveUnique": "1"},
+        timeout=30,
+    )
+
+
+def test_get_locked_workspaces_flattens_tabs_into_slug_name_pairs():
+    """get_locked_workspaces() flattens tabData[].tabPerimetres like get_workspaces()."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = (
+        _LISTER_MES_ESPACES_LOCKED_RESPONSE
+    )
+
+    result = client.get_locked_workspaces()
+
+    assert result == [{"slug": "2137454", "name": "TEST Worskspace[1]"}]
+
+
+# ---------------------------------------------------------------------------
 # find_slug_by_workspace_name()
 # ---------------------------------------------------------------------------
 
@@ -170,14 +213,54 @@ def test_find_slug_by_workspace_name_returns_matching_slug():
     assert result == "2137419"
 
 
-def test_find_slug_by_workspace_name_returns_none_when_not_found():
-    """find_slug_by_workspace_name() returns None when no workspace matches the name."""
+def test_find_slug_by_workspace_name_returns_none_when_not_found_anywhere():
+    """find_slug_by_workspace_name() returns None when no unlocked or locked workspace matches."""
     client = _make_client()
-    client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
+
+    def post_side_effect(url, **_kwargs):
+        response = MagicMock()
+        if url.endswith("/getOngletTrie"):
+            response.json.return_value = _ONGLET_TRIE_RESPONSE
+        elif url.endswith("/listerMesEspaces"):
+            response.json.return_value = _LISTER_MES_ESPACES_LOCKED_RESPONSE
+        return response
+
+    client.session.post.side_effect = post_side_effect
 
     result = client.find_slug_by_workspace_name("Unknown")
 
     assert result is None
+
+
+def test_find_slug_by_workspace_name_does_not_check_locked_workspaces_when_found_unlocked():
+    """find_slug_by_workspace_name() short-circuits before hitting listerMesEspaces."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
+
+    client.find_slug_by_workspace_name("TEST Worskspace")
+
+    client.session.post.assert_called_once_with(
+        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30
+    )
+
+
+def test_find_slug_by_workspace_name_falls_back_to_locked_workspaces():
+    """find_slug_by_workspace_name() finds a locked workspace missing from getOngletTrie (#169)."""
+    client = _make_client()
+
+    def post_side_effect(url, **_kwargs):
+        response = MagicMock()
+        if url.endswith("/getOngletTrie"):
+            response.json.return_value = _ONGLET_TRIE_RESPONSE
+        elif url.endswith("/listerMesEspaces"):
+            response.json.return_value = _LISTER_MES_ESPACES_LOCKED_RESPONSE
+        return response
+
+    client.session.post.side_effect = post_side_effect
+
+    result = client.find_slug_by_workspace_name("TEST Worskspace[1]")
+
+    assert result == "2137454"
 
 
 # ---------------------------------------------------------------------------
