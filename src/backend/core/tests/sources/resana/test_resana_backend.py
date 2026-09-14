@@ -83,8 +83,22 @@ def test_get_client_propagates_token_expired(settings):
 # ---------------------------------------------------------------------------
 
 
+def _patch_get_workspaces_clients(
+    mock_client,
+    mock_members_client,
+    *,
+    raw_workspaces,
+    workspaces_with_role=None,
+):
+    mock_client.return_value.get_workspaces.return_value = raw_workspaces
+    mock_members_client.return_value.get_workspaces_with_role.return_value = (
+        workspaces_with_role or []
+    )
+
+
 def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     raw_workspaces = [
         {"uuid": "ws-1", "name": "Espace Projet", "isPersonalWorkspace": False},
         {"uuid": "ws-2", "name": "Mon espace", "isPersonalWorkspace": True},
@@ -94,8 +108,22 @@ def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
     with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
         mock_tm.return_value.get_valid_token.return_value = "tok"
         with patch("core.sources.resana.backend.InterstisClient") as mock_client:
-            mock_client.return_value.get_workspaces.return_value = raw_workspaces
-            result = ResanaSourceBackend().get_workspaces(user)
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client,
+                    mock_members,
+                    raw_workspaces=raw_workspaces,
+                    workspaces_with_role=[
+                        {
+                            "slug": "slug-1",
+                            "name": "Espace Projet",
+                            "role_code": "GESTIONNAIRE",
+                        }
+                    ],
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
 
     assert len(result) == 2
     assert all(isinstance(ws, SourceWorkspace) for ws in result)
@@ -107,6 +135,7 @@ def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
 def test_get_workspaces_unescapes_html_entities_in_title(settings):
     """Resana returns names HTML-escaped (e.g. &#039; for apostrophe); decode them."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     raw_workspaces = [
         {
             "uuid": "ws-1",
@@ -119,24 +148,191 @@ def test_get_workspaces_unescapes_html_entities_in_title(settings):
     with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
         mock_tm.return_value.get_valid_token.return_value = "tok"
         with patch("core.sources.resana.backend.InterstisClient") as mock_client:
-            mock_client.return_value.get_workspaces.return_value = raw_workspaces
-            result = ResanaSourceBackend().get_workspaces(user)
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client,
+                    mock_members,
+                    raw_workspaces=raw_workspaces,
+                    workspaces_with_role=[
+                        {
+                            "slug": "slug-1",
+                            "name": "Rapports d'activité & suivi",
+                            "role_code": "GESTIONNAIRE",
+                        }
+                    ],
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
 
     assert result[0].title == "Rapports d'activité & suivi"
 
 
 def test_get_workspaces_stores_user_on_backend(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     user = MagicMock()
     backend = ResanaSourceBackend()
 
     with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
         mock_tm.return_value.get_valid_token.return_value = "tok"
         with patch("core.sources.resana.backend.InterstisClient") as mock_client:
-            mock_client.return_value.get_workspaces.return_value = []
-            backend.get_workspaces(user)
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client, mock_members, raw_workspaces=[]
+                )
+                backend.get_workspaces(user)
 
     assert backend._user is user
+
+
+# ---------------------------------------------------------------------------
+# get_workspaces() — role-based filtering
+# ---------------------------------------------------------------------------
+
+
+def test_get_workspaces_excludes_workspace_when_user_is_not_manager(settings):
+    """A workspace where the user is only Lecteur/Contributeur (not GESTIONNAIRE) is excluded."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    raw_workspaces = [
+        {"uuid": "ws-1", "name": "groupe2", "isPersonalWorkspace": False},
+    ]
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client,
+                    mock_members,
+                    raw_workspaces=raw_workspaces,
+                    workspaces_with_role=[
+                        {"slug": "2137456", "name": "groupe2", "role_code": "VISITEUR"}
+                    ],
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    assert not result
+
+
+def test_get_workspaces_excludes_workspace_when_user_is_only_contributeur(settings):
+    """A workspace where the user is Contributeur (not GESTIONNAIRE) is excluded."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    raw_workspaces = [
+        {"uuid": "ws-1", "name": "groupe1", "isPersonalWorkspace": False},
+    ]
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client,
+                    mock_members,
+                    raw_workspaces=raw_workspaces,
+                    workspaces_with_role=[
+                        {
+                            "slug": "2137455",
+                            "name": "groupe1",
+                            "role_code": "CONTRIBUTEUR",
+                        }
+                    ],
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    assert not result
+
+
+def test_get_workspaces_includes_workspace_when_user_is_manager(settings):
+    """A workspace where the user holds the GESTIONNAIRE (Animateur) role is included."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    raw_workspaces = [
+        {"uuid": "ws-1", "name": "Test CGU", "isPersonalWorkspace": False},
+    ]
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client,
+                    mock_members,
+                    raw_workspaces=raw_workspaces,
+                    workspaces_with_role=[
+                        {
+                            "slug": "2137439",
+                            "name": "Test CGU",
+                            "role_code": "GESTIONNAIRE",
+                        }
+                    ],
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    assert len(result) == 1
+    assert result[0].id == "ws-1"
+
+
+def test_get_workspaces_includes_personal_workspace_without_role_check(settings):
+    """A personal workspace is always included: there's no member/role concept there."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    raw_workspaces = [
+        {"uuid": "ws-1", "name": "Mon espace", "isPersonalWorkspace": True},
+    ]
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client, mock_members, raw_workspaces=raw_workspaces
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    assert len(result) == 1
+
+
+def test_get_workspaces_excludes_workspace_absent_from_lister_mes_espaces(settings):
+    """A workspace absent from listerMesEspacesV2 is excluded (safe default deny)."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    raw_workspaces = [
+        {"uuid": "ws-1", "name": "Unknown to PHP portal", "isPersonalWorkspace": False},
+    ]
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client,
+                    mock_members,
+                    raw_workspaces=raw_workspaces,
+                    workspaces_with_role=[],
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    assert not result
 
 
 # ---------------------------------------------------------------------------

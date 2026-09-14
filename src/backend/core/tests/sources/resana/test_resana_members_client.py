@@ -244,3 +244,87 @@ def test_list_workspace_members_empty_when_no_members():
     result = client.list_workspace_members(SLUG)
 
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# get_workspaces_with_role() — listerMesEspacesV2, role resolved server-side
+# ---------------------------------------------------------------------------
+
+_LISTER_MES_ESPACES_V2_RESPONSE = {
+    "tabData": [
+        {
+            "id": "GESTIONNAIRE",
+            "libelle": "Animateur",
+            "tabPerimetres": [
+                {
+                    "id": "2137419",
+                    "nom": "TEST Worskspace",
+                    "profilDroitCode": "GESTIONNAIRE",
+                    "profilDroitLibelle": "Animateur",
+                }
+            ],
+        },
+        {
+            "id": "CONTRIBUTEUR",
+            "libelle": "Contributeur",
+            "tabPerimetres": [
+                {
+                    "id": "2137455",
+                    "nom": "groupe1",
+                    "profilDroitCode": "CONTRIBUTEUR",
+                    "profilDroitLibelle": "Contributeur",
+                }
+            ],
+        },
+        {
+            "id": "VISITEUR",
+            "libelle": "Lecteur",
+            "tabPerimetres": [
+                {
+                    "id": "2137456",
+                    "nom": "groupe2",
+                    "profilDroitCode": "VISITEUR",
+                    "profilDroitLibelle": "Lecteur",
+                }
+            ],
+        },
+    ]
+}
+
+
+def test_get_workspaces_with_role_gets_lister_mes_espaces_v2_with_sorting_param():
+    """get_workspaces_with_role() GETs listerMesEspacesV2 grouped by role tab."""
+    client = _make_client()
+    client.session.get.return_value.json.return_value = _LISTER_MES_ESPACES_V2_RESPONSE
+
+    client.get_workspaces_with_role()
+
+    client.session.get.assert_called_once_with(
+        f"{BASE_URL}/public/perimetre/listerMesEspacesV2",
+        params={"sorting": "TRIE_GROUPE_UTILISATEUR"},
+        timeout=30,
+    )
+
+
+def test_get_workspaces_with_role_flattens_tabs_with_their_role_code():
+    """get_workspaces_with_role() flattens all tabs into {slug, name, role_code} dicts."""
+    client = _make_client()
+    client.session.get.return_value.json.return_value = _LISTER_MES_ESPACES_V2_RESPONSE
+
+    result = client.get_workspaces_with_role()
+
+    assert result == [
+        {"slug": "2137419", "name": "TEST Worskspace", "role_code": "GESTIONNAIRE"},
+        {"slug": "2137455", "name": "groupe1", "role_code": "CONTRIBUTEUR"},
+        {"slug": "2137456", "name": "groupe2", "role_code": "VISITEUR"},
+    ]
+
+
+def test_get_workspaces_with_role_empty_when_no_tabs():
+    """get_workspaces_with_role() returns an empty list when the API returns no tabs."""
+    client = _make_client()
+    client.session.get.return_value.json.return_value = {}
+
+    result = client.get_workspaces_with_role()
+
+    assert result == []

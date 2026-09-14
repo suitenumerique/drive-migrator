@@ -11,6 +11,7 @@ The PHPSESSID and CSRF token both come from the resana-migrator bridge response
 import requests
 
 _REQUEST_TIMEOUT = 30
+GESTIONNAIRE_CODE = "GESTIONNAIRE"
 
 
 class ResanaMembersClient:
@@ -51,12 +52,12 @@ class ResanaMembersClient:
                 return workspace["slug"]
         return None
 
-    def list_workspace_members(self, slug: str) -> list[dict]:
-        """Return workspace members as {name, firstName, email} dicts.
+    def _fetch_raw_members(self, slug: str) -> dict:
+        """Return the raw listerUtilisateursAdminDroits payload, keyed by member.
 
-        listerUtilisateursAdminDroits requires the workspace to first be placed
-        in session via GET .../perimetre/consulter/{slug} — a legacy constraint
-        unrelated to CSRF, so this GET stays even without HTML scraping.
+        Requires the workspace to first be placed in session via
+        GET .../perimetre/consulter/{slug} — a legacy constraint unrelated to
+        CSRF, so this GET stays even without HTML scraping.
         """
         resp = self.session.get(
             f"{self.base_url}/public/perimetre/consulter/{slug}",
@@ -69,11 +70,39 @@ class ResanaMembersClient:
             timeout=_REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
+        return resp.json()
+
+    def list_workspace_members(self, slug: str) -> list[dict]:
+        """Return workspace members as {name, firstName, email} dicts."""
         return [
             {
                 "name": entry["utilisateur"].get("nom", ""),
                 "firstName": entry["utilisateur"].get("prenom", ""),
                 "email": entry["utilisateur"].get("mail_inscription", ""),
             }
-            for entry in resp.json().values()
+            for entry in self._fetch_raw_members(slug).values()
+        ]
+
+    def get_workspaces_with_role(self) -> list[dict]:
+        """Return all workspaces as {slug, name, role_code} dicts.
+
+        listerMesEspacesV2 groups workspaces by role tab and resolves the
+        current session's own role server-side (profilDroitCode), so no
+        cross-referencing with a separate role catalog is needed.
+        """
+        resp = self.session.get(
+            f"{self.base_url}/public/perimetre/listerMesEspacesV2",
+            params={"sorting": "TRIE_GROUPE_UTILISATEUR"},
+            timeout=_REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {
+                "slug": perimetre["id"],
+                "name": perimetre["nom"],
+                "role_code": perimetre["profilDroitCode"],
+            }
+            for tab in data.get("tabData", [])
+            for perimetre in tab.get("tabPerimetres", [])
         ]

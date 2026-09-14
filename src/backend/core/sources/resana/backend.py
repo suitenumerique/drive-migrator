@@ -11,7 +11,10 @@ from core.backends.source import (
     SourceWorkspace,
 )
 from core.sources.resana.interstis_client import InterstisClient
-from core.sources.resana.resana_members_client import ResanaMembersClient
+from core.sources.resana.resana_members_client import (
+    GESTIONNAIRE_CODE,
+    ResanaMembersClient,
+)
 from core.sources.resana.token_manager import ResanaTokenManager
 
 
@@ -35,13 +38,39 @@ class ResanaSourceBackend(AbstractSourceBackend):
         token = ResanaTokenManager(self._user).get_valid_token()
         return InterstisClient(token)
 
+    def _get_members_client(self) -> ResanaMembersClient:
+        manager = ResanaTokenManager(self._user)
+        return ResanaMembersClient(
+            access_token=manager.get_valid_token(),
+            session_id=manager.get_session_id(),
+            csrf_token=manager.get_csrf_token(),
+            base_url=settings.RESANA_WEB_ENDPOINT,
+        )
+
     def get_workspaces(self, user) -> list[SourceWorkspace]:
+        """Return workspaces where `user` can migrate: personal workspaces, and
+        shared workspaces where the user holds the GESTIONNAIRE (Animateur) role.
+
+        Resana's GED API lists every workspace the user belongs to regardless of
+        role, so Lecteur/Contributeur-only workspaces are filtered out here using
+        the PHP portal's role data (not exposed by the GED API).
+        """
         self._user = user
         client = self._get_client()
-        return [
-            SourceWorkspace(id=ws["uuid"], title=html.unescape(ws["name"]), raw_data=ws)
-            for ws in client.get_workspaces()
-        ]
+        members_client = self._get_members_client()
+        manager_names = {
+            ws["name"]
+            for ws in members_client.get_workspaces_with_role()
+            if ws["role_code"] == GESTIONNAIRE_CODE
+        }
+
+        workspaces = []
+        for ws in client.get_workspaces():
+            name = html.unescape(ws["name"])
+            if not ws.get("isPersonalWorkspace") and name not in manager_names:
+                continue
+            workspaces.append(SourceWorkspace(id=ws["uuid"], title=name, raw_data=ws))
+        return workspaces
 
     def get_workspace_structure(self, workspace) -> SourceFolder:
         self._user = workspace.migration_user
@@ -53,13 +82,8 @@ class ResanaSourceBackend(AbstractSourceBackend):
         client.download_file(file.download_url, destination_path)
 
     def prepare_export(self, workspace, local_folder_path: str) -> None:
-        manager = ResanaTokenManager(workspace.migration_user)
-        client = ResanaMembersClient(
-            access_token=manager.get_valid_token(),
-            session_id=manager.get_session_id(),
-            csrf_token=manager.get_csrf_token(),
-            base_url=settings.RESANA_WEB_ENDPOINT,
-        )
+        self._user = workspace.migration_user
+        client = self._get_members_client()
         slug = client.find_slug_by_workspace_name(workspace.title)
         if slug is None:
             return
