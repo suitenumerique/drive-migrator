@@ -509,6 +509,12 @@ class Base(Configuration):
     # Sentry
     SENTRY_DSN = values.Value(environ_name="SENTRY_DSN", environ_prefix=None)
 
+    # Posthog
+    POSTHOG_KEY = values.Value(environ_name="POSTHOG_KEY", environ_prefix=None)
+    POSTHOG_HOST = values.Value(
+        "https://eu.i.posthog.com", environ_name="POSTHOG_HOST", environ_prefix=None
+    )
+
     # Easy thumbnails
     THUMBNAIL_EXTENSION = "webp"
     THUMBNAIL_TRANSPARENCY_EXTENSION = "webp"
@@ -666,6 +672,10 @@ class Base(Configuration):
 
             # Ignore the logs added by the DockerflowMiddleware
             ignore_logger("request.summary")
+
+        if cls.POSTHOG_KEY is not None:
+            posthog.api_key = cls.POSTHOG_KEY
+            posthog.host = cls.POSTHOG_HOST
 
 
 class Build(Base):
