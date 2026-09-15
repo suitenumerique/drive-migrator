@@ -70,6 +70,11 @@ and this project adheres to
 - retry Drive upload-ended notification on transient network timeouts #176
 - retry Drive API calls on transient 5xx errors instead of failing #208
 - retry Resana file download and skip failing files instead of aborting #175
+- patch js-yaml allocation vulnerability (SNYK-JS-JSYAML-19496768)
+- bump djangorestframework to 3.17.2 (CVE-2026-73228)
+- bump next to 16.3.3 and storybook to 8.6.17
+- bump mjml to 5.0.0 and @html-to/text-cli to 0.6.0
+- patch remaining brace-expansion vulnerabilities in frontend and mail dependencies
 
 ### Removed
 
