@@ -28,6 +28,12 @@ from core.processing.tasks import (
 )
 
 
+@pytest.fixture(autouse=True)
+def work_directory(settings, tmp_path):
+    """Keep export task filesystem operations inside a temporary directory."""
+    settings.APP_WORK_DIR = str(tmp_path)
+
+
 @pytest.fixture()
 def workspace():
     ws = MagicMock(spec=Workspace)
