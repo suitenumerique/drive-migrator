@@ -1,12 +1,14 @@
 import os
 
 from django.conf import settings
+from django.utils import timezone
 
 from celery import states
 from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
 
+from core.analytics import posthog_capture, workspaces_counts
 from core.backends.destination import DestinationRegistry
 from core.backends.source import SourceFolder, SourceManager, truncate_folder_files
 from core.mails_manager import MailsManager
@@ -69,6 +71,24 @@ def debug_folder(folder: SourceFolder):
             aux(child, depth + 1)
 
     aux(folder)
+
+
+def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
+    workspace = extra_task.workspace
+    posthog_capture(
+        "migration_finished",
+        extra_task.user,
+        {
+            "status": status,
+            "is_truncated": workspace.is_truncated,
+            "download_errors_count": len(workspace.download_errors),
+            "duration_seconds": (
+                timezone.now() - extra_task.task_result.date_created
+            ).total_seconds(),
+            "$set": workspaces_counts(extra_task.user),
+        },
+        workspace=workspace,
+    )
 
 
 @app.task(bind=True)
@@ -167,6 +187,7 @@ def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
         return
     workspace = extra_task.workspace
     workspace.save()
+    capture_migration_finished(extra_task, "success")
 
     cleanup_workspace_dir(workspace)
 
@@ -185,6 +206,7 @@ def task_failure(sender=None, **kwargs):
         if status == Workspace.Status.PENDING:
             workspace.set_destination_status(dest_name, Workspace.Status.FAILURE)
     workspace.save()
+    capture_migration_finished(extra_task, "failure")
 
     cleanup_workspace_dir(workspace)
 
