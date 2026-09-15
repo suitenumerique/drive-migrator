@@ -58,6 +58,10 @@ and this project adheres to
 
 ### Fixed
 
+- patch remaining frontend dependency vulnerabilities
+- patch remaining mail dependency vulnerabilities
+- patch Handlebars and js-yaml vulnerabilities in the API client generator
+- remove vulnerable legacy tooling and crypto polyfills from Storybook
 - fix illustration page finish
 - fix CI checks (self-hosted runner deps, gitlint job, test-back env vars)
 - fix Resana access token refresh crashing with KeyError: 'access_token'
@@ -70,6 +74,13 @@ and this project adheres to
 - retry Drive upload-ended notification on transient network timeouts #176
 - retry Drive API calls on transient 5xx errors instead of failing #208
 - retry Resana file download and skip failing files instead of aborting #175
+- patch js-yaml allocation vulnerability (SNYK-JS-JSYAML-19496768)
+- bump djangorestframework to 3.17.2 (CVE-2026-73228)
+- bump next to 16.3.3 and storybook to 10.6.0
+- bump mjml to 5.0.0 and @html-to/text-cli to 0.6.0
+- preserve mail template includes and Django rendering with MJML 5
+- patch remaining brace-expansion vulnerabilities
+- patch deepmerge-ts uncontrolled recursion (CVE-2026-40345)
 
 ### Removed
 
