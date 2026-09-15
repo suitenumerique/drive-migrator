@@ -381,10 +381,10 @@ csso@^5.0.5:
   dependencies:
     css-tree "~2.2.0"
 
-deepmerge-ts@^7.1.5:
-  version "7.1.6"
-  resolved "https://registry.yarnpkg.com/deepmerge-ts/-/deepmerge-ts-7.1.6.tgz#e226a79609c20aa6b89b00a1f4c5705ca71d9d2e"
-  integrity sha512-gQhL1ksGBLQbHeAo47YU6cs2ahd3Pv+8PFYoWogNZbQnNwQyOh9Ad5kbeHFiWwbKdeWQJ5Z7Y7mwb9ew2hXBLw==
+deepmerge-ts@8.0.0, deepmerge-ts@^7.1.5:
+  version "8.0.0"
+  resolved "https://registry.yarnpkg.com/deepmerge-ts/-/deepmerge-ts-8.0.0.tgz#9fde9f1122d44ab4d1de31eda3e20b55693c8e59"
+  integrity sha512-ICNjaP0ML+eSdEpJYQC46XiAn/UjAdwbEl0dE8p85ZTeNDinN4Kd4+9jS4OSAuH7st6eC7rQhsqTF5zIDaUm2g==
 
 detect-node@2.1.0, detect-node@^2.0.4:
   version "2.1.0"
