@@ -1,5 +1,7 @@
 """Unit tests for the Authentication Backends."""
 
+from unittest.mock import patch
+
 from django.core.exceptions import SuspiciousOperation
 from django.utils import timezone
 
@@ -375,3 +377,18 @@ def test_get_or_create_user_returns_inactive_user_unchanged(monkeypatch):
 
     assert user == db_user
     assert user.is_active is False
+
+
+@pytest.mark.parametrize("existing", [True, False])
+def test_get_or_create_user_captures_login(monkeypatch, existing):
+    """Each successful login emits a user_login event flagging new users."""
+    klass = OIDCAuthenticationBackend()
+    sub = UserFactory().sub if existing else "new-sub"
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend, "get_userinfo", lambda *args: {"sub": sub}
+    )
+    with patch("core.authentication.backends.posthog_capture") as capture:
+        user = klass.get_or_create_user(
+            access_token="test-token", id_token=None, payload=None
+        )
+    capture.assert_called_once_with("user_login", user, {"is_new_user": not existing})
