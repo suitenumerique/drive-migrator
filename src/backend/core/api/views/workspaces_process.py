@@ -4,6 +4,7 @@ from django_celery_results.models import TaskResult
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.analytics import posthog_capture
 from core.sources.osmose.serializers import WorkspaceSerializer
 
 from ...destinations.drive.drive_backend import DriveUserTokenBackend
@@ -47,6 +48,7 @@ class WorkspacesProcessAPIView(APIView):
             workspace.set_destination_status(dest_name, Workspace.Status.PENDING)
         workspace.save()
         push_workspace_task(workspace, user)
+        posthog_capture("migration_started", user, workspace=workspace)
 
     def validation(self, user, data, workspaces):
         """
