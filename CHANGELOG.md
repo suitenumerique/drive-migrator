@@ -75,7 +75,7 @@ and this project adheres to
 - bump next to 16.3.3 and storybook to 10.6.0
 - bump mjml to 5.0.0 and @html-to/text-cli to 0.6.0
 - preserve mail template includes and Django rendering with MJML 5
-- patch remaining brace-expansion vulnerabilities in frontend and mail dependencies
+- patch remaining brace-expansion vulnerabilities
 
 ### Removed
 
