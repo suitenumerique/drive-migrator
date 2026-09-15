@@ -16,6 +16,7 @@ from socket import gethostbyname, gethostname
 
 from django.utils.translation import gettext_lazy as _
 
+import posthog
 import sentry_sdk
 from configurations import Configuration, values
 from sentry_sdk.integrations.django import DjangoIntegration
@@ -509,6 +510,12 @@ class Base(Configuration):
     # Sentry
     SENTRY_DSN = values.Value(environ_name="SENTRY_DSN", environ_prefix=None)
 
+    # Posthog
+    POSTHOG_KEY = values.Value(environ_name="POSTHOG_KEY", environ_prefix=None)
+    POSTHOG_HOST = values.Value(
+        "https://eu.i.posthog.com", environ_name="POSTHOG_HOST", environ_prefix=None
+    )
+
     # Easy thumbnails
     THUMBNAIL_EXTENSION = "webp"
     THUMBNAIL_TRANSPARENCY_EXTENSION = "webp"
@@ -666,6 +673,9 @@ class Base(Configuration):
 
             # Ignore the logs added by the DockerflowMiddleware
             ignore_logger("request.summary")
+
+        posthog.api_key = cls.POSTHOG_KEY
+        posthog.host = cls.POSTHOG_HOST
 
 
 class Build(Base):
