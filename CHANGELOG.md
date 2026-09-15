@@ -69,6 +69,7 @@ and this project adheres to
 - fix error modal looping infinitely on connect page #138
 - retry Drive upload-ended notification on transient network timeouts #176
 - retry Resana file download and skip failing files instead of aborting #175
+- fix user.csv not generated for locked Resana workspaces #169
 
 ### Removed
 

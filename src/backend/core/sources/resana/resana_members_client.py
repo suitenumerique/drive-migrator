@@ -32,12 +32,30 @@ class ResanaMembersClient:
         self.session.headers["X-CSRF-TOKEN"] = csrf_token
 
     def get_workspaces(self) -> list[dict]:
-        """Return all workspaces accessible to the current user as {slug, name} dicts."""
+        """Return all unlocked workspaces accessible to the current user as {slug, name} dicts."""
         resp = self.session.post(
             f"{self.base_url}/public/perimetre/getOngletTrie", timeout=_REQUEST_TIMEOUT
         )
         resp.raise_for_status()
-        data = resp.json()
+        return self._parse_workspaces(resp.json())
+
+    def get_locked_workspaces(self) -> list[dict]:
+        """Return locked ("verrouille") workspaces as {slug, name} dicts.
+
+        Locked workspaces are missing from getOngletTrie's response (see #169),
+        so listerMesEspaces with archiveUnique=1 is the only way to resolve
+        their slug.
+        """
+        resp = self.session.post(
+            f"{self.base_url}/public/perimetre/listerMesEspaces",
+            data={"archiveUnique": "1"},
+            timeout=_REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return self._parse_workspaces(resp.json())
+
+    @staticmethod
+    def _parse_workspaces(data: dict) -> list[dict]:
         return [
             {"slug": perimetre["id"], "name": perimetre["nom"]}
             for tab in data.get("tabData", [])
@@ -45,8 +63,15 @@ class ResanaMembersClient:
         ]
 
     def find_slug_by_workspace_name(self, name: str) -> str | None:
-        """Return the PHP slug of the workspace whose name matches, or None."""
+        """Return the PHP slug of the workspace whose name matches, or None.
+
+        Checks unlocked workspaces first, then falls back to locked ones,
+        which getOngletTrie omits entirely (#169).
+        """
         for workspace in self.get_workspaces():
+            if workspace["name"] == name:
+                return workspace["slug"]
+        for workspace in self.get_locked_workspaces():
             if workspace["name"] == name:
                 return workspace["slug"]
         return None
