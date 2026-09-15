@@ -60,6 +60,8 @@ and this project adheres to
 
 ### Fixed
 
+- patch remaining frontend dependency vulnerabilities
+- remove vulnerable legacy tooling and crypto polyfills from Storybook
 - fix illustration page finish
 - fix CI checks (self-hosted runner deps, gitlint job, test-back env vars)
 - fix Resana access token refresh crashing with KeyError: 'access_token'
