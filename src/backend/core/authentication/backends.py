@@ -11,6 +11,7 @@ from mozilla_django_oidc.auth import (
     OIDCAuthenticationBackend as MozillaOIDCAuthenticationBackend,
 )
 
+from core.analytics import posthog_capture
 from core.encryption import encrypt_token
 from core.models import FeatureFlag, User
 from core.utils import is_feature
@@ -88,16 +89,19 @@ class OIDCAuthenticationBackend(MozillaOIDCAuthenticationBackend):
                 _("User info contained no recognizable user identification")
             )
 
+        is_new_user = False
         try:
             user = User.objects.get(sub=sub)
         except User.DoesNotExist:
             if self.get_settings("OIDC_CREATE_USER", True):
                 user = self.create_user(user_info)
+                is_new_user = True
             else:
                 user = None
 
         if user is not None:
             self._persist_oidc_tokens(user, access_token)
+            posthog_capture("user_login", user, {"is_new_user": is_new_user})
 
         return user
 

@@ -150,3 +150,17 @@ def test_non_resana_source_skips_token_check():
             view.validation(user, data, [workspace])
 
     mock_tm.assert_not_called()
+
+
+def test_create_export_captures_migration_started():
+    """Launching a migration emits migration_started for the workspace."""
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory()
+
+    with (
+        patch("core.api.views.workspaces_process.push_workspace_task"),
+        patch("core.api.views.workspaces_process.posthog_capture") as capture,
+    ):
+        _make_view().create_export(user, workspace, ["drive"])
+
+    capture.assert_called_once_with("migration_started", user, workspace=workspace)

@@ -2,7 +2,10 @@
 
 # pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
 
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
+
+from django.utils import timezone
 
 import pytest
 from django_celery_results.models import TaskResult
@@ -479,3 +482,52 @@ def test_task_failure_handler_sends_fail_mail():
     mock_mails_cls.return_value.send_fail_mail.assert_called_once_with(
         mock_extra_task.user, mock_workspace
     )
+
+
+# ---------------------------------------------------------------------------
+# migration_finished analytics
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "handler,status",
+    [(task_success_handler, "success"), (task_failure_handler, "failure")],
+)
+def test_task_handlers_capture_migration_finished(handler, status):
+    """Both end-of-task handlers emit migration_finished with the final status."""
+    mock_sender = MagicMock()
+    mock_sender.request.id = "task-id-4"
+
+    mock_task_result = MagicMock(spec=TaskResult)
+    mock_task_result.date_created = timezone.now() - timedelta(seconds=42)
+    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
+    mock_extra_task.task_result = mock_task_result
+    mock_workspace = MagicMock(spec=Workspace)
+    mock_workspace.destination_statuses = {}
+    mock_workspace.is_truncated = True
+    mock_workspace.download_errors = [{"name": "a"}, {"name": "b"}]
+    mock_extra_task.workspace = mock_workspace
+
+    with (
+        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
+        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.MailsManager"),
+        patch("core.processing.tasks.workspaces_counts", return_value={"c": 1}),
+        patch("core.processing.tasks.posthog_capture") as capture,
+    ):
+        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
+        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
+
+        handler(sender=mock_sender)
+
+    capture.assert_called_once()
+    event, user, properties = capture.call_args.args
+    assert event == "migration_finished"
+    assert user is mock_extra_task.user
+    assert capture.call_args.kwargs == {"workspace": mock_workspace}
+    assert properties["status"] == status
+    assert properties["is_truncated"] is True
+    assert properties["download_errors_count"] == 2
+    assert 42 <= properties["duration_seconds"] < 60
+    assert properties["$set"] == {"c": 1}
