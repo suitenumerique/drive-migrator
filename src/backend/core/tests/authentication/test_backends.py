@@ -1,5 +1,7 @@
 """Unit tests for the Authentication Backends."""
 
+from unittest.mock import patch
+
 from django.core.exceptions import SuspiciousOperation
 from django.utils import timezone
 
@@ -38,12 +40,16 @@ def test_authentication_getter_existing_user_no_email(
     monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", get_userinfo_mocked)
 
     # 1 SELECT to find user + 1 SELECT for unique validation (full_clean) + 1 UPDATE for tokens
-    with django_assert_num_queries(3):
+    with (
+        django_assert_num_queries(3),
+        patch("core.authentication.backends.posthog_capture") as capture,
+    ):
         user = klass.get_or_create_user(
             access_token="test-token", id_token=None, payload=None
         )
 
     assert user == db_user
+    capture.assert_called_once_with("user_login", user, {"is_new_user": False})
 
 
 def test_authentication_getter_new_user_no_email(monkeypatch):
@@ -58,14 +64,16 @@ def test_authentication_getter_new_user_no_email(monkeypatch):
 
     monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", get_userinfo_mocked)
 
-    user = klass.get_or_create_user(
-        access_token="test-token", id_token=None, payload=None
-    )
+    with patch("core.authentication.backends.posthog_capture") as capture:
+        user = klass.get_or_create_user(
+            access_token="test-token", id_token=None, payload=None
+        )
 
     assert user.sub == "123"
     assert user.email is None
     assert user.password == "!"
     assert models.User.objects.count() == 1
+    capture.assert_called_once_with("user_login", user, {"is_new_user": True})
 
 
 def test_authentication_getter_new_user_with_email(monkeypatch):
