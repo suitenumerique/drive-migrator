@@ -60,6 +60,8 @@ class Base(Configuration):
     variables:
 
     * DJANGO_SENTRY_DSN
+    * POSTHOG_KEY
+    * POSTHOG_HOST
     * DB_NAME
     * DB_HOST
     * DB_PASSWORD
