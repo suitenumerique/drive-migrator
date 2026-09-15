@@ -201,18 +201,18 @@ jobs:
 
       - name: Start Minio
         run: |
-          docker pull minio/minio
+          docker pull quay.io/minio/minio
           docker run -d --name minio \
             -p 9000:9000 \
             -e "MINIO_ACCESS_KEY=dinum" \
             -e "MINIO_SECRET_KEY=password" \
             -v /data/media:/data \
-            minio/minio server --console-address :9001 /data
+            quay.io/minio/minio server --console-address :9001 /data
           sleep 10
 
       - name: Configure MinIO
         run: |
-          MINIO=$(docker ps | grep minio/minio | sed -E 's/.*\s+([a-zA-Z0-9_-]+)$/\1/')
+          MINIO=$(docker ps | grep quay.io/minio/minio | sed -E 's/.*\s+([a-zA-Z0-9_-]+)$/\1/')
           docker exec ${MINIO} sh -c \
             "mc alias set dinum http://localhost:9000 dinum password && \
             mc alias ls"
