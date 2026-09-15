@@ -17,22 +17,34 @@ from core.models import Workspace
 
 
 @pytest.mark.django_db
-def test_send_migration_mail_renders_named_template_and_sends():
+@pytest.mark.parametrize(
+    "template_name",
+    ["fail", "archive_download", "drive_ready", "resana_ready", "resana_ready_errors"],
+)
+def test_send_migration_mail_renders_named_template_and_sends(template_name):
     """send_migration_mail() renders mail/html/{template_name}.html and
     mail/text/{template_name}.txt, then sends the resulting email to the user."""
     workspace = MagicMock(spec=Workspace)
-    workspace.title = "My Workspace"
+    workspace.title = "Équipe <projet> & partenaires"
     user = MagicMock()
     user.email = "user@example.com"
 
-    MailsManager().send_migration_mail(user, workspace, "fail", {"title": "Some Title"})
+    MailsManager().send_migration_mail(
+        user, workspace, template_name, {"title": "Some Title"}
+    )
 
     assert len(mail.outbox) == 1
     sent = mail.outbox[0]
     assert sent.subject == "Some Title"
     assert sent.to == ["user@example.com"]
     assert sent.from_email == settings.EMAIL_FROM
-    assert "My Workspace" in sent.body
+    assert "Équipe" in sent.body
+    html = sent.alternatives[0][0]
+    assert "Équipe &lt;projet&gt; &amp; partenaires" in html
+    for content in (sent.body, html):
+        assert "contacter le support" in content
+        assert "Ce mail a été envoyé" in content
+    assert "data:image/png;base64," in html
 
 
 @pytest.mark.django_db
