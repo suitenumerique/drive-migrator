@@ -6,6 +6,7 @@
             so the html-to-text command includes it within its output
         -->
         {% load i18n static extra_tags %}
+        {% base64_static 'images/mail-header-background.png' as mail_header_background %}
         {{ title }}
     </mj-preview>
     <mj-attributes>

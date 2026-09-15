@@ -74,6 +74,7 @@ and this project adheres to
 - bump djangorestframework to 3.17.2 (CVE-2026-73228)
 - bump next to 16.3.3 and storybook to 8.6.17
 - bump mjml to 5.0.0 and @html-to/text-cli to 0.6.0
+- preserve mail template includes and Django rendering with MJML 5
 - patch remaining brace-expansion vulnerabilities in frontend and mail dependencies
 
 ### Removed
