@@ -10,5 +10,12 @@ module.exports = {
       rootDir: __dirname,
     },
   },
-  ignorePatterns: ['node_modules', '.eslintrc.js', 'service-worker.js'],
+  ignorePatterns: [
+    'node_modules',
+    '.eslintrc.js',
+    'service-worker.js',
+    'next-env.d.ts',
+    'out',
+    'storybook-static',
+  ],
 };
