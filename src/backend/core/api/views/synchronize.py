@@ -2,6 +2,7 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.analytics import posthog_capture, workspaces_counts
 from core.api import APIException
 from core.api.permissions import IsAuthenticated
 from core.backends.source import SourceManager
@@ -24,4 +25,8 @@ class SynchronizeAPIView(APIView):
             manager.synchronize(request.user)
         except ResanaTokenExpired as exc:
             raise APIException("ResanaTokenRequired") from exc
+        counts = workspaces_counts(request.user)
+        posthog_capture(
+            "workspaces_synchronized", request.user, {**counts, "$set": counts}
+        )
         return Response()
