@@ -1,4 +1,4 @@
-import type { StorybookConfig } from '@storybook/nextjs';
+import type { StorybookConfig } from '@storybook/nextjs-vite';
 
 import { join, dirname } from 'path';
 import { createRequire } from 'module';
@@ -21,7 +21,7 @@ const config: StorybookConfig = {
     getAbsolutePath('@chromatic-com/storybook'),
   ],
   framework: {
-    name: getAbsolutePath('@storybook/nextjs'),
+    name: getAbsolutePath('@storybook/nextjs-vite'),
     options: {},
   },
   staticDirs: ['../public'],
