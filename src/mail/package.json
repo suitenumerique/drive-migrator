@@ -8,6 +8,9 @@
     "mjml": "5.0.0"
   },
   "private": true,
+  "resolutions": {
+    "deepmerge-ts": "8.0.0"
+  },
   "scripts": {
     "build-mjml-to-html": "bash ./bin/mjml-to-html",
     "build-html-to-plain-text": "bash ./bin/html-to-plain-text",

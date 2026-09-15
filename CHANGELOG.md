@@ -76,6 +76,7 @@ and this project adheres to
 - bump mjml to 5.0.0 and @html-to/text-cli to 0.6.0
 - preserve mail template includes and Django rendering with MJML 5
 - patch remaining brace-expansion vulnerabilities
+- patch deepmerge-ts uncontrolled recursion (CVE-2026-40345)
 
 ### Removed
 
