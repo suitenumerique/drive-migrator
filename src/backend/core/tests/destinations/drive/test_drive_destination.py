@@ -18,14 +18,17 @@ def _patch_mails_manager():
 
 
 def test_implements_abstract_destination():
+    """DriveDestinationBackend satisfies the AbstractDestinationBackend interface."""
     assert issubclass(DriveDestinationBackend, AbstractDestinationBackend)
 
 
 def test_name_is_drive():
+    """name class attribute is 'drive'."""
     assert DriveDestinationBackend.name == "drive"
 
 
 def test_label_is_set():
+    """label class attribute is a non-empty string."""
     assert isinstance(DriveDestinationBackend.label, str)
     assert DriveDestinationBackend.label != ""
 
