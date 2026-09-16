@@ -5,6 +5,7 @@
 # its progress-tracking state from the outside.
 
 import os
+import zipfile
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -95,7 +96,7 @@ def test_get_archive_path(tmp_path, settings):
 
 
 def test_zip_workspace_folder(tmp_path, settings):
-    """zip_workspace_folder() calls shutil.make_archive on the workspace path."""
+    """zip_workspace_folder() creates a zip archive of the workspace folder."""
     settings.APP_WORK_DIR = str(tmp_path)
     workspace = MagicMock(spec=Workspace)
     workspace.id = "ws-zip"
@@ -107,6 +108,59 @@ def test_zip_workspace_folder(tmp_path, settings):
     manager.zip_workspace_folder(workspace)
 
     assert os.path.exists(str(tmp_path / "workspace_ws-zip.zip"))
+
+
+def test_zip_workspace_folder_sets_utf8_flag_on_accented_filenames(tmp_path, settings):
+    """zip_workspace_folder() sets the ZIP UTF-8 language encoding flag on entries.
+
+    Without this flag, tools that follow the ZIP spec strictly (Windows Explorer,
+    some unzip clients) fall back to the local codepage to decode filenames, turning
+    accented bytes into mojibake (see issue #166: "Hébergement" -> "H俠ergement").
+    """
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = MagicMock(spec=Workspace)
+    workspace.id = "ws-accents"
+    workspace_dir = tmp_path / "workspace_ws-accents"
+    subdir = workspace_dir / "Hébergement"
+    subdir.mkdir(parents=True)
+    (subdir / "file.txt").write_text("content")
+
+    manager = ArchiveManager()
+    manager.zip_workspace_folder(workspace)
+
+    zip_path = tmp_path / "workspace_ws-accents.zip"
+    with zipfile.ZipFile(zip_path) as zip_file:
+        infos = zip_file.infolist()
+        assert infos, "archive should not be empty"
+        for info in infos:
+            assert (
+                info.flag_bits & 0x800
+            ), f"UTF-8 flag missing on entry {info.filename!r}"
+        assert any("Hébergement" in info.filename for info in infos)
+
+
+def test_zip_workspace_folder_preserves_file_modification_time(tmp_path, settings):
+    """zip_workspace_folder() keeps each entry's original mtime.
+
+    Forcing the UTF-8 flag must rewrite entries without resetting their metadata
+    (an earlier fix attempt rebuilt ZipInfo from scratch and reset every entry's
+    date to the zipfile default of 1980-01-01).
+    """
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = MagicMock(spec=Workspace)
+    workspace.id = "ws-mtime"
+    workspace_dir = tmp_path / "workspace_ws-mtime"
+    workspace_dir.mkdir()
+    (workspace_dir / "file.txt").write_text("content")
+
+    manager = ArchiveManager()
+    manager.zip_workspace_folder(workspace)
+
+    zip_path = tmp_path / "workspace_ws-mtime.zip"
+    with zipfile.ZipFile(zip_path) as zip_file:
+        info = zip_file.getinfo("file.txt")
+
+    assert info.date_time != (1980, 1, 1, 0, 0, 0)
 
 
 def test_delete_archive_removes_existing_file(tmp_path, settings):

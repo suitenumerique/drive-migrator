@@ -79,6 +79,7 @@ and this project adheres to
 - exclude Resana workspaces where user isn't Animateur from migration #110 #160
 - exclude Resana personal workspaces from migration by default #163
 - fix user.csv not generated for locked Resana workspaces #169
+- fix accented filenames mangled in workspace ZIP export #166
 
 ### Removed
 

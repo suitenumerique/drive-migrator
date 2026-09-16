@@ -3,6 +3,7 @@ import shutil
 import threading
 import time
 import urllib.parse
+import zipfile
 
 from django.conf import settings
 
@@ -47,6 +48,24 @@ class ArchiveManager:
         folder_creator = FolderCreator()
         path = folder_creator.get_workspace_path(workspace)
         shutil.make_archive(path, self.archive_format, path)
+        self._force_utf8_filenames(path + "." + self.archive_format)
+
+    @staticmethod
+    def _force_utf8_filenames(zip_path):
+        # shutil.make_archive (via zipfile) silently falls back to CP437 for
+        # non-ASCII filenames instead of setting the UTF-8 language encoding
+        # flag, which strict unzip clients then misread as mojibake instead of
+        # accented characters (see issue #166). Rewrite each entry with the
+        # flag set, without touching how the archive itself was built.
+        tmp_path = zip_path + ".utf8"
+        with (
+            zipfile.ZipFile(zip_path) as src,
+            zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as dst,
+        ):
+            for info in src.infolist():
+                info.flag_bits |= 0x800
+                dst.writestr(info, src.read(info.filename))
+        os.replace(tmp_path, zip_path)
 
     def get_archive_path(self, workspace: Workspace):
         folder_creator = FolderCreator()
