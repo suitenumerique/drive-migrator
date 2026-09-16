@@ -101,7 +101,6 @@ def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     raw_workspaces = [
         {"uuid": "ws-1", "name": "Espace Projet", "isPersonalWorkspace": False},
-        {"uuid": "ws-2", "name": "Mon espace", "isPersonalWorkspace": True},
     ]
     user = MagicMock()
 
@@ -125,11 +124,10 @@ def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
                 )
                 result = ResanaSourceBackend().get_workspaces(user)
 
-    assert len(result) == 2
-    assert all(isinstance(ws, SourceWorkspace) for ws in result)
+    assert len(result) == 1
+    assert isinstance(result[0], SourceWorkspace)
     assert result[0].id == "ws-1"
     assert result[0].title == "Espace Projet"
-    assert result[1].id == "ws-2"
 
 
 def test_get_workspaces_unescapes_html_entities_in_title(settings):
@@ -286,10 +284,35 @@ def test_get_workspaces_includes_workspace_when_user_is_manager(settings):
     assert result[0].id == "ws-1"
 
 
-def test_get_workspaces_includes_personal_workspace_without_role_check(settings):
-    """A personal workspace is always included: there's no member/role concept there."""
+def test_get_workspaces_excludes_personal_workspace_by_default(settings):
+    """A personal workspace isn't offered for migration by default (issue #163)."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    settings.RESANA_MIGRATE_PERSONAL_WORKSPACES = False
+    raw_workspaces = [
+        {"uuid": "ws-1", "name": "Mon espace", "isPersonalWorkspace": True},
+    ]
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client, mock_members, raw_workspaces=raw_workspaces
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    assert not result
+
+
+def test_get_workspaces_includes_personal_workspace_when_setting_enabled(settings):
+    """RESANA_MIGRATE_PERSONAL_WORKSPACES=True re-enables migrating personal workspaces."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    settings.RESANA_MIGRATE_PERSONAL_WORKSPACES = True
     raw_workspaces = [
         {"uuid": "ws-1", "name": "Mon espace", "isPersonalWorkspace": True},
     ]
@@ -307,6 +330,7 @@ def test_get_workspaces_includes_personal_workspace_without_role_check(settings)
                 result = ResanaSourceBackend().get_workspaces(user)
 
     assert len(result) == 1
+    assert result[0].id == "ws-1"
 
 
 def test_get_workspaces_excludes_workspace_absent_from_lister_mes_espaces(settings):

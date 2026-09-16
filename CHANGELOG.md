@@ -72,6 +72,7 @@ and this project adheres to
 - retry Drive API calls on transient 5xx errors instead of failing #208
 - retry Resana file download and skip failing files instead of aborting #175
 - exclude Resana workspaces where user isn't Animateur from migration #110 #160
+- exclude Resana personal workspaces from migration by default #163
 
 ### Removed
 

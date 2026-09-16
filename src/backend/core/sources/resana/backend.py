@@ -48,8 +48,9 @@ class ResanaSourceBackend(AbstractSourceBackend):
         )
 
     def get_workspaces(self, user) -> list[SourceWorkspace]:
-        """Return workspaces where `user` can migrate: personal workspaces, and
-        shared workspaces where the user holds the GESTIONNAIRE (Animateur) role.
+        """Return workspaces where `user` can migrate: shared workspaces where the
+        user holds the GESTIONNAIRE (Animateur) role, and personal workspaces
+        only when RESANA_MIGRATE_PERSONAL_WORKSPACES is enabled (issue #163).
 
         Resana's GED API lists every workspace the user belongs to regardless of
         role, so Lecteur/Contributeur-only workspaces are filtered out here using
@@ -67,7 +68,10 @@ class ResanaSourceBackend(AbstractSourceBackend):
         workspaces = []
         for ws in client.get_workspaces():
             name = html.unescape(ws["name"])
-            if not ws.get("isPersonalWorkspace") and name not in manager_names:
+            if ws.get("isPersonalWorkspace"):
+                if not settings.RESANA_MIGRATE_PERSONAL_WORKSPACES:
+                    continue
+            elif name not in manager_names:
                 continue
             workspaces.append(SourceWorkspace(id=ws["uuid"], title=name, raw_data=ws))
         return workspaces

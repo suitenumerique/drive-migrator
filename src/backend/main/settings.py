@@ -210,6 +210,11 @@ class Base(Configuration):
     RESANA_DEFAULT_ORGANIZATION = values.Value(
         environ_name="RESANA_DEFAULT_ORGANIZATION", environ_prefix=None
     )
+    # Personal workspaces are excluded from migration by default (issue #163).
+    # Set to True to offer them for migration again.
+    RESANA_MIGRATE_PERSONAL_WORKSPACES = values.BooleanValue(
+        False, environ_name="RESANA_MIGRATE_PERSONAL_WORKSPACES", environ_prefix=None
+    )
     # Retry tuning for transient network errors on Resana/Interstis API calls.
     RESANA_RETRY_MAX_ATTEMPTS = values.IntegerValue(
         3, environ_name="RESANA_RETRY_MAX_ATTEMPTS", environ_prefix=None
