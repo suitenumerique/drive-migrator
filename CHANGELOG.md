@@ -49,6 +49,7 @@ and this project adheres to
 
 ### Changed
 
+- update the logo in mail header
 - add tooltip for cropped title
 - update zip archive download journey
 - specify logo fichiers
