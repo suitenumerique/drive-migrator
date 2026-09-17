@@ -186,3 +186,12 @@ data:
   .dockerconfigjson: {{ template "template.secret.dockerconfigjson.data" .imageCredentials }}
 {{- end -}}
 {{- end }}
+
+{{/*
+Full name for the posthog proxy
+
+Requires top level scope
+*/}}
+{{- define "template.posthog.fullname" -}}
+{{ include "template.fullname" . }}-posthog
+{{- end }}
