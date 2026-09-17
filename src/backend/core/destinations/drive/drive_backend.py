@@ -228,6 +228,12 @@ class DriveBackend:
                     _is_server_error(http_error)
                     or _is_duplicate_id_conflict(http_error)
                 ):
+                    logger.warning(
+                        "item creation failed (%s) for %s: %s",
+                        http_error.response.status_code,
+                        url,
+                        http_error.response.text[:2000],
+                    )
                     raise
                 existing_item = self._get_item_if_exists_or_none(item_id)
                 if existing_item is not None:

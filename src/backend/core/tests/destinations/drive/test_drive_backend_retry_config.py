@@ -235,11 +235,14 @@ def test_service_account_create_subfolder_does_not_retry_on_client_error(setting
     backend._access_token = "tok"  # pylint: disable=protected-access
     backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
 
+    error = _server_error(400)
+    error.response.text = "blocked by proxy"
     error_response = MagicMock()
-    error_response.raise_for_status.side_effect = _server_error(400)
+    error_response.raise_for_status.side_effect = error
 
     with (
         patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch.object(drive_backend.logger, "warning") as mock_warning,
         pytest.raises(HTTPError),
     ):
         mock_requests.post.return_value = error_response
@@ -247,6 +250,7 @@ def test_service_account_create_subfolder_does_not_retry_on_client_error(setting
 
     assert mock_requests.post.call_count == 1
     mock_requests.get.assert_not_called()
+    assert "blocked by proxy" in mock_warning.call_args_list[0][0]
 
 
 def test_service_account_create_subfolder_returns_existing_item_after_server_error(
