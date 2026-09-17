@@ -8,19 +8,19 @@
         <mj-column>
           <!-- Welcome Message -->
           <mj-text>
-            <h1>{% blocktrans %}Votre espace La Suite Drive est prêt !{% endblocktrans %}</h1>
+            <h1>{% blocktrans %}Votre espace LaSuite Fichiers est prêt !{% endblocktrans %}</h1>
           </mj-text>
           <mj-divider border-width="1px" border-style="solid" border-color="#DDDDDD" width="30%" align="left"/>
 
           <!-- Main Message -->
-          <mj-text>{% blocktrans %}Suite à votre demande, la migration de votre espace {{source_label}} <strong>{{workspace_name}}</strong> vers La Suite Drive est finalisée.{% endblocktrans %}</mj-text>
-          <mj-text>{% blocktrans %}Connectez-vous à La Suite Drive afin de retrouver votre nouvel espace de travail.{% endblocktrans %}</mj-text>
+          <mj-text>{% blocktrans %}Suite à votre demande, la migration de votre espace {{source_label}} <strong>{{workspace_name}}</strong> vers LaSuite Fichiers est finalisée.{% endblocktrans %}</mj-text>
+          <mj-text>{% blocktrans %}Connectez-vous à LaSuite Fichiers afin de retrouver votre nouvel espace de travail.{% endblocktrans %}</mj-text>
 
           <mj-include path="./partial/support.mjml" />
 
           <!-- Signature -->
           <mj-text>
-            <p>{% trans "La Suite Numérique" %}</p>
+            <p>{% trans "LaSuite" %}</p>
           </mj-text>
         </mj-column>
       </mj-section>
