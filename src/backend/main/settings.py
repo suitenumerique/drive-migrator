@@ -275,6 +275,18 @@ class Base(Configuration):
         DRIVE_BASE_URL, environ_name="DRIVE_FRONTEND_URL", environ_prefix=None
     )
 
+    # Help menu documentation link and contact email, displayed by the frontend.
+    HELP_DOCUMENTATION_URL = values.Value(
+        "https://example.com/help",
+        environ_name="HELP_DOCUMENTATION_URL",
+        environ_prefix=None,
+    )
+    HELP_CONTACT_EMAIL = values.Value(
+        "help@example.com",
+        environ_name="HELP_CONTACT_EMAIL",
+        environ_prefix=None,
+    )
+
     DRIVE_OIDC_TOKEN_ENDPOINT = values.Value(
         environ_name="DRIVE_OIDC_TOKEN_ENDPOINT", environ_prefix=None, default=""
     )

@@ -15,5 +15,7 @@ class MigrationConfigApiView(APIView):
             {
                 "file_limit_per_workspace": settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE,
                 "drive_frontend_url": settings.DRIVE_FRONTEND_URL,
+                "help_documentation_url": settings.HELP_DOCUMENTATION_URL,
+                "help_contact_email": settings.HELP_CONTACT_EMAIL,
             }
         )
