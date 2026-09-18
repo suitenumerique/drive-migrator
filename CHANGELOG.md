@@ -48,6 +48,7 @@ and this project adheres to
 - add PostHog events for login, sync and migration outcome
 - add opt-in per-file migration integrity report #235
 - show migrated/source file counts and gaps on workspace cards #235
+- lock Resana workspace and grant folder access during migration #215
 
 ### Changed
 

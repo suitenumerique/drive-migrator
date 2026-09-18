@@ -117,30 +117,39 @@ def export(self, data):  # pylint: disable=unused-argument
     source_backend = SourceManager().get_backend()
     list_work_dir()
 
-    logger.info("Calling get_workspace_structure ...")
-    folder = source_backend.get_workspace_structure(workspace)
-    debug_folder(folder)
-    # Snapshots the source tree, so it must be created before truncation.
-    integrity_tracker = IntegrityTracker(workspace, folder)
-
-    file_limit = settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE
-    if file_limit > 0:
-        workspace.is_truncated = truncate_folder_files(folder, file_limit)
-        workspace.save()
-        logger.info(
-            "File limit %s applied, is_truncated=%s",
-            file_limit,
-            workspace.is_truncated,
-        )
-    integrity_tracker.set_kept_files(folder)
-
-    run_failed = True
     try:
-        _export_workspace(workspace, user, folder, source_backend, integrity_tracker)
-        run_failed = False
+        logger.info("Calling begin_export ...")
+        source_backend.begin_export(workspace)
+
+        logger.info("Calling get_workspace_structure ...")
+        folder = source_backend.get_workspace_structure(workspace)
+        debug_folder(folder)
+        # Snapshots the source tree, so it must be created before truncation.
+        integrity_tracker = IntegrityTracker(workspace, folder)
+
+        file_limit = settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE
+        if file_limit > 0:
+            workspace.is_truncated = truncate_folder_files(folder, file_limit)
+            workspace.save()
+            logger.info(
+                "File limit %s applied, is_truncated=%s",
+                file_limit,
+                workspace.is_truncated,
+            )
+        integrity_tracker.set_kept_files(folder)
+
+        run_failed = True
+        try:
+            _export_workspace(
+                workspace, user, folder, source_backend, integrity_tracker
+            )
+            run_failed = False
+        finally:
+            # Before the task_success/task_failure handlers delete the local folder.
+            integrity_tracker.save(self.request.id, run_failed=run_failed)
     finally:
-        # Before the task_success/task_failure handlers delete the local folder.
-        integrity_tracker.save(self.request.id, run_failed=run_failed)
+        logger.info("Calling finalize_export ...")
+        source_backend.finalize_export(workspace)
 
     logger.info("Task done")
 
