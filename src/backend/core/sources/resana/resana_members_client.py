@@ -77,8 +77,8 @@ class ResanaMembersClient:
                 return workspace["slug"]
         return None
 
-    def _fetch_raw_members(self, slug: str) -> dict:
-        """Return the raw listerUtilisateursAdminDroits payload, keyed by member.
+    def _fetch_raw_members(self, slug: str) -> list[dict]:
+        """Return the raw listerUtilisateurByPerimetreAndGroupe payload.
 
         Requires the workspace to first be placed in session via
         GET .../perimetre/consulter/{slug} — a legacy constraint unrelated to
@@ -90,8 +90,8 @@ class ResanaMembersClient:
         )
         resp.raise_for_status()
         resp = self.session.post(
-            f"{self.base_url}/public/perimetre/listerUtilisateursAdminDroits",
-            data={"perimetre_id": slug},
+            f"{self.base_url}/public/utilisateur/listerUtilisateurByPerimetreAndGroupe",
+            data={"id_perimetre": slug, "chargerAllUtilisateurs": "1"},
             timeout=_REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
@@ -101,11 +101,11 @@ class ResanaMembersClient:
         """Return workspace members as {name, firstName, email} dicts."""
         return [
             {
-                "name": entry["utilisateur"].get("nom", ""),
-                "firstName": entry["utilisateur"].get("prenom", ""),
-                "email": entry["utilisateur"].get("mail_inscription", ""),
+                "name": entry.get("nom", ""),
+                "firstName": entry.get("prenom", ""),
+                "email": entry.get("mail_inscription", ""),
             }
-            for entry in self._fetch_raw_members(slug).values()
+            for entry in self._fetch_raw_members(slug)
         ]
 
     def get_workspaces_with_role(self) -> list[dict]:

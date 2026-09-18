@@ -264,14 +264,14 @@ def test_find_slug_by_workspace_name_falls_back_to_locked_workspaces():
 
 
 # ---------------------------------------------------------------------------
-# list_workspace_members() — Endpoint 4 (listerUtilisateursAdminDroits)
+# list_workspace_members() — listerUtilisateurByPerimetreAndGroupe
 # ---------------------------------------------------------------------------
 
 
 def test_list_workspace_members_visits_consulter_page_first():
     """list_workspace_members() still visits consulter/{slug} first (mandatory legacy constraint)."""
     client = _make_client()
-    client.session.post.return_value.json.return_value = {}
+    client.session.post.return_value.json.return_value = []
 
     client.list_workspace_members(SLUG)
 
@@ -280,33 +280,31 @@ def test_list_workspace_members_visits_consulter_page_first():
     )
 
 
-def test_list_workspace_members_posts_perimetre_id():
-    """list_workspace_members() POSTs perimetre_id=slug to listerUtilisateursAdminDroits."""
+def test_list_workspace_members_posts_id_perimetre_and_charger_all():
+    """list_workspace_members() POSTs id_perimetre and chargerAllUtilisateurs=1."""
     client = _make_client()
-    client.session.post.return_value.json.return_value = {}
+    client.session.post.return_value.json.return_value = []
 
     client.list_workspace_members(SLUG)
 
     client.session.post.assert_called_once_with(
-        f"{BASE_URL}/public/perimetre/listerUtilisateursAdminDroits",
-        data={"perimetre_id": SLUG},
+        f"{BASE_URL}/public/utilisateur/listerUtilisateurByPerimetreAndGroupe",
+        data={"id_perimetre": SLUG, "chargerAllUtilisateurs": "1"},
         timeout=30,
     )
 
 
 def test_list_workspace_members_extracts_name_firstname_email():
-    """list_workspace_members() maps each entry's nested utilisateur to {name, firstName, email}."""
+    """list_workspace_members() maps each flat entry to {name, firstName, email}."""
     client = _make_client()
-    client.session.post.return_value.json.return_value = {
-        "DUPONT_Jean_1234567": {
-            "utilisateur": {
-                "nom": "Dupont",
-                "prenom": "Jean",
-                "mail_inscription": "jean.dupont@example.test",
-            },
-            "profil_droit": "10821219",
+    client.session.post.return_value.json.return_value = [
+        {
+            "id": "1234567",
+            "nom": "Dupont",
+            "prenom": "Jean",
+            "mail_inscription": "jean.dupont@example.test",
         }
-    }
+    ]
 
     result = client.list_workspace_members(SLUG)
 
@@ -322,7 +320,7 @@ def test_list_workspace_members_extracts_name_firstname_email():
 def test_list_workspace_members_empty_when_no_members():
     """list_workspace_members() returns an empty list when the API returns no entries."""
     client = _make_client()
-    client.session.post.return_value.json.return_value = {}
+    client.session.post.return_value.json.return_value = []
 
     result = client.list_workspace_members(SLUG)
 
