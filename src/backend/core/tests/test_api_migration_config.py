@@ -11,10 +11,10 @@ pytestmark = pytest.mark.django_db
 
 
 def test_migration_config_anonymous():
-    """Anonymous users must not access the migration config."""
+    """Anonymous users can read the migration config (used on public pages)."""
     client = APIClient()
     response = client.get("/api/v1.0/migration-config")
-    assert response.status_code == 401
+    assert response.status_code == 200
 
 
 @override_settings(
