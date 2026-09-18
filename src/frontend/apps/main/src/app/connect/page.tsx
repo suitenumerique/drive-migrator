@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import FichiersLogo from '@/assets/icons/logo-fichiers.svg';
 import ResanaLogoFull from '@/assets/icons/logo-resana-full.svg';
+import ProConnectLogo from '@/assets/icons/proconnect-logo.svg';
 import { Button } from '@/components/Button/Button';
 import { ArrowLeftIcon } from '@/components/icons/ArrowLeftIcon';
 import { login, logout, useAuth } from '@/core/auth/Auth';
@@ -250,6 +251,10 @@ function ConnectPageContent() {
     return null;
   }
 
+  const isArchiveZipTarget = target === 'archive-zip';
+  const authToolName = isArchiveZipTarget ? 'ProConnect' : 'Fichiers';
+  const AuthToolLogo = isArchiveZipTarget ? ProConnectLogo : FichiersLogo;
+
   return (
     <div className="migration-connect container">
       <Button
@@ -269,9 +274,12 @@ function ConnectPageContent() {
 
       <div className="migration-connect__tools">
         <ConnectToolRow
-          name="ProConnect"
+          name={authToolName}
           logo={
-            <FichiersLogo className="migration-connect__logo-svg" aria-hidden />
+            <AuthToolLogo
+              className="migration-connect__logo-svg"
+              aria-hidden
+            />
           }
           isDone={proConnectDone}
           actionLabel={proConnectDone ? t('Se déconnecter') : t('Se connecter')}

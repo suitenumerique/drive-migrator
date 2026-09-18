@@ -49,6 +49,7 @@ and this project adheres to
 
 ### Changed
 
+- show ProConnect logo on connect page for zip target
 - update the name of LaSuite Drive in mail
 - update the logo in mail header
 - add tooltip for cropped title
