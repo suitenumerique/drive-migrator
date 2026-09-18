@@ -55,6 +55,10 @@ class ResanaMembersClient:
         resp.raise_for_status()
         return self._parse_workspaces(resp.json())
 
+    def is_workspace_locked(self, slug: str) -> bool:
+        """Return whether `slug` currently appears in the locked ("verrouille") workspaces list."""
+        return any(ws["slug"] == slug for ws in self.get_locked_workspaces())
+
     @staticmethod
     def _parse_workspaces(data: dict) -> list[dict]:
         return [

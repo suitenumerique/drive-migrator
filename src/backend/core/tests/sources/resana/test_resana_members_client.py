@@ -199,6 +199,53 @@ def test_get_locked_workspaces_flattens_tabs_into_slug_name_pairs():
 
 
 # ---------------------------------------------------------------------------
+# is_workspace_locked()
+# ---------------------------------------------------------------------------
+
+
+def test_is_workspace_locked_returns_true_when_slug_in_locked_list():
+    """is_workspace_locked() is True when the slug appears in get_locked_workspaces()."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = (
+        _LISTER_MES_ESPACES_LOCKED_RESPONSE
+    )
+
+    assert client.is_workspace_locked("2137454") is True
+
+
+def test_is_workspace_locked_returns_false_when_slug_not_in_locked_list():
+    """is_workspace_locked() is False when the slug is absent from the locked list."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = (
+        _LISTER_MES_ESPACES_LOCKED_RESPONSE
+    )
+
+    assert client.is_workspace_locked("2137419") is False
+
+
+def test_is_workspace_locked_returns_false_when_no_workspaces_locked():
+    """is_workspace_locked() is False when the locked list is empty."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {"tabData": []}
+
+    assert client.is_workspace_locked("2137419") is False
+
+
+def test_is_workspace_locked_posts_to_lister_mes_espaces():
+    """is_workspace_locked() reuses get_locked_workspaces()'s endpoint, not a new one."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {"tabData": []}
+
+    client.is_workspace_locked("2137419")
+
+    client.session.post.assert_called_once_with(
+        f"{BASE_URL}/public/perimetre/listerMesEspaces",
+        data={"archiveUnique": "1"},
+        timeout=30,
+    )
+
+
+# ---------------------------------------------------------------------------
 # find_slug_by_workspace_name()
 # ---------------------------------------------------------------------------
 
