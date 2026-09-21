@@ -23,17 +23,17 @@
     "format:fix": "prettier --write ."
   },
   "resolutions": {
-    "@types/node": "20.14.2",
-    "@types/react": "19.1.8",
-    "@types/react-dom": "19.1.6",
-    "@gouvfr-lasuite/cunningham-react": "4.3.0",
-    "cross-env": "7.0.3",
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@gouvfr-lasuite/cunningham-react": "4.4.0",
+    "cross-env": "10.1.0",
     "react": "19.1.2",
     "react-dom": "19.1.2",
-    "react-aria-components": "1.16.0",
-    "typescript": "5.4.5",
-    "**/js-yaml": "4.3.2",
-    "**/@next/eslint-plugin-next/glob": "10.5.0",
-    "**/@typescript-eslint/typescript-estree/minimatch": "9.0.9"
+    "react-aria-components": "1.21.1",
+    "typescript": "7.0.2",
+    "**/js-yaml": "5.4.2",
+    "**/@next/eslint-plugin-next/glob": "13.0.6",
+    "**/@typescript-eslint/typescript-estree/minimatch": "10.2.6"
   }
 }
