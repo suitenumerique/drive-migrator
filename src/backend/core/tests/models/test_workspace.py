@@ -58,6 +58,12 @@ def test_get_destination_metadata_defaults_to_empty_dict():
     assert workspace.get_destination_metadata("unknown") == {}
 
 
+def test_source_lock_state_defaults_to_empty_dict():
+    """A new Workspace has an empty source_lock_state dict."""
+    workspace = Workspace()
+    assert workspace.source_lock_state == {}
+
+
 def test_compute_status_no_destinations():
     """compute_status returns NONE when no destination statuses are set."""
     workspace = Workspace()

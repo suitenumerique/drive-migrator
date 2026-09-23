@@ -104,6 +104,12 @@ class Workspace(BaseModel):
     # True/False: explicit per-workspace override, takes precedence over the flag.
     is_file_integrity_tracked = models.BooleanField(null=True, blank=True, default=None)
 
+    # Source-side lock/permission bookkeeping recorded during migration (e.g. whether
+    # *we* locked the workspace ourselves, which folders *we* granted access to), so
+    # finalize_export only reverses what it actually changed (#215). Kept separate from
+    # destination_metadata, which is keyed by destination and owned by destination backends.
+    source_lock_state = models.JSONField(default=dict, blank=True)
+
     # Files that FolderCreator failed to download from the source backend.
     # Each entry: {"id": str, "name": str, "path": str, "error": str}, where "id"
     # is the source file id and "path" is relative to the workspace root (see

@@ -21,6 +21,7 @@ def _make_workspace(user=None):
     ws = MagicMock()
     ws.source_id = "ws-uuid"
     ws.migration_user = user or MagicMock()
+    ws.source_lock_state = {}
     return ws
 
 
@@ -612,9 +613,10 @@ def test_download_file_raises_when_no_user_set(settings):
 # ---------------------------------------------------------------------------
 
 
-def _patch_members_client(mock_cls, slug="2137419", members=None):
+def _patch_members_client(mock_cls, slug="2137419", members=None, is_locked=False):
     mock_cls.return_value.find_slug_by_workspace_name.return_value = slug
     mock_cls.return_value.list_workspace_members.return_value = members or []
+    mock_cls.return_value.is_workspace_locked.return_value = is_locked
 
 
 def test_prepare_export_populates_members_when_workspace_found(settings):
