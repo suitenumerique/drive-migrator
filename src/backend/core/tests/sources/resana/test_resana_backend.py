@@ -614,7 +614,7 @@ def test_download_file_raises_when_no_user_set(settings):
 
 
 def _patch_members_client(mock_cls, slug="2137419", members=None, is_locked=False):
-    mock_cls.return_value.find_slug_by_workspace_name.return_value = slug
+    mock_cls.return_value.find_slug_by_workspace_uuid.return_value = slug
     mock_cls.return_value.list_workspace_members.return_value = members or []
     mock_cls.return_value.is_workspace_locked.return_value = is_locked
 
@@ -638,8 +638,8 @@ def test_prepare_export_populates_members_when_workspace_found(settings):
     workspace.save.assert_called_once()
 
 
-def test_prepare_export_resolves_slug_by_workspace_title(settings):
-    """prepare_export() looks up the PHP slug using workspace.title."""
+def test_prepare_export_resolves_slug_by_workspace_source_id(settings):
+    """prepare_export() looks up the PHP slug using the GED UUID, not the title."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.title = "TEST Worskspace"
@@ -650,8 +650,8 @@ def test_prepare_export_resolves_slug_by_workspace_title(settings):
             _patch_members_client(mock_client)
             ResanaSourceBackend().prepare_export(workspace, "/tmp/workdir")
 
-    mock_client.return_value.find_slug_by_workspace_name.assert_called_once_with(
-        "TEST Worskspace"
+    mock_client.return_value.find_slug_by_workspace_uuid.assert_called_once_with(
+        "ws-uuid"
     )
 
 

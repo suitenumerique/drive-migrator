@@ -117,7 +117,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
     def prepare_export(self, workspace, local_folder_path: str) -> None:
         self._user = workspace.migration_user
         client = self._get_members_client()
-        slug = client.find_slug_by_workspace_name(workspace.title)
+        slug = client.find_slug_by_workspace_uuid(workspace.source_id)
         if slug is None:
             return
         workspace.members = client.list_workspace_members(slug)
@@ -136,7 +136,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
         """
         self._user = workspace.migration_user
         members_client = self._get_members_client()
-        slug = members_client.find_slug_by_workspace_name(workspace.title)
+        slug = members_client.find_slug_by_workspace_uuid(workspace.source_id)
         if slug is None:
             return
 

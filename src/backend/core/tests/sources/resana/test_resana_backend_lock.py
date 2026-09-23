@@ -28,7 +28,7 @@ def _make_workspace(user=None):
 
 
 def _patch_members_client(mock_cls, slug="2137419", members=None, is_locked=False):
-    mock_cls.return_value.find_slug_by_workspace_name.return_value = slug
+    mock_cls.return_value.find_slug_by_workspace_uuid.return_value = slug
     mock_cls.return_value.list_workspace_members.return_value = members or []
     # An unlocked workspace reads as locked once begin_export() has frozen it.
     mock_cls.return_value.is_workspace_locked.side_effect = (
@@ -382,8 +382,8 @@ def test_finalize_export_does_nothing_when_no_slug_recorded(settings):
     workspace.save.assert_not_called()
 
 
-def test_finalize_export_uses_recorded_slug_without_resolving_title(settings):
-    """finalize_export() acts on the slug recorded by begin_export(), not a title lookup."""
+def test_finalize_export_uses_recorded_slug_without_resolving_it_again(settings):
+    """finalize_export() acts on the slug recorded by begin_export(), not a new lookup."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.title = "Renamed or duplicated title"
@@ -403,7 +403,7 @@ def test_finalize_export_uses_recorded_slug_without_resolving_title(settings):
                 ResanaSourceBackend().finalize_export(workspace)
 
     manager.unlock_workspace.assert_called_once_with("recorded-slug")
-    mock_members.return_value.find_slug_by_workspace_name.assert_not_called()
+    mock_members.return_value.find_slug_by_workspace_uuid.assert_not_called()
 
 
 def test_finalize_export_does_not_raise_when_lock_client_cannot_be_built(settings):
