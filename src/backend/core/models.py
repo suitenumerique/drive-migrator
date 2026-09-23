@@ -98,6 +98,13 @@ class Workspace(BaseModel):
     # this workspace's file tree (i.e. it had more files than the configured limit).
     is_truncated = models.BooleanField(default=False)
 
+    # Source-side lock/permission bookkeeping recorded during migration (e.g. whether
+    # *we* locked the workspace ourselves, which folders *we* granted access to), so
+    # finalize_export only reverses what it actually changed (#215). Not general-purpose
+    # metadata; see destination_metadata, which is NOT safe to reuse here: destination
+    # backends replace it wholesale mid-task (see resana_backend.py's set_destination_metadata).
+    source_lock_state = models.JSONField(default=dict, blank=True)
+
     # Files that FolderCreator failed to download from the source backend.
     # Each entry: {"name": str, "path": str, "error": str}, where "path" is
     # relative to the workspace root (see FolderCreator.get_workspace_path).
