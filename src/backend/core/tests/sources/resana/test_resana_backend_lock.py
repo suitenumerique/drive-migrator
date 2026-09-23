@@ -29,7 +29,7 @@ def _make_workspace(user=None):
 
 
 def _patch_members_client(mock_cls, slug="2137419", members=None, is_locked=False):
-    mock_cls.return_value.find_slug_by_workspace_name.return_value = slug
+    mock_cls.return_value.find_slug_by_workspace_uuid.return_value = slug
     mock_cls.return_value.list_workspace_members.return_value = members or []
     # An unlocked workspace reads as locked once begin_export() has frozen it.
     mock_cls.return_value.is_workspace_locked.side_effect = (
@@ -65,6 +65,25 @@ def test_begin_export_does_nothing_when_slug_not_found(settings):
 
     mock_lock.return_value.lock_workspace.assert_not_called()
     workspace.save.assert_not_called()
+
+
+def test_begin_export_logs_warning_when_slug_not_found(settings):
+    """An unresolved slug must not be silent: the migration then runs unlocked."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = _make_workspace()
+
+    with (
+        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
+        patch("core.sources.resana.backend.ResanaMembersClient") as mock_members,
+        patch("core.sources.resana.backend.ResanaLockClient"),
+        patch("core.sources.resana.backend.logger") as mock_logger,
+    ):
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        _patch_members_client(mock_members, slug=None)
+        ResanaSourceBackend().begin_export(workspace)
+
+    mock_logger.warning.assert_called_once()
+    assert "ws-uuid" in mock_logger.warning.call_args[0]
 
 
 def test_begin_export_locks_workspace_when_not_already_locked(settings):
@@ -404,8 +423,8 @@ def test_finalize_export_does_nothing_when_no_slug_recorded(settings):
     workspace.save.assert_not_called()
 
 
-def test_finalize_export_uses_recorded_slug_without_resolving_title(settings):
-    """finalize_export() acts on the slug recorded by begin_export(), not a title lookup."""
+def test_finalize_export_uses_recorded_slug_without_resolving_it_again(settings):
+    """finalize_export() acts on the slug recorded by begin_export(), not a new lookup."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.title = "Renamed or duplicated title"
@@ -425,7 +444,7 @@ def test_finalize_export_uses_recorded_slug_without_resolving_title(settings):
                 ResanaSourceBackend().finalize_export(workspace)
 
     manager.unlock_workspace.assert_called_once_with("recorded-slug")
-    mock_members.return_value.find_slug_by_workspace_name.assert_not_called()
+    mock_members.return_value.find_slug_by_workspace_uuid.assert_not_called()
 
 
 def test_finalize_export_does_not_raise_when_lock_client_cannot_be_built(settings):
