@@ -33,7 +33,7 @@ class ResanaMembersClient:
         self.session.headers["X-CSRF-TOKEN"] = csrf_token
 
     def get_workspaces(self) -> list[dict]:
-        """Return all unlocked workspaces accessible to the current user as {slug, name} dicts."""
+        """Return all unlocked workspaces accessible to the current user as {slug, name, uuid} dicts."""
         resp = self.session.post(
             f"{self.base_url}/public/perimetre/getOngletTrie", timeout=_REQUEST_TIMEOUT
         )
@@ -41,7 +41,7 @@ class ResanaMembersClient:
         return self._parse_workspaces(resp.json())
 
     def get_locked_workspaces(self) -> list[dict]:
-        """Return locked ("verrouille") workspaces as {slug, name} dicts.
+        """Return locked ("verrouille") workspaces as {slug, name, uuid} dicts.
 
         Locked workspaces are missing from getOngletTrie's response (see #169),
         so listerMesEspaces with archiveUnique=1 is the only way to resolve
@@ -55,25 +55,34 @@ class ResanaMembersClient:
         resp.raise_for_status()
         return self._parse_workspaces(resp.json())
 
+    def is_workspace_locked(self, slug: str) -> bool:
+        """Return whether `slug` currently appears in the locked ("verrouille") workspaces list."""
+        return any(ws["slug"] == slug for ws in self.get_locked_workspaces())
+
     @staticmethod
     def _parse_workspaces(data: dict) -> list[dict]:
         return [
-            {"slug": perimetre["id"], "name": perimetre["nom"]}
+            {
+                "slug": perimetre["id"],
+                "name": perimetre["nom"],
+                "uuid": perimetre.get("uuid"),
+            }
             for tab in data.get("tabData", [])
             for perimetre in tab.get("tabPerimetres", [])
         ]
 
-    def find_slug_by_workspace_name(self, name: str) -> str | None:
-        """Return the PHP slug of the workspace whose name matches, or None.
+    def find_slug_by_workspace_uuid(self, uuid: str) -> str | None:
+        """Return the PHP slug of the workspace with this GED UUID, or None.
 
-        Checks unlocked workspaces first, then falls back to locked ones,
-        which getOngletTrie omits entirely (#169).
+        Matches on the GED UUID rather than the name, since several workspaces
+        can share a name. Checks unlocked workspaces first, then falls back to
+        locked ones, which getOngletTrie omits entirely (#169).
         """
         for workspace in self.get_workspaces():
-            if workspace["name"] == name:
+            if workspace["uuid"] == uuid:
                 return workspace["slug"]
         for workspace in self.get_locked_workspaces():
-            if workspace["name"] == name:
+            if workspace["uuid"] == uuid:
                 return workspace["slug"]
         return None
 

@@ -303,6 +303,88 @@ def test_export_skips_non_pending_destinations(workspace, user):
 
 
 # ---------------------------------------------------------------------------
+# begin_export() / finalize_export() hooks (#215)
+# ---------------------------------------------------------------------------
+
+
+def test_export_calls_begin_export_before_get_workspace_structure(workspace, user):
+    """begin_export() must run before any file is read from the source."""
+    calls = []
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator") as mock_fc,
+        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
+    ):
+
+        def get_workspace_structure(_ws):
+            calls.append("structure")
+            return SourceFolder(name="root")
+
+        source_backend = mock_sm.return_value.get_backend.return_value
+        source_backend.begin_export.side_effect = lambda ws: calls.append("begin")
+        source_backend.get_workspace_structure.side_effect = get_workspace_structure
+        mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
+        mock_dr.get_all.return_value = []
+
+        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+
+    assert calls == ["begin", "structure"]
+
+
+def test_export_calls_finalize_export_after_destinations(workspace, user):
+    """finalize_export() must run after every destination has been processed."""
+    source_backend, _, _ = _run_export(workspace, user)
+    source_backend.finalize_export.assert_called_once_with(workspace)
+
+
+def test_export_calls_finalize_export_even_when_get_workspace_structure_raises(
+    workspace, user
+):
+    """finalize_export() must still run if the migration body raises partway through."""
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator"),
+        patch("core.processing.tasks.DestinationRegistry"),
+    ):
+        source_backend = mock_sm.return_value.get_backend.return_value
+        source_backend.get_workspace_structure.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+
+    source_backend.finalize_export.assert_called_once_with(workspace)
+
+
+def test_export_calls_finalize_export_even_when_begin_export_raises(workspace, user):
+    """A partial begin_export() (e.g. locked, then a grant fails) must still be reversed."""
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator"),
+        patch("core.processing.tasks.DestinationRegistry"),
+    ):
+        source_backend = mock_sm.return_value.get_backend.return_value
+        source_backend.begin_export.side_effect = RuntimeError("grant failed")
+
+        with pytest.raises(RuntimeError, match="grant failed"):
+            export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+
+    source_backend.get_workspace_structure.assert_not_called()
+    source_backend.finalize_export.assert_called_once_with(workspace)
+
+
+def test_export_calls_begin_export_with_workspace(workspace, user):
+    """begin_export() receives the workspace being migrated."""
+    source_backend, _, _ = _run_export(workspace, user)
+    source_backend.begin_export.assert_called_once_with(workspace)
+
+
+# ---------------------------------------------------------------------------
 # list_work_dir
 # ---------------------------------------------------------------------------
 

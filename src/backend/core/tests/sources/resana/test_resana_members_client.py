@@ -21,11 +21,16 @@ _ONGLET_TRIE_RESPONSE = {
         {
             "id": -1,
             "tabPerimetres": [
-                {"id": "2137428", "nom": "Coucou"},
-                {"id": "2137419", "nom": "TEST Worskspace"},
+                {"id": "2137428", "nom": "Coucou", "uuid": "02-01-uuid-coucou"},
+                {"id": "2137419", "nom": "TEST Worskspace", "uuid": "02-01-uuid-test"},
             ],
         },
-        {"id": 1, "tabPerimetres": [{"id": "2137438", "nom": "Autre"}]},
+        {
+            "id": 1,
+            "tabPerimetres": [
+                {"id": "2137438", "nom": "Autre", "uuid": "02-01-uuid-autre"}
+            ],
+        },
     ]
 }
 
@@ -33,7 +38,11 @@ _LISTER_MES_ESPACES_LOCKED_RESPONSE = {
     "tabData": [
         {
             "tabPerimetres": [
-                {"id": "2137454", "nom": "TEST Worskspace[1]"},
+                {
+                    "id": "2137454",
+                    "nom": "TEST Worskspace[1]",
+                    "uuid": "02-01-uuid-locked",
+                },
             ]
         }
     ]
@@ -151,18 +160,30 @@ def test_get_workspaces_posts_to_get_onglet_trie_without_a_prior_get():
     )
 
 
-def test_get_workspaces_flattens_tabs_into_slug_name_pairs():
-    """get_workspaces() flattens all tabData[].tabPerimetres into {slug, name} dicts."""
+def test_get_workspaces_flattens_tabs_into_slug_name_uuid_dicts():
+    """get_workspaces() flattens all tabData[].tabPerimetres into {slug, name, uuid} dicts."""
     client = _make_client()
     client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
 
     result = client.get_workspaces()
 
     assert result == [
-        {"slug": "2137428", "name": "Coucou"},
-        {"slug": "2137419", "name": "TEST Worskspace"},
-        {"slug": "2137438", "name": "Autre"},
+        {"slug": "2137428", "name": "Coucou", "uuid": "02-01-uuid-coucou"},
+        {"slug": "2137419", "name": "TEST Worskspace", "uuid": "02-01-uuid-test"},
+        {"slug": "2137438", "name": "Autre", "uuid": "02-01-uuid-autre"},
     ]
+
+
+def test_get_workspaces_defaults_missing_uuid_to_none():
+    """A workspace without a uuid field (absent in Resana's base) gets uuid None."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "tabData": [{"tabPerimetres": [{"id": "2137428", "nom": "Coucou"}]}]
+    }
+
+    result = client.get_workspaces()
+
+    assert result == [{"slug": "2137428", "name": "Coucou", "uuid": None}]
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +207,7 @@ def test_get_locked_workspaces_posts_to_lister_mes_espaces_with_archive_unique()
     )
 
 
-def test_get_locked_workspaces_flattens_tabs_into_slug_name_pairs():
+def test_get_locked_workspaces_flattens_tabs_into_slug_name_uuid_dicts():
     """get_locked_workspaces() flattens tabData[].tabPerimetres like get_workspaces()."""
     client = _make_client()
     client.session.post.return_value.json.return_value = (
@@ -195,26 +216,94 @@ def test_get_locked_workspaces_flattens_tabs_into_slug_name_pairs():
 
     result = client.get_locked_workspaces()
 
-    assert result == [{"slug": "2137454", "name": "TEST Worskspace[1]"}]
+    assert result == [
+        {"slug": "2137454", "name": "TEST Worskspace[1]", "uuid": "02-01-uuid-locked"}
+    ]
 
 
 # ---------------------------------------------------------------------------
-# find_slug_by_workspace_name()
+# is_workspace_locked()
 # ---------------------------------------------------------------------------
 
 
-def test_find_slug_by_workspace_name_returns_matching_slug():
-    """find_slug_by_workspace_name() returns the PHP slug for an exact name match."""
+def test_is_workspace_locked_returns_true_when_slug_in_locked_list():
+    """is_workspace_locked() is True when the slug appears in get_locked_workspaces()."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = (
+        _LISTER_MES_ESPACES_LOCKED_RESPONSE
+    )
+
+    assert client.is_workspace_locked("2137454") is True
+
+
+def test_is_workspace_locked_returns_false_when_slug_not_in_locked_list():
+    """is_workspace_locked() is False when the slug is absent from the locked list."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = (
+        _LISTER_MES_ESPACES_LOCKED_RESPONSE
+    )
+
+    assert client.is_workspace_locked("2137419") is False
+
+
+def test_is_workspace_locked_returns_false_when_no_workspaces_locked():
+    """is_workspace_locked() is False when the locked list is empty."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {"tabData": []}
+
+    assert client.is_workspace_locked("2137419") is False
+
+
+def test_is_workspace_locked_posts_to_lister_mes_espaces():
+    """is_workspace_locked() reuses get_locked_workspaces()'s endpoint, not a new one."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {"tabData": []}
+
+    client.is_workspace_locked("2137419")
+
+    client.session.post.assert_called_once_with(
+        f"{BASE_URL}/public/perimetre/listerMesEspaces",
+        data={"archiveUnique": "1"},
+        timeout=30,
+    )
+
+
+# ---------------------------------------------------------------------------
+# find_slug_by_workspace_uuid()
+# ---------------------------------------------------------------------------
+
+
+def test_find_slug_by_workspace_uuid_returns_matching_slug():
+    """find_slug_by_workspace_uuid() returns the PHP slug for the matching GED UUID."""
     client = _make_client()
     client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
 
-    result = client.find_slug_by_workspace_name("TEST Worskspace")
+    result = client.find_slug_by_workspace_uuid("02-01-uuid-test")
 
     assert result == "2137419"
 
 
-def test_find_slug_by_workspace_name_returns_none_when_not_found_anywhere():
-    """find_slug_by_workspace_name() returns None when no unlocked or locked workspace matches."""
+def test_find_slug_by_workspace_uuid_picks_right_workspace_among_homonyms():
+    """Two workspaces sharing a name are told apart by their UUID (#215)."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "tabData": [
+            {
+                "tabPerimetres": [
+                    {"id": "2137439", "nom": "Test CGU", "uuid": "02-01-uuid-cgu-a"},
+                    {"id": "2137459", "nom": "Test CGU", "uuid": "02-01-uuid-cgu-b"},
+                ]
+            }
+        ]
+    }
+
+    result = client.find_slug_by_workspace_uuid("02-01-uuid-cgu-b")
+
+    assert result == "2137459"
+
+
+def test_find_slug_by_workspace_uuid_returns_none_when_not_found_anywhere():
+    """find_slug_by_workspace_uuid() returns None when no unlocked or locked workspace matches."""
     client = _make_client()
 
     def post_side_effect(url, **_kwargs):
@@ -227,25 +316,25 @@ def test_find_slug_by_workspace_name_returns_none_when_not_found_anywhere():
 
     client.session.post.side_effect = post_side_effect
 
-    result = client.find_slug_by_workspace_name("Unknown")
+    result = client.find_slug_by_workspace_uuid("02-01-uuid-unknown")
 
     assert result is None
 
 
-def test_find_slug_by_workspace_name_does_not_check_locked_workspaces_when_found_unlocked():
-    """find_slug_by_workspace_name() short-circuits before hitting listerMesEspaces."""
+def test_find_slug_by_workspace_uuid_does_not_check_locked_workspaces_when_found_unlocked():
+    """find_slug_by_workspace_uuid() short-circuits before hitting listerMesEspaces."""
     client = _make_client()
     client.session.post.return_value.json.return_value = _ONGLET_TRIE_RESPONSE
 
-    client.find_slug_by_workspace_name("TEST Worskspace")
+    client.find_slug_by_workspace_uuid("02-01-uuid-test")
 
     client.session.post.assert_called_once_with(
         f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30
     )
 
 
-def test_find_slug_by_workspace_name_falls_back_to_locked_workspaces():
-    """find_slug_by_workspace_name() finds a locked workspace missing from getOngletTrie (#169)."""
+def test_find_slug_by_workspace_uuid_falls_back_to_locked_workspaces():
+    """find_slug_by_workspace_uuid() finds a locked workspace missing from getOngletTrie (#169)."""
     client = _make_client()
 
     def post_side_effect(url, **_kwargs):
@@ -258,7 +347,7 @@ def test_find_slug_by_workspace_name_falls_back_to_locked_workspaces():
 
     client.session.post.side_effect = post_side_effect
 
-    result = client.find_slug_by_workspace_name("TEST Worskspace[1]")
+    result = client.find_slug_by_workspace_uuid("02-01-uuid-locked")
 
     assert result == "2137454"
 

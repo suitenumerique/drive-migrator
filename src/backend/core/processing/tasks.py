@@ -107,52 +107,61 @@ def export(self, data):  # pylint: disable=unused-argument
     source_backend = SourceManager().get_backend()
     list_work_dir()
 
-    logger.info("Calling get_workspace_structure ...")
-    folder = source_backend.get_workspace_structure(workspace)
-    debug_folder(folder)
+    try:
+        logger.info("Calling begin_export ...")
+        source_backend.begin_export(workspace)
 
-    file_limit = settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE
-    if file_limit > 0:
-        workspace.is_truncated = truncate_folder_files(folder, file_limit)
-        workspace.save()
-        logger.info(
-            "File limit %s applied, is_truncated=%s",
-            file_limit,
-            workspace.is_truncated,
-        )
+        logger.info("Calling get_workspace_structure ...")
+        folder = source_backend.get_workspace_structure(workspace)
+        debug_folder(folder)
 
-    logger.info("Calling create_folder ...")
-    creator = FolderCreator()
-    local_path = creator.create_folder(workspace, folder, source_backend)
+        file_limit = settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE
+        if file_limit > 0:
+            workspace.is_truncated = truncate_folder_files(folder, file_limit)
+            workspace.save()
+            logger.info(
+                "File limit %s applied, is_truncated=%s",
+                file_limit,
+                workspace.is_truncated,
+            )
 
-    if creator.failed_files:
-        workspace.download_errors = creator.failed_files
-        workspace.save(update_fields=["download_errors"])
-        logger.warning(
-            "%s file(s) failed to download: %s",
-            len(creator.failed_files),
-            creator.failed_files,
-        )
+        logger.info("Calling create_folder ...")
+        creator = FolderCreator()
+        local_path = creator.create_folder(workspace, folder, source_backend)
 
-    if creator.files_count and creator.files_success == 0:
-        raise RuntimeError(
-            f"All {creator.files_count} file(s) failed to download for "
-            f"workspace {workspace.id}"
-        )
+        if creator.failed_files:
+            workspace.download_errors = creator.failed_files
+            workspace.save(update_fields=["download_errors"])
+            logger.warning(
+                "%s file(s) failed to download: %s",
+                len(creator.failed_files),
+                creator.failed_files,
+            )
 
-    list_workspace_dir(workspace)
+        if creator.files_count and creator.files_success == 0:
+            raise RuntimeError(
+                f"All {creator.files_count} file(s) failed to download for "
+                f"workspace {workspace.id}"
+            )
 
-    logger.info("Calling prepare_export ...")
-    source_backend.prepare_export(workspace, local_path)
+        list_workspace_dir(workspace)
 
-    for dest_backend in DestinationRegistry.get_all():
-        dest_name = dest_backend.name
-        logger.info(
-            "%s status = %s", dest_name, workspace.get_destination_status(dest_name)
-        )
-        if workspace.get_destination_status(dest_name) == Workspace.Status.PENDING:
-            logger.info("Calling %s export ...", dest_name)
-            dest_backend.export(workspace, user, local_path)
+        logger.info("Calling prepare_export ...")
+        source_backend.prepare_export(workspace, local_path)
+
+        for dest_backend in DestinationRegistry.get_all():
+            dest_name = dest_backend.name
+            logger.info(
+                "%s status = %s",
+                dest_name,
+                workspace.get_destination_status(dest_name),
+            )
+            if workspace.get_destination_status(dest_name) == Workspace.Status.PENDING:
+                logger.info("Calling %s export ...", dest_name)
+                dest_backend.export(workspace, user, local_path)
+    finally:
+        logger.info("Calling finalize_export ...")
+        source_backend.finalize_export(workspace)
 
     logger.info("Task done")
 
