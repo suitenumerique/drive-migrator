@@ -46,6 +46,7 @@ and this project adheres to
 - add migration user email/name columns and search to workspace admin #143
 - add admin actions to reset a user's Resana or Drive connection #198
 - add PostHog events for login, sync and migration outcome
+- add opt-in per-file migration integrity report #325
 
 ### Changed
 
