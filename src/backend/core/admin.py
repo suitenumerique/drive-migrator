@@ -5,7 +5,7 @@ from django.contrib import admin, messages
 from django.contrib.auth import admin as auth_admin
 from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import reverse
-from django.utils.safestring import mark_safe
+from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
 from core.api.views.workspaces_process import push_workspace_task
@@ -129,15 +129,13 @@ class ExtraTaskInfoAdminInline(admin.TabularInline):
     max_num = 0
 
     def get_task(self, obj):
-        return mark_safe(  # noqa: S308
-            '<a href="%s">%s</a>'
-            % (
-                reverse(
-                    "admin:django_celery_results_taskresult_change",
-                    args=(obj.task_result.id,),
-                ),
-                obj.task_result.id,
-            )
+        return format_html(
+            '<a href="{}">{}</a>',
+            reverse(
+                "admin:django_celery_results_taskresult_change",
+                args=(obj.task_result.id,),
+            ),
+            obj.task_result.id,
         )
 
     get_task.short_description = "Task"
@@ -185,7 +183,7 @@ class WorkspaceAdmin(admin.ModelAdmin):
         meta = self.model._meta  # noqa: SLF001
 
         response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = "attachment; filename={}.csv".format(meta)
+        response["Content-Disposition"] = f"attachment; filename={meta}.csv"
         writer = csv.writer(response)
 
         backend = ResanaBackend()
@@ -193,29 +191,32 @@ class WorkspaceAdmin(admin.ModelAdmin):
         writer.writerow(
             ["user", "domain", "titre", "destination", "date", "archive", "resana"]
         )
-        # domain email, titre du workspace, organisation destination, date, archive (o/n), resana (o/n)
         for workspace in queryset:
-            user = workspace.migration_user
-            email = user.email if user else ""
-            domain = user.email.split("@")[1] if user else ""
-            title = workspace.title
-            destination = (
+            writer.writerow(self._export_csv_row(backend, workspace))
+
+        return response
+
+    @staticmethod
+    def _export_csv_row(backend, workspace):
+        """domain email, titre du workspace, organisation destination, date,
+        archive (o/n), resana (o/n)"""
+        user = workspace.migration_user
+        task_info = (
+            ExtraTaskInfo.objects.filter(workspace=workspace).order_by("-id").first()
+        )
+        return [
+            user.email if user else "",
+            user.email.split("@")[1] if user else "",
+            workspace.title,
+            (
                 backend.get_mapping_from_email(user.email).resana_organization_name
                 if user
                 else ""
-            )
-            task_info = (
-                ExtraTaskInfo.objects.filter(workspace=workspace)
-                .order_by("-id")
-                .first()
-            )
-            date = task_info.task_result.date_done if task_info else ""
-            archive = workspace.get_destination_status("archive")
-            resana = workspace.get_destination_status("resana")
-
-            writer.writerow([email, domain, title, destination, date, archive, resana])
-
-        return response
+            ),
+            task_info.task_result.date_done if task_info else "",
+            workspace.get_destination_status("archive"),
+            workspace.get_destination_status("resana"),
+        ]
 
     export_as_csv.short_description = "Export Selected"
 
@@ -274,39 +275,33 @@ class ExtraTaskInfoAdmin(admin.ModelAdmin):
     ]
 
     def get_workspace(self, obj):
-        return mark_safe(  # noqa: S308
-            '<a href="%s">%s</a>'
-            % (
-                reverse("admin:core_workspace_change", args=(obj.workspace.id,)),
-                obj.workspace.title,
-            )
+        return format_html(
+            '<a href="{}">{}</a>',
+            reverse("admin:core_workspace_change", args=(obj.workspace.id,)),
+            obj.workspace.title,
         )
 
     get_workspace.short_description = "Workspace"
 
     def get_user(self, obj):
-        return mark_safe(  # noqa: S308
-            '<a href="%s">%s</a>'
-            % (
-                reverse("admin:core_user_change", args=(obj.user.id,)),
-                obj.user.email,
-            )
-            if obj.user
-            else "None"
+        if not obj.user:
+            return "None"
+        return format_html(
+            '<a href="{}">{}</a>',
+            reverse("admin:core_user_change", args=(obj.user.id,)),
+            obj.user.email,
         )
 
     get_user.short_description = "User"
 
     def get_task(self, obj):
-        return mark_safe(  # noqa: S308
-            '<a href="%s">%s</a>'
-            % (
-                reverse(
-                    "admin:django_celery_results_taskresult_change",
-                    args=(obj.task_result.id,),
-                ),
-                obj.task_result.id,
-            )
+        return format_html(
+            '<a href="{}">{}</a>',
+            reverse(
+                "admin:django_celery_results_taskresult_change",
+                args=(obj.task_result.id,),
+            ),
+            obj.task_result.id,
         )
 
     get_task.short_description = "Task"

@@ -1,4 +1,7 @@
-"""Tests for the UserAdmin token-reset actions and the Workspace changelist."""
+"""Tests for the core admin: UserAdmin actions, Workspace and ExtraTaskInfo pages."""
+
+import csv
+import io
 
 from django.contrib import admin
 from django.contrib.messages.storage.fallback import FallbackStorage
@@ -6,10 +9,11 @@ from django.test import Client, RequestFactory
 from django.utils import timezone
 
 import pytest
+from django_celery_results.models import TaskResult
 
-from core.admin import UserAdmin
+from core.admin import UserAdmin, WorkspaceAdmin
 from core.factories import UserFactory, WorkspaceFactory
-from core.models import User
+from core.models import ExtraTaskInfo, ResanaEmailMapping, User, Workspace
 
 pytestmark = pytest.mark.django_db
 
@@ -99,3 +103,98 @@ def test_workspace_changelist_renders_with_migration_user():
     response = client.get("/admin/core/workspace/")
 
     assert response.status_code == 200
+
+
+def _admin_client():
+    client = Client()
+    client.force_login(UserFactory(is_staff=True, is_superuser=True))
+    return client
+
+
+def _extra_task(workspace, user=None, task_id="task-1"):
+    return ExtraTaskInfo.objects.create(
+        task_result=TaskResult.objects.create(task_id=task_id),
+        workspace=workspace,
+        user=user,
+    )
+
+
+def test_extra_task_changelist_escapes_workspace_title():
+    """A workspace title is user data: it is rendered escaped inside its link."""
+    workspace = WorkspaceFactory(title="<b>evil</b>")
+    _extra_task(workspace, user=UserFactory())
+
+    response = _admin_client().get("/admin/core/extrataskinfo/")
+
+    content = response.content.decode()
+    assert f'href="/admin/core/workspace/{workspace.id}/change/"' in content
+    assert "&lt;b&gt;evil&lt;/b&gt;" in content
+    assert "<b>evil</b>" not in content
+
+
+def test_extra_task_changelist_links_user_or_shows_none():
+    """The user column links to the user, or shows None for a run without user."""
+    user = UserFactory()
+    _extra_task(WorkspaceFactory(), user=user, task_id="task-1")
+    _extra_task(WorkspaceFactory(), user=None, task_id="task-2")
+
+    response = _admin_client().get("/admin/core/extrataskinfo/")
+
+    content = response.content.decode()
+    assert f'<a href="/admin/core/user/{user.id}/change/">{user.email}</a>' in content
+    assert '<td class="field-get_user">None</td>' in content
+
+
+def test_workspace_inline_links_task_result():
+    """The run inline on the workspace page links to its Celery task result."""
+    workspace = WorkspaceFactory()
+    extra_task = _extra_task(workspace, user=UserFactory())
+    task_result_id = extra_task.task_result.id
+
+    response = _admin_client().get(f"/admin/core/workspace/{workspace.id}/change/")
+
+    assert (
+        f'<a href="/admin/django_celery_results/taskresult/{task_result_id}/change/">'
+        f"{task_result_id}</a>"
+    ) in response.content.decode()
+
+
+def test_workspace_export_as_csv_writes_one_line_per_workspace():
+    """export_as_csv lists user, domain, title, Resana organization, last run date
+    and destination statuses, and tolerates a workspace without migration user."""
+    ResanaEmailMapping.objects.create(
+        domain="example.com",
+        resana_organization_name="Org",
+        resana_organization_uuid="org-uuid",
+    )
+    user = UserFactory(email="alice@example.com")
+    migrated = WorkspaceFactory(
+        title="Migrated",
+        migration_user=user,
+        destination_statuses={"archive": "SUCCESS", "resana": "FAILURE"},
+    )
+    # TaskResult.date_done is set automatically on save.
+    date_done = _extra_task(migrated, user=user).task_result.date_done
+    orphan = WorkspaceFactory(title="Orphan", migration_user=None)
+    model_admin = WorkspaceAdmin(Workspace, admin.site)
+
+    response = model_admin.export_as_csv(
+        RequestFactory().get("/"),
+        Workspace.objects.filter(pk__in=[migrated.pk, orphan.pk]).order_by("title"),
+    )
+
+    assert response["Content-Disposition"] == "attachment; filename=core.workspace.csv"
+    rows = list(csv.reader(io.StringIO(response.content.decode())))
+    assert rows == [
+        ["user", "domain", "titre", "destination", "date", "archive", "resana"],
+        [
+            "alice@example.com",
+            "example.com",
+            "Migrated",
+            "Org",
+            str(date_done),
+            "SUCCESS",
+            "FAILURE",
+        ],
+        ["", "", "Orphan", "", "", "NONE", "NONE"],
+    ]
