@@ -155,13 +155,13 @@ def test_export_includes_any_extra_files_in_local_folder():
 
 
 def test_export_writes_users_csv_then_removes_it(tmp_path):
-    """export() writes users.csv before zipping then removes it so Drive won't upload it."""
+    """export() writes users_list_by_migrator.csv before zipping then removes it so Drive won't upload it."""
     workspace = MagicMock(spec=Workspace)
     workspace.members = [
         {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
     ]
     user = MagicMock()
-    csv_path = tmp_path / "users.csv"
+    csv_path = tmp_path / "users_list_by_migrator.csv"
 
     def assert_csv_exists_during_zip(_ws):
         assert csv_path.exists()
@@ -178,7 +178,7 @@ def test_export_writes_users_csv_then_removes_it(tmp_path):
 
 
 def test_export_skips_users_csv_when_no_members(tmp_path):
-    """export() does not write users.csv when workspace.members is empty."""
+    """export() does not write users_list_by_migrator.csv when workspace.members is empty."""
     workspace = MagicMock(spec=Workspace)
     workspace.members = []
     user = MagicMock()
@@ -190,7 +190,7 @@ def test_export_skips_users_csv_when_no_members(tmp_path):
         backend = ArchiveDestinationBackend()
         backend.export(workspace, user, str(tmp_path))
 
-    assert not (tmp_path / "users.csv").exists()
+    assert not (tmp_path / "users_list_by_migrator.csv").exists()
 
 
 def test_get_download_url_returns_presigned_url():

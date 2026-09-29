@@ -361,19 +361,19 @@ def test_sharing_disabled_skips_share_members(mock_cls, tmp_path, settings):
 
 
 # ---------------------------------------------------------------------------
-# users.csv (shared users list, mirrors the archive export)
+# users_list_by_migrator.csv (shared users list, mirrors the archive export)
 # ---------------------------------------------------------------------------
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
 def test_uploads_users_csv_when_workspace_has_members(mock_cls, tmp_path, settings):
-    """export() uploads a users.csv listing the shared members, like the zip export."""
+    """export() uploads a users_list_by_migrator.csv listing the shared members, like the zip export."""
     settings.DRIVE_AUTH_MODE = "service_account"
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     mock_backend.create_file_item.return_value = {
         "id": "file-uuid",
-        "policy": "https://s3.example.com/users.csv?sig=x",
+        "policy": "https://s3.example.com/users_list_by_migrator.csv?sig=x",
     }
     workspace = _make_workspace(
         members=[{"name": "Doe", "firstName": "Jean", "email": "jean@example.com"}]
@@ -382,22 +382,23 @@ def test_uploads_users_csv_when_workspace_has_members(mock_cls, tmp_path, settin
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
     mock_backend.create_file_item.assert_any_call(
-        "users.csv", parent_id="root-uuid", item_id=ANY
+        "users_list_by_migrator.csv", parent_id="root-uuid", item_id=ANY
     )
     mock_backend.upload_to_s3.assert_any_call(
-        "https://s3.example.com/users.csv?sig=x", str(tmp_path / "users.csv")
+        "https://s3.example.com/users_list_by_migrator.csv?sig=x",
+        str(tmp_path / "users_list_by_migrator.csv"),
     )
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
 def test_users_csv_removed_from_local_folder_after_upload(mock_cls, tmp_path, settings):
-    """The temporary users.csv is cleaned up from the local folder after export."""
+    """The temporary users_list_by_migrator.csv is cleaned up from the local folder after export."""
     settings.DRIVE_AUTH_MODE = "service_account"
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     mock_backend.create_file_item.return_value = {
         "id": "file-uuid",
-        "policy": "https://s3.example.com/users.csv?sig=x",
+        "policy": "https://s3.example.com/users_list_by_migrator.csv?sig=x",
     }
     workspace = _make_workspace(
         members=[{"name": "Doe", "firstName": "Jean", "email": "jean@example.com"}]
@@ -405,14 +406,14 @@ def test_users_csv_removed_from_local_folder_after_upload(mock_cls, tmp_path, se
 
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
-    assert not (tmp_path / "users.csv").exists()
+    assert not (tmp_path / "users_list_by_migrator.csv").exists()
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
 def test_no_users_csv_uploaded_when_workspace_has_no_members(
     mock_cls, tmp_path, settings
 ):
-    """No users.csv is created or uploaded when the workspace has no members."""
+    """No users_list_by_migrator.csv is created or uploaded when the workspace has no members."""
     settings.DRIVE_AUTH_MODE = "service_account"
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
@@ -421,7 +422,7 @@ def test_no_users_csv_uploaded_when_workspace_has_no_members(
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
     uploaded_names = [c.args[0] for c in mock_backend.create_file_item.call_args_list]
-    assert "users.csv" not in uploaded_names
+    assert "users_list_by_migrator.csv" not in uploaded_names
 
 
 @patch("core.destinations.drive.backend.DriveUserTokenBackend")
