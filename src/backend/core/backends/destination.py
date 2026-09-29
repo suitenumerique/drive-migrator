@@ -62,6 +62,18 @@ class AbstractDestinationBackend(ABC):
         """
         raise NotImplementedError
 
+    def check_integrity(
+        self, workspace, local_folder_path: str, wait_for_analysis: bool
+    ) -> dict:
+        """
+        Re-read the destination to report what it actually holds for each local
+        file sent by the last export() of this workspace in this process.
+        Returns {"files": {local relative path: {..., "stage": Stage}},
+        "extra": [destination items with no local file], "error": str (optional)}.
+        wait_for_analysis is False after a failed run, to avoid delaying it.
+        """
+        raise NotImplementedError
+
 
 class DestinationRegistry:
     """

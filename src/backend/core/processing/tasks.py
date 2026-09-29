@@ -15,6 +15,7 @@ from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
+from core.processing.integrity import IntegrityTracker, Stage
 from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app
@@ -75,6 +76,7 @@ def debug_folder(folder: SourceFolder):
 
 def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
     workspace = extra_task.workspace
+    integrity_summary = extra_task.integrity_report.get("summary", {})
     posthog_capture(
         "migration_finished",
         extra_task.user,
@@ -82,6 +84,14 @@ def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
             "status": status,
             "is_truncated": workspace.is_truncated,
             "download_errors_count": len(workspace.download_errors),
+            "integrity_check_passed": extra_task.integrity_check_passed,
+            "migrated_files_count": integrity_summary.get("migrated_files_count"),
+            "source_files_count": integrity_summary.get("source_files_count"),
+            "analysis_unfinished_count": (
+                integrity_summary.get("stages", {}).get(Stage.ANALYSIS_UNFINISHED, 0)
+                if integrity_summary
+                else None
+            ),
             "duration_seconds": (
                 timezone.now() - extra_task.task_result.date_created
             ).total_seconds(),
@@ -110,6 +120,8 @@ def export(self, data):  # pylint: disable=unused-argument
     logger.info("Calling get_workspace_structure ...")
     folder = source_backend.get_workspace_structure(workspace)
     debug_folder(folder)
+    # Snapshots the source tree, so it must be created before truncation.
+    integrity_tracker = IntegrityTracker(workspace, folder)
 
     file_limit = settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE
     if file_limit > 0:
@@ -120,9 +132,25 @@ def export(self, data):  # pylint: disable=unused-argument
             file_limit,
             workspace.is_truncated,
         )
+    integrity_tracker.set_kept_files(folder)
 
+    run_failed = True
+    try:
+        _export_workspace(workspace, user, folder, source_backend, integrity_tracker)
+        run_failed = False
+    finally:
+        # Before the task_success/task_failure handlers delete the local folder.
+        integrity_tracker.save(self.request.id, run_failed=run_failed)
+
+    logger.info("Task done")
+
+    return True
+
+
+def _export_workspace(workspace, user, folder, source_backend, integrity_tracker):
     logger.info("Calling create_folder ...")
     creator = FolderCreator()
+    integrity_tracker.set_retrieval(creator, creator.get_workspace_path(workspace))
     local_path = creator.create_folder(workspace, folder, source_backend)
 
     if creator.failed_files:
@@ -152,11 +180,9 @@ def export(self, data):  # pylint: disable=unused-argument
         )
         if workspace.get_destination_status(dest_name) == Workspace.Status.PENDING:
             logger.info("Calling %s export ...", dest_name)
+            # Registered first so a destination that fails midway is still checked.
+            integrity_tracker.add_exported_destination(dest_backend)
             dest_backend.export(workspace, user, local_path)
-
-    logger.info("Task done")
-
-    return True
 
 
 # From https://github.com/celery/django-celery-results/issues/286#issuecomment-1279161047

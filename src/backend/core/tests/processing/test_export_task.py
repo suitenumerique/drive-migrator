@@ -3,7 +3,7 @@
 # pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from django.utils import timezone
 
@@ -41,6 +41,7 @@ def workspace():
     ws.title = "My Workspace"
     ws.destination_statuses = {}
     ws.get_destination_status.return_value = Workspace.Status.PENDING
+    ws.is_file_integrity_tracked = False
     return ws
 
 
@@ -303,6 +304,99 @@ def test_export_skips_non_pending_destinations(workspace, user):
 
 
 # ---------------------------------------------------------------------------
+# Integrity tracking
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def mock_tracker_cls():
+    with patch("core.processing.tasks.IntegrityTracker") as tracker_cls:
+        yield tracker_cls
+
+
+def _run_export_with_tracker(workspace, user, dest_backends, setup_creator=None):
+    """Run export() with standard mocks; return (creator, source folder)."""
+    folder = SourceFolder(name="root")
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator") as mock_fc,
+        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
+    ):
+        mock_sm.return_value.get_backend.return_value.get_workspace_structure.return_value = folder
+        creator = mock_fc.return_value
+        creator.create_folder.return_value = "/tmp/ws-1"
+        creator.failed_files = []
+        if setup_creator:
+            setup_creator(creator)
+        mock_dr.get_all.return_value = dest_backends
+
+        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+    return creator, folder
+
+
+def _destination(name):
+    destination = MagicMock()
+    destination.name = name
+    return destination
+
+
+def test_export_feeds_integrity_tracker_and_saves_it(workspace, user, mock_tracker_cls):
+    """export() gives the tracker the kept files, the retrieval and the pending
+    destinations, then saves the report of a successful run."""
+    dest_archive = _destination("archive")
+    dest_drive = _destination("drive")
+    workspace.get_destination_status.side_effect = lambda name: (
+        Workspace.Status.SUCCESS if name == "archive" else Workspace.Status.PENDING
+    )
+
+    creator, folder = _run_export_with_tracker(
+        workspace, user, [dest_archive, dest_drive]
+    )
+
+    mock_tracker_cls.assert_called_once_with(workspace, folder)
+    tracker = mock_tracker_cls.return_value
+    tracker.set_kept_files.assert_called_once_with(folder)
+    tracker.set_retrieval.assert_called_once_with(
+        creator, creator.get_workspace_path.return_value
+    )
+    tracker.add_exported_destination.assert_called_once_with(dest_drive)
+    tracker.save.assert_called_once_with(ANY, run_failed=False)
+
+
+def test_export_saves_integrity_report_when_a_destination_fails(
+    workspace, user, mock_tracker_cls
+):
+    """A failing destination is still checked and the original error propagates."""
+    dest_drive = _destination("drive")
+    dest_drive.export.side_effect = RuntimeError("Drive down")
+
+    with pytest.raises(RuntimeError, match="Drive down"):
+        _run_export_with_tracker(workspace, user, [dest_drive])
+
+    tracker = mock_tracker_cls.return_value
+    tracker.add_exported_destination.assert_called_once_with(dest_drive)
+    tracker.save.assert_called_once_with(ANY, run_failed=True)
+
+
+def test_export_saves_integrity_report_when_all_downloads_fail(
+    workspace, user, mock_tracker_cls
+):
+    """The report is also saved when the run stops during retrieval."""
+
+    def all_downloads_failed(creator):
+        creator.failed_files = [{"id": "f1", "name": "a", "path": "a", "error": "x"}]
+        creator.files_count = 1
+        creator.files_success = 0
+
+    with pytest.raises(RuntimeError, match="failed to download"):
+        _run_export_with_tracker(workspace, user, [], all_downloads_failed)
+
+    mock_tracker_cls.return_value.save.assert_called_once_with(ANY, run_failed=True)
+
+
+# ---------------------------------------------------------------------------
 # list_work_dir
 # ---------------------------------------------------------------------------
 
@@ -513,6 +607,14 @@ def test_task_handlers_capture_migration_finished(handler, status):
     mock_workspace.is_truncated = True
     mock_workspace.download_errors = [{"name": "a"}, {"name": "b"}]
     mock_extra_task.workspace = mock_workspace
+    mock_extra_task.integrity_check_passed = False
+    mock_extra_task.integrity_report = {
+        "summary": {
+            "source_files_count": 7,
+            "migrated_files_count": 5,
+            "stages": {"ok": 5, "analysis_unfinished": 2},
+        }
+    }
 
     with (
         patch("core.processing.tasks.TaskResult") as mock_tr_cls,
@@ -535,5 +637,74 @@ def test_task_handlers_capture_migration_finished(handler, status):
     assert properties["status"] == status
     assert properties["is_truncated"] is True
     assert properties["download_errors_count"] == 2
+    assert properties["integrity_check_passed"] is False
+    assert properties["migrated_files_count"] == 5
+    assert properties["source_files_count"] == 7
+    assert properties["analysis_unfinished_count"] == 2
     assert 42 <= properties["duration_seconds"] < 60
     assert properties["$set"] == {"c": 1}
+
+
+def test_migration_finished_file_counts_are_none_without_integrity_report():
+    """Without integrity check, the file counts are sent as None."""
+    mock_sender = MagicMock()
+    mock_sender.request.id = "task-id-5"
+    mock_task_result = MagicMock(spec=TaskResult)
+    mock_task_result.date_created = timezone.now()
+    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
+    mock_extra_task.task_result = mock_task_result
+    mock_extra_task.integrity_report = {}
+    mock_workspace = MagicMock(spec=Workspace)
+    mock_workspace.download_errors = []
+    mock_extra_task.workspace = mock_workspace
+
+    with (
+        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
+        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.workspaces_counts", return_value={}),
+        patch("core.processing.tasks.posthog_capture") as capture,
+    ):
+        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
+        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
+
+        task_success_handler(sender=mock_sender)
+
+    properties = capture.call_args.args[2]
+    assert properties["migrated_files_count"] is None
+    assert properties["source_files_count"] is None
+    assert properties["analysis_unfinished_count"] is None
+
+
+def test_migration_finished_counts_zero_unfinished_analyses_in_a_report():
+    """A report without file under analysis sends 0, not None."""
+    mock_sender = MagicMock()
+    mock_sender.request.id = "task-id-6"
+    mock_task_result = MagicMock(spec=TaskResult)
+    mock_task_result.date_created = timezone.now()
+    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
+    mock_extra_task.task_result = mock_task_result
+    mock_extra_task.integrity_report = {
+        "summary": {
+            "source_files_count": 1,
+            "migrated_files_count": 1,
+            "stages": {"ok": 1},
+        }
+    }
+    mock_workspace = MagicMock(spec=Workspace)
+    mock_workspace.download_errors = []
+    mock_extra_task.workspace = mock_workspace
+
+    with (
+        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
+        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.workspaces_counts", return_value={}),
+        patch("core.processing.tasks.posthog_capture") as capture,
+    ):
+        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
+        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
+
+        task_success_handler(sender=mock_sender)
+
+    assert capture.call_args.args[2]["analysis_unfinished_count"] == 0
