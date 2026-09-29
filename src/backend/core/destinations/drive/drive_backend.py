@@ -27,6 +27,8 @@ logger = get_task_logger(__name__)
 
 _UPLOAD_STATE_NOT_PENDING = "item_upload_state_not_pending"
 _EXISTING_ID = "item_create_existing_id"
+# Drive caps page_size with its MAX_PAGE_SIZE setting (200 by default).
+_LIST_PAGE_SIZE = 200
 
 
 def _stop_after_configured_attempts(retry_state) -> bool:
@@ -175,11 +177,14 @@ class DriveBackend:
 
     # --- File upload (3-step) ---
 
-    def create_file_item(self, filename: str, parent_id: str) -> dict:
-        """Step 1: Create a file item. Returns item dict including S3 presigned URL in 'policy'."""
+    def create_file_item(
+        self, filename: str, parent_id: str, item_id: str | None = None
+    ) -> dict:
+        """Step 1: Create a file item. Returns item dict including S3 presigned URL in 'policy'.
+        Pass item_id to know the item's id before the request is sent."""
         url = f"{self._base_url()}{self._api_prefix()}/items/{parent_id}/children/"
         payload = {"type": "file", "filename": filename}
-        item = self._create_item(url, payload)
+        item = self._create_item(url, payload, item_id=item_id)
         if "policy" not in item:
             item = self._replace_recovered_pending_file(item, url, payload)
         return item
@@ -206,13 +211,13 @@ class DriveBackend:
         response = requests.delete(url, headers=self._headers(), timeout=30)
         response.raise_for_status()
 
-    def _create_item(self, url: str, payload: dict) -> dict:
+    def _create_item(self, url: str, payload: dict, item_id: str | None = None) -> dict:
         """POST with a client-generated id, retried via tenacity on 5xx/network
         errors or a Drive id conflict: creation isn't idempotent (Drive silently
         renames title duplicates), so on a retryable failure we check for the item
         by id before giving up, instead of duplicating it or failing a write that
         actually succeeded. See #208."""
-        item_id = str(uuid.uuid4())
+        item_id = item_id or str(uuid.uuid4())
         payload = {**payload, "id": item_id}
 
         @_retry_on_transient_error
@@ -246,6 +251,30 @@ class DriveBackend:
                 raise
 
         return do_create_item()
+
+    @_retry_on_transient_error
+    def get_item(self, item_id: str) -> dict | None:
+        """Return the item, or None if Drive answers 404."""
+        return self._get_item_if_exists(item_id)
+
+    @_retry_on_transient_error
+    def list_children(self, item_id: str) -> list[dict]:
+        """Return all children of a folder, following pagination. Drive hides
+        items still in PENDING upload state from this listing."""
+        url = f"{self._base_url()}{self._api_prefix()}/items/{item_id}/children/"
+        params = {"page_size": _LIST_PAGE_SIZE}
+        children = []
+        while url:
+            response = requests.get(
+                url, params=params, headers=self._headers(), timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+            children.extend(data.get("results", []))
+            url = data.get("next")
+            # "next" already carries the query string.
+            params = None
+        return children
 
     def _get_item_if_exists(self, item_id: str) -> dict | None:
         """GET /items/{id}/, treating a 404 as 'not created yet' rather than an error."""

@@ -1,6 +1,6 @@
 """Tests for DriveDestinationBackend."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -126,7 +126,7 @@ def test_service_account_mode_uploads_files(mock_cls, tmp_path, settings):
     DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
 
     mock_backend.create_file_item.assert_called_once_with(
-        "report.pdf", parent_id="root-uuid"
+        "report.pdf", parent_id="root-uuid", item_id=ANY
     )
     mock_backend.upload_to_s3.assert_called_once_with(
         "https://s3.example.com/file.pdf?sig=x", str(tmp_path / "report.pdf")
@@ -381,7 +381,9 @@ def test_uploads_users_csv_when_workspace_has_members(mock_cls, tmp_path, settin
 
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
-    mock_backend.create_file_item.assert_any_call("users.csv", parent_id="root-uuid")
+    mock_backend.create_file_item.assert_any_call(
+        "users.csv", parent_id="root-uuid", item_id=ANY
+    )
     mock_backend.upload_to_s3.assert_any_call(
         "https://s3.example.com/users.csv?sig=x", str(tmp_path / "users.csv")
     )
