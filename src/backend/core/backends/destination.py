@@ -5,6 +5,10 @@ from abc import ABC, abstractmethod
 from django.conf import settings
 from django.utils.module_loading import import_string
 
+# Members listing written by the archive and Drive exports. Named so that it
+# hardly collides with a source file, which it would overwrite then delete.
+MEMBERS_CSV_FILENAME = "users_list_by_migrator.csv"
+
 
 class AbstractDestinationBackend(ABC):
     """

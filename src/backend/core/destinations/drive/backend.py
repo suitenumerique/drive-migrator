@@ -11,7 +11,10 @@ from django.utils.translation import gettext_lazy as _
 
 from celery.utils.log import get_task_logger
 
-from core.backends.destination import AbstractDestinationBackend
+from core.backends.destination import (
+    MEMBERS_CSV_FILENAME,
+    AbstractDestinationBackend,
+)
 from core.destinations.drive.drive_backend import (
     DriveBackend,
     DriveServiceAccountBackend,
@@ -22,8 +25,6 @@ from core.models import Workspace
 from core.processing.integrity import Stage
 
 logger = get_task_logger(__name__)
-
-USERS_CSV_FILENAME = "users.csv"
 
 _UPLOAD_STATE_PENDING = "pending"
 _UPLOAD_STATE_ANALYZING = "analyzing"
@@ -102,7 +103,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         """Write the shared-users listing into the local folder, like the archive export."""
         if not workspace.members:
             return None
-        csv_path = os.path.join(local_folder_path, USERS_CSV_FILENAME)
+        csv_path = os.path.join(local_folder_path, MEMBERS_CSV_FILENAME)
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerows(
@@ -202,7 +203,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                 os.path.getsize(local_file) if os.path.isfile(local_file) else None
             )
             files[path] = _integrity_entry(item_id, items[path], local_size)
-            if path == USERS_CSV_FILENAME:
+            if path == MEMBERS_CSV_FILENAME:
                 files[path]["generated"] = True
 
         extra = [

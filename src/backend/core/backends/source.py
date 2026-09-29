@@ -126,7 +126,7 @@ class AbstractSourceBackend(ABC):
 
         Destination backends consume workspace.members to share/invite users or
         generate platform-specific member files (e.g. osmose_users.csv for Resana,
-        users.csv for archive).
+        users_list_by_migrator.csv for archive).
 
         Default implementation is a no-op.
         """

@@ -287,13 +287,16 @@ def test_report_lists_destination_items_without_source_as_extra(tmp_path):
         [],
         _creator(),
         destination_results={
-            "drive": {"files": {"users.csv": users_csv}, "extra": [unknown]}
+            "drive": {
+                "files": {"users_list_by_migrator.csv": users_csv},
+                "extra": [unknown],
+            }
         },
     )
 
     assert report["files"] == [
         {
-            "local_path": "users.csv",
+            "local_path": "users_list_by_migrator.csv",
             "destination": "drive",
             "item_id": "csv-id",
             "title": "a.txt",
@@ -333,7 +336,10 @@ def test_report_counts_source_files_ok_on_every_checked_destination(tmp_path):
                     "a.txt": _drive_ok("a"),
                     "b.txt": _drive_ok("b"),
                     "c.txt": {"item_id": "c", "stage": "analysis_unfinished"},
-                    "users.csv": {**_drive_ok("csv"), "generated": True},
+                    "users_list_by_migrator.csv": {
+                        **_drive_ok("csv"),
+                        "generated": True,
+                    },
                 },
                 "extra": [],
             },

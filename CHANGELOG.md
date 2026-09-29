@@ -59,6 +59,8 @@ and this project adheres to
 - derive DRIVE_API_BASE_URL and DRIVE_FRONTEND_URL from DRIVE_BASE_URL #103
 - update cunningham tokens
 - replace unmaintained retry package with tenacity
+- rename the members CSV of archive and Drive exports to
+  users_list_by_migrator.csv, so it no longer overwrites a source file #235
 - switch Resana source auth to PKCE + bridge flow #190
 
 ### Fixed

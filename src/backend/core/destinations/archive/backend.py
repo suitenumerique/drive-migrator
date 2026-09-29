@@ -6,7 +6,10 @@ import os
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 
-from core.backends.destination import AbstractDestinationBackend
+from core.backends.destination import (
+    MEMBERS_CSV_FILENAME,
+    AbstractDestinationBackend,
+)
 from core.mails_manager import MailsManager
 from core.models import Workspace
 from core.processing.folder_helper import ArchiveManager
@@ -27,7 +30,7 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
     def export(self, workspace, user, local_folder_path: str) -> None:
         csv_path = None
         if workspace.members:
-            csv_path = os.path.join(local_folder_path, "users.csv")
+            csv_path = os.path.join(local_folder_path, MEMBERS_CSV_FILENAME)
             with open(csv_path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerows(

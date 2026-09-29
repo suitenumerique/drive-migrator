@@ -237,13 +237,15 @@ def test_drive_file_without_local_counterpart_is_extra(tmp_path, mock_backend):
 
 
 def test_generated_users_csv_is_flagged(tmp_path, mock_backend):
-    """users.csv is written by the migrator itself, not by the source."""
-    mock_backend.list_children.return_value = [_drive_file("id-users.csv", "users.csv")]
+    """users_list_by_migrator.csv is written by the migrator itself, not by the source."""
+    mock_backend.list_children.return_value = [
+        _drive_file("id-users_list_by_migrator.csv", "users_list_by_migrator.csv")
+    ]
     workspace = _make_workspace(members=[{"name": "A", "firstName": "B", "email": "c"}])
 
     result = _export_then_check(tmp_path, workspace=workspace)
 
-    assert result["files"]["users.csv"]["generated"] is True
+    assert result["files"]["users_list_by_migrator.csv"]["generated"] is True
 
 
 # ---------------------------------------------------------------------------

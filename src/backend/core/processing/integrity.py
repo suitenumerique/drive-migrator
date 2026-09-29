@@ -330,7 +330,7 @@ def _retrieval_row(
 
 
 def _extra_rows(destination_results: dict, matched_local_paths: set) -> list[dict]:
-    """Destination items that match no source file (e.g. the generated users.csv)."""
+    """Destination items that match no source file (e.g. the generated members CSV)."""
     rows = []
     for destination, result in destination_results.items():
         for local_path, entry in result["files"].items():
