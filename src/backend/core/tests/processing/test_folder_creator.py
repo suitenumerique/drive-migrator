@@ -8,10 +8,16 @@ from core.models import Workspace
 from core.processing.folder_creator import FolderCreator
 
 
+def _write_empty_file(_file, destination):
+    """Simulate a successful download by creating the destination file."""
+    with open(destination, "wb"):
+        pass
+
+
 def _make_backend():
-    """Return a minimal AbstractSourceBackend stub."""
+    """Return a minimal AbstractSourceBackend stub whose downloads write the file."""
     backend = MagicMock(spec=AbstractSourceBackend)
-    backend.download_file = MagicMock()
+    backend.download_file = MagicMock(side_effect=_write_empty_file)
     return backend
 
 
@@ -424,3 +430,70 @@ def test_create_folder_ensures_filename_uniqueness(tmp_path, settings):
 
     called_dest = backend.download_file.call_args[0][1]
     assert "doc (1).pdf" in called_dest
+
+
+# ---------------------------------------------------------------------------
+# Integrity tracking: written files and silent download losses
+# ---------------------------------------------------------------------------
+
+
+def test_create_folder_records_written_files_by_source_id(tmp_path, settings):
+    """written_files maps each downloaded source file id to its path relative
+    to the workspace root, after name sanitization."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws20")
+    root_file = SourceFile(id="f1", name="readme", extension=".pdf", download_url="x")
+    nested_file = SourceFile(id="f2", name="a/b", extension=".txt", download_url="x")
+    folder = SourceFolder(
+        name="root",
+        files=[root_file],
+        children=[SourceFolder(name="sub", files=[nested_file])],
+    )
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, _make_backend())
+
+    assert creator.written_files == {
+        "f1": "readme.pdf",
+        "f2": os.path.join("sub", "a-b.txt"),
+    }
+
+
+def test_create_folder_records_source_id_on_failed_downloads(tmp_path, settings):
+    """failed_files entries carry the source file id."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws21")
+    file = SourceFile(id="f1", name="broken", extension=".docx", download_url="x")
+    backend = _make_backend()
+    backend.download_file.side_effect = RuntimeError("403 Forbidden")
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, SourceFolder(name="root", files=[file]), backend)
+
+    assert creator.failed_files[0]["id"] == "f1"
+    assert not creator.written_files
+
+
+def test_create_folder_flags_download_that_wrote_no_file(tmp_path, settings):
+    """A download that returns without error but writes nothing is reported as
+    failed, flagged in not_written_ids and not counted as a success."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws22")
+    file = SourceFile(id="f1", name="ghost", extension=".pdf", download_url="x")
+    backend = _make_backend()
+    backend.download_file.side_effect = None
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, SourceFolder(name="root", files=[file]), backend)
+
+    assert creator.not_written_ids == {"f1"}
+    assert not creator.written_files
+    assert creator.files_success == 0
+    assert creator.failed_files == [
+        {
+            "id": "f1",
+            "name": "ghost.pdf",
+            "path": "ghost.pdf",
+            "error": "Download reported success but wrote no file",
+        }
+    ]
