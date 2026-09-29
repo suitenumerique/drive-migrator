@@ -316,6 +316,14 @@ class Base(Configuration):
     DRIVE_RETRY_WAIT_MIN = values.IntegerValue(
         2, environ_name="DRIVE_RETRY_WAIT_MIN", environ_prefix=None
     )
+    # Integrity check: how long to wait for Drive's malware analysis of freshly
+    # uploaded files to finish, and how often to poll their upload_state.
+    DRIVE_INTEGRITY_ANALYSIS_TIMEOUT = values.PositiveIntegerValue(
+        300, environ_name="DRIVE_INTEGRITY_ANALYSIS_TIMEOUT", environ_prefix=None
+    )
+    DRIVE_INTEGRITY_ANALYSIS_POLL_INTERVAL = values.PositiveIntegerValue(
+        10, environ_name="DRIVE_INTEGRITY_ANALYSIS_POLL_INTERVAL", environ_prefix=None
+    )
     # Fernet key (URL-safe base64, 32 bytes) used to encrypt OIDC tokens at rest.
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     OIDC_TOKENS_ENCRYPTION_KEY = values.Value(
