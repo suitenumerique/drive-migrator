@@ -5,7 +5,7 @@ from django.conf import settings
 
 from celery.utils.log import get_task_logger
 
-from core.backends.source import AbstractSourceBackend, SourceFolder
+from core.backends.source import AbstractSourceBackend, SourceFile, SourceFolder
 from core.models import Workspace
 from core.utils import (
     ensure_file_uniqueness,
@@ -24,6 +24,11 @@ class FolderCreator:
         self.files_success = 0
         self.files_current = 0
         self.failed_files = []
+        # Source file id -> path relative to the workspace root, for every file
+        # actually written to disk.
+        self.written_files = {}
+        # Source file ids whose download returned without error but left no file.
+        self.not_written_ids = set()
         self.workspace = None
 
     def __get_files_count(self, folder: SourceFolder):
@@ -106,6 +111,9 @@ class FolderCreator:
                 )
                 destination = destination_uniqueness
 
+            relative_path = os.path.relpath(
+                destination, self.get_workspace_path(self.workspace)
+            )
             try:
                 source_backend.download_file(file, destination)
             # Broad on purpose: source_backend is backend-agnostic (Resana, Osmose,
@@ -117,19 +125,33 @@ class FolderCreator:
                 )
                 if os.path.exists(destination):
                     os.remove(destination)
-                relative_path = os.path.relpath(
-                    destination, self.get_workspace_path(self.workspace)
+                self.__add_failed_file(file, relative_path, str(error))
+                continue
+
+            if not os.path.isfile(destination):
+                logger.error(
+                    "Download of %s reported success but wrote no file",
+                    file.name_with_extension,
                 )
-                self.failed_files.append(
-                    {
-                        "name": file.name_with_extension,
-                        "path": relative_path,
-                        "error": str(error),
-                    }
+                self.not_written_ids.add(file.id)
+                self.__add_failed_file(
+                    file, relative_path, "Download reported success but wrote no file"
                 )
                 continue
+
+            self.written_files[file.id] = relative_path
 
             size = get_dir_size(self.get_workspace_path(self.workspace))
             size_formatted = sizeof_fmt(size)
             logger.info("Directory size: %s (%s)", size_formatted, size)
             self.files_success += 1
+
+    def __add_failed_file(self, file: SourceFile, relative_path: str, error: str):
+        self.failed_files.append(
+            {
+                "id": file.id,
+                "name": file.name_with_extension,
+                "path": relative_path,
+                "error": error,
+            }
+        )

@@ -12,7 +12,12 @@ import requests
 from celery.utils.log import get_task_logger
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
-from tenacity import before_sleep_log, retry, wait_exponential
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_not_exception_type,
+    wait_exponential,
+)
 
 from core.models import Workspace
 from core.retry_utils import log_final_failure_and_reraise
@@ -85,6 +90,10 @@ class OsmoseFailedDownloadException(Exception):
     pass
 
 
+class OsmoseFileNotFound(FileNotFoundError):
+    """Raise for a 404 accepted by OSMOSE_BACKEND_ACCEPT_404, never retried."""
+
+
 def _stop_after_configured_attempts(retry_state) -> bool:
     """Read OSMOSE_RETRY_MAX_ATTEMPTS at call time, not decoration time, so it
     stays overridable per-test/per-environment like every other setting here."""
@@ -140,6 +149,7 @@ class OsmoseRealBackend(OsmoseBackend):
         return opener
 
     @retry(
+        retry=retry_if_not_exception_type(OsmoseFileNotFound),
         stop=_stop_after_configured_attempts,
         wait=_wait_configured_backoff,
         before_sleep=before_sleep_log(get_logger(), logging.INFO),
@@ -156,27 +166,23 @@ class OsmoseRealBackend(OsmoseBackend):
         opener = self.__build_opener()
         urllib.request.install_opener(opener)
 
-        error_ignored = False
-
         # Per-attempt failures are surfaced by the @retry decorator above (INFO before
         # each retry, ERROR once every attempt is exhausted), so these handlers only
-        # decide whether to swallow (404 accepted) or propagate for tenacity to retry.
+        # decide whether a 404 is accepted (raised once, not retried) or retried.
         try:
             urllib.request.urlretrieve(download_url, destination)  # noqa: S310
 
         except HTTPError as e:
             if e.code == 404 and settings.OSMOSE_BACKEND_ACCEPT_404:
-                error_ignored = True
-            else:
-                raise e
+                raise OsmoseFileNotFound(
+                    f"404 Not Found (accepted): {download_url}"
+                ) from e
+            raise e
 
         get_logger().info("Success %s to %s ...", download_url, destination)
-        if error_ignored:
-            get_logger().info("Error ignored.")
-        else:
-            size = os.stat(destination).st_size
-            size_formatted = sizeof_fmt(size)
-            get_logger().info("File: %s %s (%s) ...", destination, size_formatted, size)
+        size = os.stat(destination).st_size
+        size_formatted = sizeof_fmt(size)
+        get_logger().info("File: %s %s (%s) ...", destination, size_formatted, size)
 
     def get_members(self, workspace) -> list[dict]:
         """Return workspace members as a list of {name, firstName, email} dicts."""

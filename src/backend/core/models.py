@@ -99,9 +99,9 @@ class Workspace(BaseModel):
     is_truncated = models.BooleanField(default=False)
 
     # Files that FolderCreator failed to download from the source backend.
-    # Each entry: {"name": str, "path": str, "error": str}, where "path" is
-    # relative to the workspace root (see FolderCreator.get_workspace_path).
-    # Set by the export task.
+    # Each entry: {"id": str, "name": str, "path": str, "error": str}, where "id"
+    # is the source file id and "path" is relative to the workspace root (see
+    # FolderCreator.get_workspace_path). Set by the export task.
     download_errors = models.JSONField(default=list, blank=True)
 
     def get_destination_status(self, destination_name: str) -> str:

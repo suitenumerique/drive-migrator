@@ -2,7 +2,7 @@
 
 import logging
 from unittest.mock import patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -104,3 +104,21 @@ def test_download_file_logs_error_on_final_failure(settings):
         _backend().download_file("http://osmose.example.com/file", "/tmp/x.pdf")
 
     mock_error.assert_called_once()
+
+
+def test_download_file_raises_accepted_404_without_retry(settings):
+    """An accepted 404 is reported as a missing file, not as a silent success."""
+    settings.OSMOSE_BACKEND_ACCEPT_404 = True
+    settings.OSMOSE_RETRY_MAX_ATTEMPTS = 3
+    url = "http://osmose.example.com/file"
+
+    with (
+        patch(
+            "core.sources.osmose.osmose_real_backend.urllib.request.urlretrieve"
+        ) as mock_urlretrieve,
+        pytest.raises(FileNotFoundError, match="404"),
+    ):
+        mock_urlretrieve.side_effect = HTTPError(url, 404, "Not Found", None, None)
+        _backend().download_file(url, "/tmp/x.pdf")
+
+    assert mock_urlretrieve.call_count == 1
