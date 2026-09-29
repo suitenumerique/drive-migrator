@@ -98,6 +98,12 @@ class Workspace(BaseModel):
     # this workspace's file tree (i.e. it had more files than the configured limit).
     is_truncated = models.BooleanField(default=False)
 
+    # When enabled, the export task records the per-file path of every source
+    # file (source, local disk, destination) in ExtraTaskInfo.integrity_report.
+    # None: follow the FILE_INTEGRITY_TRACKING feature flag.
+    # True/False: explicit per-workspace override, takes precedence over the flag.
+    is_file_integrity_tracked = models.BooleanField(null=True, blank=True, default=None)
+
     # Files that FolderCreator failed to download from the source backend.
     # Each entry: {"id": str, "name": str, "path": str, "error": str}, where "id"
     # is the source file id and "path" is relative to the workspace root (see
@@ -142,6 +148,14 @@ class ExtraTaskInfo(models.Model):
 
     # Should not be null, but we need to allow it for the initial migration.
     user = models.ForeignKey("User", on_delete=models.CASCADE, null=True, blank=True)
+
+    # Per-file integrity listing of this run, built by core.processing.integrity
+    # when the workspace has is_file_integrity_tracked enabled.
+    integrity_report = models.JSONField(default=dict, blank=True)
+
+    # False when a file was lost for a reason nothing else accounts for.
+    # None when the integrity check did not run for this task.
+    integrity_check_passed = models.BooleanField(null=True, blank=True)
 
     def __str__(self):
         return f"TaskResult {self.task_result.task_id} for {self.workspace.source_id} "
@@ -265,6 +279,7 @@ class FeatureFlag(models.Model):
         ALLOW_NEW_TASKS = "allow-new-tasks"
         READ_ONLY_MODE = "read-only-mode"
         AUTO_VALIDATE_NEW_USERS = "auto-validate-new-users"
+        FILE_INTEGRITY_TRACKING = "file-integrity-tracking"
 
     name = models.CharField(
         max_length=32,
