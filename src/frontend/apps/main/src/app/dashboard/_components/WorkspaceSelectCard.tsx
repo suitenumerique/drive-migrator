@@ -6,7 +6,7 @@ import { useController, useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/Badge/Badge';
-import { Workspace } from '@/components/Workspace/Workspace';
+import { Workspace, hasIntegrityGap } from '@/components/Workspace/Workspace';
 import { getFrontendTheme, tokens } from '@/cunningham';
 
 import './WorkspaceSelectCard.scss';
@@ -47,6 +47,56 @@ export const WorkspaceSelectCard = ({
     setIsOverflowing(!isMobile && !!el && el.scrollWidth > el.clientWidth);
   }, [workspace.title]);
 
+  const integrity = workspace.integrity;
+  const hasGap = hasIntegrityGap(integrity);
+  const destinationName = getDestinationName(
+    Object.keys(workspace.destination_statuses)[0],
+    t,
+  );
+
+  // Counts are only meaningful when the destination was checked file by file.
+  const integrityDetails = integrity && integrity.sent_files_count !== null && (
+    <Tooltip
+      className="workspace-select-card__integrity-tooltip"
+      // The icon sits on the card's right edge: open towards the free space.
+      placement="left"
+      content={
+        <span className="workspace-select-card__integrity">
+          <span>
+            {t("Fichiers dans l'espace d'origine : {{count}}", {
+              count: integrity.source_files_count,
+            })}
+          </span>
+          <span>
+            {t('Fichiers envoyés vers {{destination}} : {{count}}', {
+              destination: destinationName,
+              count: integrity.sent_files_count,
+            })}
+          </span>
+          <span>
+            {t('Fichiers disponibles dans {{destination}} : {{count}}', {
+              destination: destinationName,
+              count: integrity.migrated_files_count,
+            })}
+          </span>
+          <span className="workspace-select-card__integrity-note">
+            {t('État constaté à la fin de la migration')}
+          </span>
+        </span>
+      }
+    >
+      <button
+        type="button"
+        className="workspace-select-card__info"
+        aria-label={t('Détails de la migration')}
+      >
+        <span className="material-icons" aria-hidden>
+          info
+        </span>
+      </button>
+    </Tooltip>
+  );
+
   const title = (
     <span
       ref={titleRef}
@@ -57,24 +107,16 @@ export const WorkspaceSelectCard = ({
     </span>
   );
 
-  return (
-    <button
-      type="button"
-      className={[
-        'workspace-select-card',
-        locked && 'workspace-select-card--locked',
-        !locked && checked && 'workspace-select-card--selected',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      disabled={locked}
-      aria-pressed={!locked && checked}
-      onClick={() => {
-        if (!locked) {
-          setValue(workspace.id, !checked, { shouldValidate: true });
-        }
-      }}
-    >
+  const className = [
+    'workspace-select-card',
+    locked && 'workspace-select-card--locked',
+    !locked && checked && 'workspace-select-card--selected',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const content = (
+    <>
       <span
         className={[
           'workspace-select-card__checkbox',
@@ -123,13 +165,61 @@ export const WorkspaceSelectCard = ({
       {failed && (
         <span className="workspace-select-card__status workspace-select-card__status--failed">
           {t('Échoué')}
+          {integrityDetails}
         </span>
       )}
       {migrated && (
-        <span className="workspace-select-card__status workspace-select-card__status--migrated">
+        <span
+          className={[
+            'workspace-select-card__status',
+            hasGap
+              ? 'workspace-select-card__status--migrated-with-gap'
+              : 'workspace-select-card__status--migrated',
+          ].join(' ')}
+        >
+          {hasGap && (
+            <>
+              <span className="material-icons" aria-hidden>
+                warning
+              </span>
+              <span className="workspace-select-card__sr-only">
+                {t('Anomalie détectée')}
+              </span>
+            </>
+          )}
           {t('Migré')}
+          {integrityDetails}
         </span>
       )}
+    </>
+  );
+
+  // Locked cards can't be selected: a plain container, so that the details
+  // button inside is neither nested in a button nor disabled.
+  if (locked) {
+    return <div className={className}>{content}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      className={className}
+      aria-pressed={checked}
+      onClick={() => setValue(workspace.id, !checked, { shouldValidate: true })}
+    >
+      {content}
     </button>
   );
+};
+
+const getDestinationName = (
+  name: string | undefined,
+  t: (key: string) => string,
+) => {
+  const names: Record<string, string> = {
+    drive: 'LaSuite Fichiers',
+    archive: t('Archive zip'),
+    resana: 'Resana',
+  };
+  return (name && names[name]) || name || '';
 };

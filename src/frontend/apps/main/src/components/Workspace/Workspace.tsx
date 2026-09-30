@@ -26,6 +26,15 @@ export enum WorkspaceStatus {
   FAILURE = 'FAILURE',
 }
 
+// Integrity check of the latest run, null when that run was not checked.
+export interface WorkspaceIntegrity {
+  migrated_files_count: number;
+  source_files_count: number;
+  // null when no destination was checked file by file (e.g. archive).
+  sent_files_count: number | null;
+  check_passed: boolean | null;
+}
+
 export interface Workspace {
   id: string;
   title: string;
@@ -34,7 +43,16 @@ export interface Workspace {
   destination_statuses: Record<string, WorkspaceStatus>;
   destination_metadata: Record<string, Record<string, unknown>>;
   is_truncated: boolean;
+  integrity: WorkspaceIntegrity | null;
 }
+
+// Some source files did not make it, or the check found an unexplained loss.
+// Sent files include those still under malware analysis, which are no loss.
+export const hasIntegrityGap = (integrity: WorkspaceIntegrity | null) =>
+  !!integrity &&
+  ((integrity.sent_files_count ?? integrity.migrated_files_count) !==
+    integrity.source_files_count ||
+    integrity.check_passed === false);
 
 const WorkspaceStatusBadge = ({
   children,

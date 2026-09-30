@@ -15,7 +15,7 @@
     border-color 0.15s ease,
     background-color 0.15s ease;
 
-  &:hover:not(:disabled) {
+  &:hover:not(:disabled, .workspace-select-card--locked) {
     border-color: var(--c--contextuals--border--semantic--brand--primary);
   }
 
@@ -101,6 +101,7 @@
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
+    gap: 4px;
     height: 24px;
     padding: 0 10px;
     border-radius: 4px;
@@ -108,11 +109,13 @@
     font-weight: 500;
     line-height: 1;
 
+    .material-icons {
+      font-size: 1rem;
+    }
+
     &--pending {
-      background: var(
-        --c--contextuals--background--semantic--warning--secondary
-      );
-      color: var(--c--contextuals--content--semantic--warning--tertiary);
+      background: var(--c--contextuals--background--semantic--info--secondary);
+      color: var(--c--contextuals--content--semantic--info--tertiary);
     }
 
     &--failed {
@@ -126,5 +129,57 @@
       );
       color: var(--c--contextuals--content--semantic--neutral--tertiary);
     }
+
+    /* Migrated, but not every source file made it or a loss was detected. */
+    &--migrated-with-gap {
+      background: var(
+        --c--contextuals--background--semantic--warning--secondary
+      );
+      color: var(--c--contextuals--content--semantic--warning--tertiary);
+    }
+  }
+
+  &__info {
+    display: inline-flex;
+    padding: 0;
+    color: inherit;
+    cursor: help;
+    background: none;
+    border: 0;
+    border-radius: 50%;
+
+    &:focus-visible {
+      outline: 2px solid currentcolor;
+      outline-offset: 1px;
+    }
+  }
+
+  /* Sized by its content: close to the viewport edge, a shrink-to-fit width
+     would wrap every word. */
+  &__integrity-tooltip {
+    width: max-content;
+    max-width: calc(100vw - 32px);
+  }
+
+  &__integrity {
+    display: flex;
+    white-space: nowrap;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+  }
+
+  &__integrity-note {
+    margin-top: 4px;
+    font-style: italic;
+  }
+
+  &__sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
