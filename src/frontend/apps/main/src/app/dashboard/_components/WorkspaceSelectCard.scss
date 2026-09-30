@@ -101,6 +101,7 @@
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
+    gap: 4px;
     height: 24px;
     padding: 0 10px;
     border-radius: 4px;
@@ -109,10 +110,8 @@
     line-height: 1;
 
     &--pending {
-      background: var(
-        --c--contextuals--background--semantic--warning--secondary
-      );
-      color: var(--c--contextuals--content--semantic--warning--tertiary);
+      background: var(--c--contextuals--background--semantic--info--secondary);
+      color: var(--c--contextuals--content--semantic--info--tertiary);
     }
 
     &--failed {
@@ -126,5 +125,22 @@
       );
       color: var(--c--contextuals--content--semantic--neutral--tertiary);
     }
+
+    /* Migrated, but not every source file made it or a loss was detected. */
+    &--migrated-with-gap {
+      background: var(
+        --c--contextuals--background--semantic--warning--secondary
+      );
+      color: var(--c--contextuals--content--semantic--warning--tertiary);
+    }
+  }
+
+  &__sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }

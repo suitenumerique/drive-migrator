@@ -47,6 +47,7 @@ and this project adheres to
 - add admin actions to reset a user's Resana or Drive connection #198
 - add PostHog events for login, sync and migration outcome
 - add opt-in per-file migration integrity report #325
+- show migrated/source file counts and gaps on workspace cards #325
 
 ### Changed
 

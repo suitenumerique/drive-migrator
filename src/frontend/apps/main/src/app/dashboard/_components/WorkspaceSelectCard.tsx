@@ -6,7 +6,7 @@ import { useController, useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/Badge/Badge';
-import { Workspace } from '@/components/Workspace/Workspace';
+import { Workspace, hasIntegrityGap } from '@/components/Workspace/Workspace';
 import { getFrontendTheme, tokens } from '@/cunningham';
 
 import './WorkspaceSelectCard.scss';
@@ -46,6 +46,21 @@ export const WorkspaceSelectCard = ({
     ).matches;
     setIsOverflowing(!isMobile && !!el && el.scrollWidth > el.clientWidth);
   }, [workspace.title]);
+
+  // Short "· 5/7" in the status badge; screen readers get the full sentence.
+  const filesMigrated = workspace.integrity && (
+    <>
+      <span aria-hidden>
+        {`· ${workspace.integrity.migrated_files_count}/${workspace.integrity.source_files_count}`}
+      </span>
+      <span className="workspace-select-card__sr-only">
+        {t('{{migrated}} fichiers migrés sur {{source}}', {
+          migrated: workspace.integrity.migrated_files_count,
+          source: workspace.integrity.source_files_count,
+        })}
+      </span>
+    </>
+  );
 
   const title = (
     <span
@@ -123,11 +138,20 @@ export const WorkspaceSelectCard = ({
       {failed && (
         <span className="workspace-select-card__status workspace-select-card__status--failed">
           {t('Échoué')}
+          {filesMigrated}
         </span>
       )}
       {migrated && (
-        <span className="workspace-select-card__status workspace-select-card__status--migrated">
+        <span
+          className={[
+            'workspace-select-card__status',
+            hasIntegrityGap(workspace.integrity)
+              ? 'workspace-select-card__status--migrated-with-gap'
+              : 'workspace-select-card__status--migrated',
+          ].join(' ')}
+        >
           {t('Migré')}
+          {filesMigrated}
         </span>
       )}
     </button>
