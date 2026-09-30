@@ -1,11 +1,13 @@
-"""Tests for WorkspacesViewset — auth and download_archive."""
+"""Tests for WorkspacesViewset: auth, download_archive and integrity."""
 
 from unittest.mock import patch
 
 import pytest
+from django_celery_results.models import TaskResult
 from rest_framework.test import APIClient
 
 from core import factories
+from core.models import ExtraTaskInfo
 
 pytestmark = pytest.mark.django_db
 
@@ -54,3 +56,104 @@ def test_download_archive_authenticated_owner():
 
     assert response.status_code == 200
     assert response.json() == {"url": "http://s3.example.com/ws.zip?token=abc"}
+
+
+# ---------------------------------------------------------------------------
+# integrity field
+# ---------------------------------------------------------------------------
+
+
+def _run(workspace, task_id, report=None, check_passed=None):
+    return ExtraTaskInfo.objects.create(
+        task_result=TaskResult.objects.create(task_id=task_id),
+        workspace=workspace,
+        integrity_report=report or {},
+        integrity_check_passed=check_passed,
+    )
+
+
+def _report(migrated, source):
+    return {
+        "summary": {"migrated_files_count": migrated, "source_files_count": source},
+        "files": [],
+    }
+
+
+def _get_workspace(workspace):
+    user = factories.UserFactory()
+    user.workspaces.add(workspace)
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(f"/api/v1.0/workspaces/{workspace.id}/")
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_workspace_integrity_is_null_without_run():
+    """A workspace never migrated has no integrity information."""
+    workspace = factories.WorkspaceFactory()
+
+    assert _get_workspace(workspace)["integrity"] is None
+
+
+def test_workspace_integrity_comes_from_the_latest_run():
+    """The file counts and check result of the latest run are exposed."""
+    workspace = factories.WorkspaceFactory()
+    _run(workspace, "t-1", _report(3, 3), check_passed=True)
+    _run(workspace, "t-2", _report(5, 7), check_passed=False)
+
+    assert _get_workspace(workspace)["integrity"] == {
+        "migrated_files_count": 5,
+        "source_files_count": 7,
+        "check_passed": False,
+    }
+
+
+def test_workspace_integrity_is_null_when_latest_run_has_no_report():
+    """An older report is not shown for a run migrated without the check."""
+    workspace = factories.WorkspaceFactory()
+    _run(workspace, "t-1", _report(3, 3), check_passed=True)
+    _run(workspace, "t-2")
+
+    assert _get_workspace(workspace)["integrity"] is None
+
+
+def test_list_workspaces_reads_integrity_without_extra_query_per_workspace(
+    django_assert_max_num_queries,
+):
+    """The integrity information does not add one query per listed workspace."""
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+    for index in range(3):
+        workspace = factories.WorkspaceFactory()
+        user.workspaces.add(workspace)
+        _run(workspace, f"t-{index}", _report(1, 2), check_passed=True)
+
+    with django_assert_max_num_queries(3):
+        response = client.get("/api/v1.0/workspaces/")
+
+    assert response.status_code == 200
+
+
+def test_list_workspaces_is_ordered_by_status_then_title():
+    """Workspaces are listed by status, then alphabetically ignoring case."""
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+    for title, status in [
+        ("beta", "SUCCESS"),
+        ("Alpha", "SUCCESS"),
+        ("gamma", "FAILURE"),
+        ("delta", "NONE"),
+    ]:
+        user.workspaces.add(factories.WorkspaceFactory(title=title, status=status))
+
+    response = client.get("/api/v1.0/workspaces/")
+
+    assert [w["title"] for w in response.json()["results"]] == [
+        "gamma",
+        "delta",
+        "Alpha",
+        "beta",
+    ]
