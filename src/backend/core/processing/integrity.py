@@ -246,6 +246,25 @@ def build_integrity_report(
     return {"summary": summary, "files": rows}
 
 
+# The destination holds an item for the file, usable or not.
+SENT_STAGES = {
+    Stage.OK,
+    Stage.ANALYSIS_UNFINISHED,
+    Stage.PENDING,
+    Stage.NOT_READY,
+    Stage.SIZE_MISMATCH,
+}
+
+
+def _sent_files_count(rows: list[dict]) -> int:
+    """Source files received by every checked destination."""
+    stages_by_source = {}
+    for row in rows:
+        if "source_id" in row and "destination" in row:
+            stages_by_source.setdefault(row["source_id"], set()).add(row["stage"])
+    return sum(1 for stages in stages_by_source.values() if stages <= SENT_STAGES)
+
+
 def _migrated_files_count(rows: list[dict]) -> int:
     """Source files whose every row (one per checked destination) is ok."""
     stages_by_source = {}
@@ -266,6 +285,12 @@ def _summary(
         "source_files_count": source_files_count,
         "local_files_count": local_files_count,
         "migrated_files_count": _migrated_files_count(rows),
+        # Unknown when no destination was checked file by file.
+        "sent_files_count": (
+            _sent_files_count(rows)
+            if any(result is not None for result in destination_results.values())
+            else None
+        ),
         "stages": dict(Counter(row["stage"] for row in rows)),
         "destinations_checked": [
             destination

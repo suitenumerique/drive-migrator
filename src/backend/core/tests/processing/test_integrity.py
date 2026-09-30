@@ -177,6 +177,7 @@ def test_report_merges_retrieval_and_destination_for_each_file(tmp_path):
         "source_files_count": 1,
         "local_files_count": 1,
         "migrated_files_count": 1,
+        "sent_files_count": 1,
         "stages": {"ok": 1},
         "destinations_checked": ["drive"],
         "destinations_not_checked": [],
@@ -372,6 +373,45 @@ def test_report_counts_retrieved_files_as_migrated_without_checked_destination(
     )
 
     assert report["summary"]["migrated_files_count"] == 1
+    assert report["summary"]["sent_files_count"] is None
+
+
+SENT_STAGES = ["ok", "analysis_unfinished", "pending", "not_ready", "size_mismatch"]
+NOT_SENT_STAGES = ["not_created", "not_attempted", "unverified"]
+
+
+def test_report_counts_files_received_by_the_destination_as_sent(tmp_path):
+    """A file is sent when the destination holds an item for it, whatever its
+    state; failed creations, untried files and unverifiable ones are not."""
+    stages = SENT_STAGES + NOT_SENT_STAGES
+    names = [f"{stage}.txt" for stage in stages]
+    for name in names:
+        _write(tmp_path / name)
+    source_files = [
+        {"source_id": f"f{i}", "source_path": name} for i, name in enumerate(names)
+    ]
+    source_files.append({"source_id": "lost", "source_path": "lost.txt"})
+    creator = _creator(
+        written_files={f"f{i}": name for i, name in enumerate(names)},
+        failed_files=[
+            {"id": "lost", "name": "lost.txt", "path": "lost.txt", "error": "x"}
+        ],
+    )
+    drive_files = {
+        name: {"item_id": name, "stage": stage}
+        for name, stage in zip(names, stages)
+        if stage != "not_attempted"
+    }
+
+    report = _build(
+        tmp_path,
+        source_files,
+        creator,
+        destination_results={"drive": {"files": drive_files, "extra": []}},
+    )
+
+    assert report["summary"]["source_files_count"] == len(stages) + 1
+    assert report["summary"]["sent_files_count"] == len(SENT_STAGES)
 
 
 def test_report_keeps_destination_error_in_summary(tmp_path):
