@@ -20,7 +20,7 @@ services:
 
   minio:
     user: ${DOCKER_USER:-1000}
-    image: quay.io/minio/minio
+    image: cgr.dev/chainguard/minio
     environment:
       - MINIO_ROOT_USER=dinum
       - MINIO_ROOT_PASSWORD=password
@@ -33,7 +33,7 @@ services:
       - ./data/media:/data
 
   createbuckets:
-    image: quay.io/minio/mc
+    image: cgr.dev/chainguard/minio
     depends_on:
       - minio
     entrypoint: >

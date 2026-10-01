@@ -82,6 +82,7 @@ and this project adheres to
 - exclude Resana personal workspaces from migration by default #163
 - fix user.csv not generated for locked Resana workspaces #169
 - fix accented filenames mangled in workspace ZIP export #166
+- pull MinIO images from Chainguard since quay.io pulls are gated
 
 ### Removed
 

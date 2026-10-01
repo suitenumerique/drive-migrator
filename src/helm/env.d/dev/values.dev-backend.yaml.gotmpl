@@ -15,7 +15,9 @@ redis:
   password: pass
 minio:
   enabled: true
-  image: quay.io/minio/minio
+  image: cgr.dev/chainguard/minio
+  mc:
+    image: cgr.dev/chainguard/minio
   name: minio
   ingress:
     enabled: true
