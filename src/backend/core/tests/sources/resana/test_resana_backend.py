@@ -90,10 +90,14 @@ def _patch_get_workspaces_clients(
     *,
     raw_workspaces,
     workspaces_with_role=None,
+    portal_workspaces=None,
 ):
     mock_client.return_value.get_workspaces.return_value = raw_workspaces
     mock_members_client.return_value.get_workspaces_with_role.return_value = (
         workspaces_with_role or []
+    )
+    mock_members_client.return_value.get_workspaces.return_value = (
+        portal_workspaces or []
     )
 
 
@@ -121,6 +125,9 @@ def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
                             "name": "Espace Projet",
                             "role_code": "GESTIONNAIRE",
                         }
+                    ],
+                    portal_workspaces=[
+                        {"slug": "slug-1", "name": "Espace Projet", "uuid": "ws-1"}
                     ],
                 )
                 result = ResanaSourceBackend().get_workspaces(user)
@@ -159,6 +166,13 @@ def test_get_workspaces_unescapes_html_entities_in_title(settings):
                             "slug": "slug-1",
                             "name": "Rapports d'activité & suivi",
                             "role_code": "GESTIONNAIRE",
+                        }
+                    ],
+                    portal_workspaces=[
+                        {
+                            "slug": "slug-1",
+                            "name": "Rapports d'activité & suivi",
+                            "uuid": "ws-1",
                         }
                     ],
                 )
@@ -278,11 +292,60 @@ def test_get_workspaces_includes_workspace_when_user_is_manager(settings):
                             "role_code": "GESTIONNAIRE",
                         }
                     ],
+                    portal_workspaces=[
+                        {"slug": "2137439", "name": "Test CGU", "uuid": "ws-1"}
+                    ],
                 )
                 result = ResanaSourceBackend().get_workspaces(user)
 
     assert len(result) == 1
     assert result[0].id == "ws-1"
+
+
+def test_get_workspaces_filters_role_by_uuid_not_by_name(settings):
+    """Homonym workspaces: only the one where the user is GESTIONNAIRE is listed.
+
+    listerMesEspacesV2 has no uuid, so the role is joined to the GED uuid through
+    getOngletTrie's slug.
+    """
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    raw_workspaces = [
+        {"uuid": "ws-a", "name": "Test CGU", "isPersonalWorkspace": False},
+        {"uuid": "ws-b", "name": "Test CGU", "isPersonalWorkspace": False},
+    ]
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client,
+                    mock_members,
+                    raw_workspaces=raw_workspaces,
+                    workspaces_with_role=[
+                        {
+                            "slug": "2137439",
+                            "name": "Test CGU",
+                            "role_code": "GESTIONNAIRE",
+                        },
+                        {
+                            "slug": "2137459",
+                            "name": "Test CGU",
+                            "role_code": "VISITEUR",
+                        },
+                    ],
+                    portal_workspaces=[
+                        {"slug": "2137439", "name": "Test CGU", "uuid": "ws-a"},
+                        {"slug": "2137459", "name": "Test CGU", "uuid": "ws-b"},
+                    ],
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    assert [ws.id for ws in result] == ["ws-a"]
 
 
 def test_get_workspaces_excludes_personal_workspace_by_default(settings):
