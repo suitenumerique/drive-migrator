@@ -100,9 +100,8 @@ class Workspace(BaseModel):
 
     # Source-side lock/permission bookkeeping recorded during migration (e.g. whether
     # *we* locked the workspace ourselves, which folders *we* granted access to), so
-    # finalize_export only reverses what it actually changed (#215). Not general-purpose
-    # metadata; see destination_metadata, which is NOT safe to reuse here: destination
-    # backends replace it wholesale mid-task (see resana_backend.py's set_destination_metadata).
+    # finalize_export only reverses what it actually changed (#215). Kept separate from
+    # destination_metadata, which is keyed by destination and owned by destination backends.
     source_lock_state = models.JSONField(default=dict, blank=True)
 
     # Files that FolderCreator failed to download from the source backend.
