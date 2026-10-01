@@ -671,6 +671,24 @@ def test_prepare_export_does_nothing_when_slug_not_found(settings):
     workspace.save.assert_not_called()
 
 
+def test_prepare_export_logs_warning_when_slug_not_found(settings):
+    """An unresolved slug must not be silent: members are skipped, so say so."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = _make_workspace()
+
+    with (
+        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
+        patch("core.sources.resana.backend.ResanaMembersClient") as mock_client,
+        patch("core.sources.resana.backend.logger") as mock_logger,
+    ):
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        _patch_members_client(mock_client, slug=None)
+        ResanaSourceBackend().prepare_export(workspace, "/tmp/workdir")
+
+    mock_logger.warning.assert_called_once()
+    assert "ws-uuid" in mock_logger.warning.call_args[0]
+
+
 def test_prepare_export_uses_migration_user_token(settings):
     """prepare_export() authenticates via the workspace's migration_user."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"

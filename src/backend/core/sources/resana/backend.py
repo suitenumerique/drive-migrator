@@ -119,6 +119,11 @@ class ResanaSourceBackend(AbstractSourceBackend):
         client = self._get_members_client()
         slug = client.find_slug_by_workspace_uuid(workspace.source_id)
         if slug is None:
+            logger.warning(
+                "No Resana slug found for workspace %s (GED uuid %s), skipping members",
+                workspace.id,
+                workspace.source_id,
+            )
             return
         workspace.members = client.list_workspace_members(slug)
         workspace.save()
@@ -138,6 +143,12 @@ class ResanaSourceBackend(AbstractSourceBackend):
         members_client = self._get_members_client()
         slug = members_client.find_slug_by_workspace_uuid(workspace.source_id)
         if slug is None:
+            logger.warning(
+                "No Resana slug found for workspace %s (GED uuid %s), "
+                "migrating without locking it",
+                workspace.id,
+                workspace.source_id,
+            )
             return
 
         lock_client = self._get_lock_client()
