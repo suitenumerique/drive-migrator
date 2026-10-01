@@ -457,11 +457,16 @@ def test_finalize_export_does_not_raise_when_lock_client_cannot_be_built(setting
         "folders_granted_by_us": ["f1"],
     }
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+    with (
+        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
+        patch("core.sources.resana.backend.ResanaLockClient") as mock_lock,
+        patch("core.sources.resana.backend.logger") as mock_logger,
+    ):
         mock_tm.return_value.get_valid_token.side_effect = ResanaTokenExpired("expired")
-        with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
-            ResanaSourceBackend().finalize_export(workspace)  # must not raise
+        ResanaSourceBackend().finalize_export(workspace)  # must not raise
 
+    # The workspace may stay locked: an error, not a warning.
+    mock_logger.error.assert_called_once()
     mock_lock.return_value.unlock_workspace.assert_not_called()
     assert workspace.source_lock_state["folders_granted_by_us"] == ["f1"]
 
@@ -527,12 +532,17 @@ def test_finalize_export_does_not_raise_when_saving_lock_state_fails(settings):
     }
     workspace.save.side_effect = DatabaseError("db down")
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+    with (
+        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
+        patch("core.sources.resana.backend.ResanaMembersClient") as mock_members,
+        patch("core.sources.resana.backend.ResanaLockClient"),
+        patch("core.sources.resana.backend.logger") as mock_logger,
+    ):
         mock_tm.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
-            _patch_members_client(mock_members)
-            with patch("core.sources.resana.backend.ResanaLockClient"):
-                ResanaSourceBackend().finalize_export(workspace)  # must not raise
+        _patch_members_client(mock_members)
+        ResanaSourceBackend().finalize_export(workspace)  # must not raise
+
+    mock_logger.error.assert_called_once()
 
 
 def test_finalize_export_unlocks_workspace_when_we_locked_it(settings):
@@ -651,15 +661,17 @@ def test_finalize_export_swallows_error_from_one_folder_and_continues(settings):
         None,
     ]
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+    with (
+        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
+        patch("core.sources.resana.backend.ResanaMembersClient") as mock_members,
+        patch("core.sources.resana.backend.ResanaLockClient", return_value=manager),
+        patch("core.sources.resana.backend.logger") as mock_logger,
+    ):
         mock_tm.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
-            _patch_members_client(mock_members, slug="2137419")
-            with patch(
-                "core.sources.resana.backend.ResanaLockClient", return_value=manager
-            ):
-                ResanaSourceBackend().finalize_export(workspace)  # must not raise
+        _patch_members_client(mock_members, slug="2137419")
+        ResanaSourceBackend().finalize_export(workspace)  # must not raise
 
+    mock_logger.error.assert_called_once()
     assert manager.release_folder_access.call_count == 2
     manager.unlock_workspace.assert_called_once_with("2137419")
 
@@ -677,14 +689,18 @@ def test_finalize_export_swallows_error_from_unlock_workspace(settings):
     manager = MagicMock()
     manager.unlock_workspace.side_effect = requests.RequestException("boom")
 
-    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+    with (
+        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
+        patch("core.sources.resana.backend.ResanaMembersClient") as mock_members,
+        patch("core.sources.resana.backend.ResanaLockClient", return_value=manager),
+        patch("core.sources.resana.backend.logger") as mock_logger,
+    ):
         mock_tm.return_value.get_valid_token.return_value = "tok"
-        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
-            _patch_members_client(mock_members, slug="2137419")
-            with patch(
-                "core.sources.resana.backend.ResanaLockClient", return_value=manager
-            ):
-                ResanaSourceBackend().finalize_export(workspace)  # must not raise
+        _patch_members_client(mock_members, slug="2137419")
+        ResanaSourceBackend().finalize_export(workspace)  # must not raise
+
+    # The workspace stays frozen for all its members: an error, not a warning.
+    mock_logger.error.assert_called_once()
 
 
 def test_finalize_export_keeps_lock_recorded_when_defiger_did_not_unlock(settings):

@@ -215,7 +215,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
             lock_client = self._get_lock_client()
             members_client = self._get_members_client()
         except _FINALIZE_EXPORT_EXCEPTIONS:
-            logger.warning(
+            logger.error(
                 "Could not build clients to finalize export for workspace %s",
                 workspace.id,
                 exc_info=True,
@@ -229,7 +229,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 lock_client.release_folder_access(slug, folder_id)
             except _FINALIZE_EXPORT_EXCEPTIONS:
                 remaining_folder_ids.append(folder_id)
-                logger.warning(
+                logger.error(
                     "Could not release access on folder %s for workspace %s",
                     folder_id,
                     workspace.id,
@@ -242,7 +242,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 self._unlock_workspace(lock_client, members_client, slug)
                 lock_state["workspace_locked_by_us"] = False
             except _FINALIZE_EXPORT_EXCEPTIONS:
-                logger.warning(
+                logger.error(
                     "Could not unlock workspace %s", workspace.id, exc_info=True
                 )
         else:
@@ -256,7 +256,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
         try:
             workspace.save(update_fields=["source_lock_state"])
         except DatabaseError:
-            logger.warning(
+            logger.error(
                 "Could not save source_lock_state for workspace %s",
                 workspace.id,
                 exc_info=True,
