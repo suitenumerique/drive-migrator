@@ -88,10 +88,17 @@ class ResanaSourceBackend(AbstractSourceBackend):
         self._user = user
         client = self._get_client()
         members_client = self._get_members_client()
-        manager_names = {
-            ws["name"]
+        # The role listing has no GED uuid: join it through the PHP slug, since
+        # matching on the name would also list a homonym the user doesn't manage.
+        manager_slugs = {
+            ws["slug"]
             for ws in members_client.get_workspaces_with_role()
             if ws["role_code"] == GESTIONNAIRE_CODE
+        }
+        manager_uuids = {
+            ws["uuid"]
+            for ws in members_client.get_workspaces()
+            if ws["slug"] in manager_slugs
         }
 
         workspaces = []
@@ -100,7 +107,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
             if ws.get("isPersonalWorkspace"):
                 if not settings.RESANA_MIGRATE_PERSONAL_WORKSPACES:
                     continue
-            elif name not in manager_names:
+            elif ws["uuid"] not in manager_uuids:
                 continue
             workspaces.append(SourceWorkspace(id=ws["uuid"], title=name, raw_data=ws))
         return workspaces
