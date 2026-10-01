@@ -216,8 +216,10 @@ class ResanaSourceBackend(AbstractSourceBackend):
             members_client = self._get_members_client()
         except _FINALIZE_EXPORT_EXCEPTIONS:
             logger.error(
-                "Could not build clients to finalize export for workspace %s",
+                "Could not build clients to finalize export for workspace %s, "
+                "Resana lock state left to reverse by hand: %s",
                 workspace.id,
+                lock_state,
                 exc_info=True,
             )
             return
@@ -230,8 +232,10 @@ class ResanaSourceBackend(AbstractSourceBackend):
             except _FINALIZE_EXPORT_EXCEPTIONS:
                 remaining_folder_ids.append(folder_id)
                 logger.error(
-                    "Could not release access on folder %s for workspace %s",
+                    "Could not release access on folder %s of Resana workspace %s "
+                    "(workspace %s)",
                     folder_id,
+                    slug,
                     workspace.id,
                     exc_info=True,
                 )
@@ -243,7 +247,10 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 lock_state["workspace_locked_by_us"] = False
             except _FINALIZE_EXPORT_EXCEPTIONS:
                 logger.error(
-                    "Could not unlock workspace %s", workspace.id, exc_info=True
+                    "Could not unlock Resana workspace %s (workspace %s)",
+                    slug,
+                    workspace.id,
+                    exc_info=True,
                 )
         else:
             logger.info(
@@ -257,8 +264,10 @@ class ResanaSourceBackend(AbstractSourceBackend):
             workspace.save(update_fields=["source_lock_state"])
         except DatabaseError:
             logger.error(
-                "Could not save source_lock_state for workspace %s",
+                "Could not save source_lock_state for workspace %s, "
+                "Resana lock state left to reverse: %s",
                 workspace.id,
+                lock_state,
                 exc_info=True,
             )
 

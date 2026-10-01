@@ -465,8 +465,9 @@ def test_finalize_export_does_not_raise_when_lock_client_cannot_be_built(setting
         mock_tm.return_value.get_valid_token.side_effect = ResanaTokenExpired("expired")
         ResanaSourceBackend().finalize_export(workspace)  # must not raise
 
-    # The workspace may stay locked: an error, not a warning.
+    # The workspace may stay locked: an error, not a warning, with what to reverse by hand.
     mock_logger.error.assert_called_once()
+    assert workspace.source_lock_state in mock_logger.error.call_args[0]
     mock_lock.return_value.unlock_workspace.assert_not_called()
     assert workspace.source_lock_state["folders_granted_by_us"] == ["f1"]
 
@@ -543,6 +544,7 @@ def test_finalize_export_does_not_raise_when_saving_lock_state_fails(settings):
         ResanaSourceBackend().finalize_export(workspace)  # must not raise
 
     mock_logger.error.assert_called_once()
+    assert workspace.source_lock_state in mock_logger.error.call_args[0]
 
 
 def test_finalize_export_unlocks_workspace_when_we_locked_it(settings):
@@ -672,6 +674,7 @@ def test_finalize_export_swallows_error_from_one_folder_and_continues(settings):
         ResanaSourceBackend().finalize_export(workspace)  # must not raise
 
     mock_logger.error.assert_called_once()
+    assert {"2137419", "f1"} <= set(mock_logger.error.call_args[0])
     assert manager.release_folder_access.call_count == 2
     manager.unlock_workspace.assert_called_once_with("2137419")
 
@@ -701,6 +704,7 @@ def test_finalize_export_swallows_error_from_unlock_workspace(settings):
 
     # The workspace stays frozen for all its members: an error, not a warning.
     mock_logger.error.assert_called_once()
+    assert "2137419" in mock_logger.error.call_args[0]
 
 
 def test_finalize_export_keeps_lock_recorded_when_defiger_did_not_unlock(settings):
