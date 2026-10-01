@@ -12,6 +12,7 @@ from django.db import DatabaseError
 import pytest
 import requests
 
+from core.factories import WorkspaceFactory
 from core.sources.resana.backend import ResanaSourceBackend
 from core.sources.resana.resana_lock_client import ResanaLockError
 from core.sources.resana.token_manager import ResanaTokenExpired
@@ -363,6 +364,27 @@ def test_begin_export_raises_when_figer_did_not_lock_workspace(settings):
     assert workspace.source_lock_state["workspace_locked_by_us"] is True
 
 
+def test_begin_export_persists_lock_state_in_database(settings):
+    """The recorded lock state must reach the database, since crash recovery relies on it."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(source_type="resana")
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
+            _patch_members_client(mock_members, slug="2137419", is_locked=False)
+            with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
+                _patch_lock_client(mock_lock, top_level_folder_ids=["f1", "f2"])
+                ResanaSourceBackend().begin_export(workspace)
+
+    workspace.refresh_from_db()
+    assert workspace.source_lock_state == {
+        "slug": "2137419",
+        "workspace_locked_by_us": True,
+        "folders_granted_by_us": ["f1", "f2"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # finalize_export()
 # ---------------------------------------------------------------------------
@@ -694,3 +716,34 @@ def test_finalize_export_unlocks_based_only_on_recorded_flag_ignoring_concurrent
                 ResanaSourceBackend().finalize_export(workspace)
 
     manager.unlock_workspace.assert_called_once_with("2137419")
+
+
+def test_finalize_export_persists_remaining_lock_state_in_database(settings):
+    """What failed to be reversed must reach the database, so a later retry can reverse it."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(
+        source_type="resana",
+        source_lock_state={
+            "slug": "2137419",
+            "workspace_locked_by_us": True,
+            "folders_granted_by_us": ["f1", "f2"],
+        },
+    )
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
+            _patch_members_client(mock_members, is_locked=True)
+            with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
+                mock_lock.return_value.release_folder_access.side_effect = [
+                    None,
+                    requests.RequestException("boom"),
+                ]
+                ResanaSourceBackend().finalize_export(workspace)
+
+    workspace.refresh_from_db()
+    assert workspace.source_lock_state == {
+        "slug": "2137419",
+        "workspace_locked_by_us": True,
+        "folders_granted_by_us": ["f2"],
+    }
