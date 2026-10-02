@@ -21,6 +21,7 @@ def _make_workspace(user=None):
     ws = MagicMock()
     ws.source_id = "ws-uuid"
     ws.migration_user = user or MagicMock()
+    ws.source_lock_state = {}
     return ws
 
 
@@ -89,10 +90,14 @@ def _patch_get_workspaces_clients(
     *,
     raw_workspaces,
     workspaces_with_role=None,
+    portal_workspaces=None,
 ):
     mock_client.return_value.get_workspaces.return_value = raw_workspaces
     mock_members_client.return_value.get_workspaces_with_role.return_value = (
         workspaces_with_role or []
+    )
+    mock_members_client.return_value.get_workspaces.return_value = (
+        portal_workspaces or []
     )
 
 
@@ -120,6 +125,9 @@ def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
                             "name": "Espace Projet",
                             "role_code": "GESTIONNAIRE",
                         }
+                    ],
+                    portal_workspaces=[
+                        {"slug": "slug-1", "name": "Espace Projet", "uuid": "ws-1"}
                     ],
                 )
                 result = ResanaSourceBackend().get_workspaces(user)
@@ -158,6 +166,13 @@ def test_get_workspaces_unescapes_html_entities_in_title(settings):
                             "slug": "slug-1",
                             "name": "Rapports d'activité & suivi",
                             "role_code": "GESTIONNAIRE",
+                        }
+                    ],
+                    portal_workspaces=[
+                        {
+                            "slug": "slug-1",
+                            "name": "Rapports d'activité & suivi",
+                            "uuid": "ws-1",
                         }
                     ],
                 )
@@ -277,11 +292,60 @@ def test_get_workspaces_includes_workspace_when_user_is_manager(settings):
                             "role_code": "GESTIONNAIRE",
                         }
                     ],
+                    portal_workspaces=[
+                        {"slug": "2137439", "name": "Test CGU", "uuid": "ws-1"}
+                    ],
                 )
                 result = ResanaSourceBackend().get_workspaces(user)
 
     assert len(result) == 1
     assert result[0].id == "ws-1"
+
+
+def test_get_workspaces_filters_role_by_uuid_not_by_name(settings):
+    """Homonym workspaces: only the one where the user is GESTIONNAIRE is listed.
+
+    listerMesEspacesV2 has no uuid, so the role is joined to the GED uuid through
+    getOngletTrie's slug.
+    """
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    raw_workspaces = [
+        {"uuid": "ws-a", "name": "Test CGU", "isPersonalWorkspace": False},
+        {"uuid": "ws-b", "name": "Test CGU", "isPersonalWorkspace": False},
+    ]
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client,
+                    mock_members,
+                    raw_workspaces=raw_workspaces,
+                    workspaces_with_role=[
+                        {
+                            "slug": "2137439",
+                            "name": "Test CGU",
+                            "role_code": "GESTIONNAIRE",
+                        },
+                        {
+                            "slug": "2137459",
+                            "name": "Test CGU",
+                            "role_code": "VISITEUR",
+                        },
+                    ],
+                    portal_workspaces=[
+                        {"slug": "2137439", "name": "Test CGU", "uuid": "ws-a"},
+                        {"slug": "2137459", "name": "Test CGU", "uuid": "ws-b"},
+                    ],
+                )
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    assert [ws.id for ws in result] == ["ws-a"]
 
 
 def test_get_workspaces_excludes_personal_workspace_by_default(settings):
@@ -612,9 +676,10 @@ def test_download_file_raises_when_no_user_set(settings):
 # ---------------------------------------------------------------------------
 
 
-def _patch_members_client(mock_cls, slug="2137419", members=None):
-    mock_cls.return_value.find_slug_by_workspace_name.return_value = slug
+def _patch_members_client(mock_cls, slug="2137419", members=None, is_locked=False):
+    mock_cls.return_value.find_slug_by_workspace_uuid.return_value = slug
     mock_cls.return_value.list_workspace_members.return_value = members or []
+    mock_cls.return_value.is_workspace_locked.return_value = is_locked
 
 
 def test_prepare_export_populates_members_when_workspace_found(settings):
@@ -636,8 +701,8 @@ def test_prepare_export_populates_members_when_workspace_found(settings):
     workspace.save.assert_called_once()
 
 
-def test_prepare_export_resolves_slug_by_workspace_title(settings):
-    """prepare_export() looks up the PHP slug using workspace.title."""
+def test_prepare_export_resolves_slug_by_workspace_source_id(settings):
+    """prepare_export() looks up the PHP slug using the GED UUID, not the title."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.title = "TEST Worskspace"
@@ -648,8 +713,8 @@ def test_prepare_export_resolves_slug_by_workspace_title(settings):
             _patch_members_client(mock_client)
             ResanaSourceBackend().prepare_export(workspace, "/tmp/workdir")
 
-    mock_client.return_value.find_slug_by_workspace_name.assert_called_once_with(
-        "TEST Worskspace"
+    mock_client.return_value.find_slug_by_workspace_uuid.assert_called_once_with(
+        "ws-uuid"
     )
 
 
@@ -667,6 +732,24 @@ def test_prepare_export_does_nothing_when_slug_not_found(settings):
 
     mock_client.return_value.list_workspace_members.assert_not_called()
     workspace.save.assert_not_called()
+
+
+def test_prepare_export_logs_warning_when_slug_not_found(settings):
+    """An unresolved slug must not be silent: members are skipped, so say so."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = _make_workspace()
+
+    with (
+        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
+        patch("core.sources.resana.backend.ResanaMembersClient") as mock_client,
+        patch("core.sources.resana.backend.logger") as mock_logger,
+    ):
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        _patch_members_client(mock_client, slug=None)
+        ResanaSourceBackend().prepare_export(workspace, "/tmp/workdir")
+
+    mock_logger.warning.assert_called_once()
+    assert "ws-uuid" in mock_logger.warning.call_args[0]
 
 
 def test_prepare_export_uses_migration_user_token(settings):

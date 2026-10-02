@@ -131,6 +131,31 @@ class AbstractSourceBackend(ABC):
         Default implementation is a no-op.
         """
 
+    def begin_export(self, workspace) -> None:  # noqa: B027
+        """
+        Optional hook called before get_workspace_structure(), i.e. before any
+        file is read or downloaded from the source.
+
+        Implementations may use this to freeze the source workspace against
+        concurrent edits and/or grant the migration account access it would
+        otherwise lack, so the migration doesn't silently miss files (#215).
+
+        Default implementation is a no-op.
+        """
+
+    def finalize_export(self, workspace) -> None:  # noqa: B027
+        """
+        Optional hook always called after begin_export(), in a `finally` block,
+        even if get_workspace_structure(), the download, or a destination raises.
+
+        Implementations should reverse whatever begin_export() did (release any
+        access it granted, unfreeze the workspace) and must not raise: an
+        exception here would replace/mask the migration's own exception, since
+        this hook runs inside a `finally`. Swallow and log errors instead.
+
+        Default implementation is a no-op.
+        """
+
 
 class SourceManager:
     """

@@ -1,8 +1,13 @@
 """ResanaSourceBackend — reads workspaces from the Interstis GED API."""
 
 import html
+import logging
 
 from django.conf import settings
+from django.db import DatabaseError
+
+import requests
+from cryptography.fernet import InvalidToken
 
 from core.backends.source import (
     AbstractSourceBackend,
@@ -11,11 +16,26 @@ from core.backends.source import (
     SourceWorkspace,
 )
 from core.sources.resana.interstis_client import InterstisClient
+from core.sources.resana.resana_lock_client import ResanaLockClient, ResanaLockError
 from core.sources.resana.resana_members_client import (
     GESTIONNAIRE_CODE,
     ResanaMembersClient,
 )
-from core.sources.resana.token_manager import ResanaTokenManager
+from core.sources.resana.token_manager import ResanaTokenExpired, ResanaTokenManager
+
+logger = logging.getLogger(__name__)
+
+# finalize_export() runs in a `finally` in the export task: it must never raise, or it
+# would replace the migration's own exception. These are the exceptions its PHP-portal
+# calls can realistically raise; anything else is a genuine bug and should surface.
+_FINALIZE_EXPORT_EXCEPTIONS = (
+    requests.RequestException,
+    ResanaLockError,
+    ResanaTokenExpired,
+    InvalidToken,
+    ValueError,
+    KeyError,
+)
 
 
 class ResanaSourceBackend(AbstractSourceBackend):
@@ -47,6 +67,15 @@ class ResanaSourceBackend(AbstractSourceBackend):
             base_url=settings.RESANA_WEB_ENDPOINT,
         )
 
+    def _get_lock_client(self) -> ResanaLockClient:
+        manager = ResanaTokenManager(self._user)
+        return ResanaLockClient(
+            access_token=manager.get_valid_token(),
+            session_id=manager.get_session_id(),
+            csrf_token=manager.get_csrf_token(),
+            base_url=settings.RESANA_WEB_ENDPOINT,
+        )
+
     def get_workspaces(self, user) -> list[SourceWorkspace]:
         """Return workspaces where `user` can migrate: shared workspaces where the
         user holds the GESTIONNAIRE (Animateur) role, and personal workspaces
@@ -59,10 +88,17 @@ class ResanaSourceBackend(AbstractSourceBackend):
         self._user = user
         client = self._get_client()
         members_client = self._get_members_client()
-        manager_names = {
-            ws["name"]
+        # The role listing has no GED uuid: join it through the PHP slug, since
+        # matching on the name would also list a homonym the user doesn't manage.
+        manager_slugs = {
+            ws["slug"]
             for ws in members_client.get_workspaces_with_role()
             if ws["role_code"] == GESTIONNAIRE_CODE
+        }
+        manager_uuids = {
+            ws["uuid"]
+            for ws in members_client.get_workspaces()
+            if ws["slug"] in manager_slugs
         }
 
         workspaces = []
@@ -71,7 +107,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
             if ws.get("isPersonalWorkspace"):
                 if not settings.RESANA_MIGRATE_PERSONAL_WORKSPACES:
                     continue
-            elif name not in manager_names:
+            elif ws["uuid"] not in manager_uuids:
                 continue
             workspaces.append(SourceWorkspace(id=ws["uuid"], title=name, raw_data=ws))
         return workspaces
@@ -88,11 +124,159 @@ class ResanaSourceBackend(AbstractSourceBackend):
     def prepare_export(self, workspace, local_folder_path: str) -> None:
         self._user = workspace.migration_user
         client = self._get_members_client()
-        slug = client.find_slug_by_workspace_name(workspace.title)
+        slug = client.find_slug_by_workspace_uuid(workspace.source_id)
         if slug is None:
+            logger.warning(
+                "No Resana slug found for workspace %s (GED uuid %s), skipping members",
+                workspace.id,
+                workspace.source_id,
+            )
             return
         workspace.members = client.list_workspace_members(slug)
         workspace.save()
+
+    def begin_export(self, workspace) -> None:
+        """Freeze the workspace and grant our migration account access to every folder.
+
+        Runs before any file is read, so a concurrent edit can't be missed and a
+        folder we otherwise lack rights on doesn't get silently skipped (#215).
+
+        Idempotent: if the workspace is already locked, or a folder is already
+        restricted to exactly our account, we don't touch it again, and we
+        record exactly what *we* changed this run, so finalize_export() only
+        reverses that.
+        """
+        self._user = workspace.migration_user
+        members_client = self._get_members_client()
+        slug = members_client.find_slug_by_workspace_uuid(workspace.source_id)
+        if slug is None:
+            logger.warning(
+                "No Resana slug found for workspace %s (GED uuid %s), "
+                "migrating without locking it",
+                workspace.id,
+                workspace.source_id,
+            )
+            return
+
+        lock_client = self._get_lock_client()
+        previous_state = workspace.source_lock_state or {}
+
+        already_locked = members_client.is_workspace_locked(slug)
+
+        # Merge with a previous run's state: if it was killed before
+        # finalize_export(), what it locked/granted is still ours to reverse.
+        # Each change is recorded before its remote call, so a crash in between
+        # can't leave a change we don't know to reverse (reversing a change that
+        # didn't happen is harmless).
+        granted_folder_ids = list(previous_state.get("folders_granted_by_us", []))
+        workspace.source_lock_state = {
+            **previous_state,
+            "slug": slug,
+            "workspace_locked_by_us": (
+                previous_state.get("workspace_locked_by_us", False)
+                or not already_locked
+            ),
+            "folders_granted_by_us": granted_folder_ids,
+        }
+        workspace.save(update_fields=["source_lock_state"])
+
+        if not already_locked:
+            lock_client.lock_workspace(slug)
+            if not members_client.is_workspace_locked(slug):
+                raise ResanaLockError(f"Workspace {slug} is still unlocked after figer")
+
+        user_id = lock_client.get_connected_user_id()
+        for folder_id in lock_client.get_top_level_folder_ids(slug):
+            if folder_id in granted_folder_ids:
+                continue
+            current_owners = lock_client.get_folder_access_owners(slug, folder_id)
+            if current_owners == [user_id]:
+                continue
+            granted_folder_ids.append(folder_id)
+            workspace.save(update_fields=["source_lock_state"])
+            lock_client.grant_folder_access(slug, folder_id, user_id)
+
+    def finalize_export(self, workspace) -> None:
+        """Reverse begin_export(): release only the folders we granted, then unlock
+        only if we locked the workspace ourselves (#215).
+
+        Always runs, even if the migration failed. Never raises: every call is
+        best-effort and logged individually so one failure doesn't prevent the
+        rest of the cleanup, and so it can't mask the migration's own exception
+        (this runs inside a `finally`).
+        """
+        lock_state = dict(workspace.source_lock_state or {})
+        slug = lock_state.get("slug")
+        if slug is None:
+            return
+
+        self._user = workspace.migration_user
+        try:
+            lock_client = self._get_lock_client()
+            members_client = self._get_members_client()
+        except _FINALIZE_EXPORT_EXCEPTIONS:
+            logger.error(
+                "Could not build clients to finalize export for workspace %s, "
+                "Resana lock state left to reverse by hand: %s",
+                workspace.id,
+                lock_state,
+                exc_info=True,
+            )
+            return
+
+        # Only what failed to be reversed stays recorded, for a later retry.
+        remaining_folder_ids = []
+        for folder_id in lock_state.get("folders_granted_by_us", []):
+            try:
+                lock_client.release_folder_access(slug, folder_id)
+            except _FINALIZE_EXPORT_EXCEPTIONS:
+                remaining_folder_ids.append(folder_id)
+                logger.error(
+                    "Could not release access on folder %s of Resana workspace %s "
+                    "(workspace %s)",
+                    folder_id,
+                    slug,
+                    workspace.id,
+                    exc_info=True,
+                )
+        lock_state["folders_granted_by_us"] = remaining_folder_ids
+
+        if lock_state.get("workspace_locked_by_us", False):
+            try:
+                self._unlock_workspace(lock_client, members_client, slug)
+                lock_state["workspace_locked_by_us"] = False
+            except _FINALIZE_EXPORT_EXCEPTIONS:
+                logger.error(
+                    "Could not unlock Resana workspace %s (workspace %s)",
+                    slug,
+                    workspace.id,
+                    exc_info=True,
+                )
+        else:
+            logger.info(
+                "Workspace %s was not locked by us (or lock state is unknown), "
+                "leaving its lock state untouched.",
+                workspace.id,
+            )
+
+        workspace.source_lock_state = lock_state
+        try:
+            workspace.save(update_fields=["source_lock_state"])
+        except DatabaseError:
+            logger.error(
+                "Could not save source_lock_state for workspace %s, "
+                "Resana lock state left to reverse: %s",
+                workspace.id,
+                lock_state,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _unlock_workspace(lock_client, members_client, slug: str) -> None:
+        """Unlock the workspace, raising ResanaLockError if it still reads as locked."""
+        lock_client.unlock_workspace(slug)
+        if members_client.is_workspace_locked(slug):
+            raise ResanaLockError(f"Workspace {slug} is still locked after defiger")
 
     def _explore_folder(self, uuid: str, name: str, client) -> SourceFolder:
         """Recursively fetch a folder's contents via the Interstis explore endpoint.
