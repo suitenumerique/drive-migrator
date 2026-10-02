@@ -27,6 +27,7 @@ def _make_workspace(workspace_id="ws-1"):
 
 
 def test_get_workspace_path_uses_work_dir(settings):
+    """get_workspace_path() returns APP_WORK_DIR/workspace_<id>."""
     settings.APP_WORK_DIR = "/tmp/work"
     workspace = _make_workspace("abc")
     creator = FolderCreator()

@@ -10,6 +10,7 @@ and this project adheres to
 
 ### Added
 
+- add Resana permission reader for file-level access rights
 - setup Celery
 - setup Flower
 - setup S3 configuration
