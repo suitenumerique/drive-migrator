@@ -10,6 +10,7 @@ from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 
 from celery.utils.log import get_task_logger
+from requests.exceptions import HTTPError
 
 from core.backends.destination import (
     MEMBERS_CSV_FILENAME,
@@ -19,6 +20,7 @@ from core.destinations.drive.drive_backend import (
     DriveBackend,
     DriveServiceAccountBackend,
     DriveUserTokenBackend,
+    get_file_rejection_code,
 )
 from core.mails_manager import MailsManager
 from core.models import Workspace
@@ -185,13 +187,27 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                 logger.info(
                     "Uploading file %s (%s bytes)", item_id, entry.stat().st_size
                 )
-                item = backend.create_file_item(
-                    entry.name, parent_id=drive_parent_id, item_id=item_id
-                )
-                # Drive may have replaced a recovered pending item with a new id.
-                self._upload_log.items[relative_path] = item["id"]
-                backend.upload_to_s3(item["policy"], entry.path)
-                backend.notify_upload_ended(item["id"])
+                try:
+                    item = backend.create_file_item(
+                        entry.name, parent_id=drive_parent_id, item_id=item_id
+                    )
+                    # Drive may have replaced a recovered pending item with a new id.
+                    self._upload_log.items[relative_path] = item["id"]
+                    backend.upload_to_s3(item["policy"], entry.path)
+                    backend.notify_upload_ended(item["id"])
+                except HTTPError as error:
+                    # Only a refusal of this file is skipped: any other error
+                    # would hit every file.
+                    code = get_file_rejection_code(error)
+                    if code is None:
+                        raise
+                    self._upload_log.rejected.append(
+                        {
+                            "path": relative_path,
+                            "item_id": self._upload_log.items[relative_path],
+                            "error": code,
+                        }
+                    )
 
     def check_integrity(
         self, workspace, local_folder_path: str, wait_for_analysis: bool

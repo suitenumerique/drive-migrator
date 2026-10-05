@@ -27,6 +27,13 @@ logger = get_task_logger(__name__)
 
 _UPLOAD_STATE_NOT_PENDING = "item_upload_state_not_pending"
 _EXISTING_ID = "item_create_existing_id"
+# Drive refuses the file itself, at creation or upload-ended: it is skipped.
+_FILE_REJECTION_CODES = (
+    "item_create_file_extension_not_allowed",
+    "file_type_not_allowed",
+    "file_size_exceeded",
+    "file_size_mismatch",
+)
 # Drive caps page_size with its MAX_PAGE_SIZE setting (200 by default).
 _LIST_PAGE_SIZE = 200
 
@@ -86,6 +93,14 @@ def _is_upload_already_processed(error: HTTPError) -> bool:
     """A retried ReadTimeout can hit this 400 if the original call actually
     already succeeded."""
     return _has_error_code(error, 400, _UPLOAD_STATE_NOT_PENDING)
+
+
+def get_file_rejection_code(error: HTTPError) -> str | None:
+    """Return the Drive code refusing the file itself, None for any other error."""
+    return next(
+        (code for code in _FILE_REJECTION_CODES if _has_error_code(error, 400, code)),
+        None,
+    )
 
 
 def _is_duplicate_id_conflict(error: HTTPError) -> bool:

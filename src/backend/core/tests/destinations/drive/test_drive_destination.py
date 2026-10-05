@@ -3,6 +3,7 @@
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
+from requests.exceptions import HTTPError
 
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.drive.backend import DriveDestinationBackend
@@ -574,6 +575,95 @@ def test_export_ignores_the_generated_users_csv_when_checking_rejections(
     workspace.set_destination_status.assert_called_once_with(
         "drive", Workspace.Status.SUCCESS
     )
+
+
+def _drive_refusal(code):
+    """Build the HTTPError Drive raises when it refuses a file."""
+    response = MagicMock(status_code=400)
+    response.json.return_value = {
+        "type": "validation_error",
+        "errors": [{"code": code, "detail": "Refused.", "attr": None}],
+    }
+    return HTTPError("400 Client Error", response=response)
+
+
+def _mock_two_file_upload(mock_cls, tmp_path):
+    """Two local files, each getting a Drive item named after it."""
+    mock_backend = mock_cls.return_value
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.create_file_item.side_effect = lambda name, parent_id, item_id: {
+        "id": f"id-{name}",
+        "policy": f"https://s3.example.com/{name}",
+    }
+    (tmp_path / "a.txt").write_bytes(b"a")
+    (tmp_path / "b.txt").write_bytes(b"b")
+    return mock_backend
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_file_refused_at_upload_ended_is_skipped(mock_cls, tmp_path, settings):
+    """Drive refusing a file's content skips it: the next files are still sent."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
+    mock_backend.notify_upload_ended.side_effect = [
+        _drive_refusal("file_type_not_allowed"),
+        None,
+    ]
+    workspace = _make_workspace()
+
+    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    assert mock_backend.notify_upload_ended.call_count == 2
+    assert workspace.upload_errors == [
+        {"path": "a.txt", "item_id": "id-a.txt", "error": "file_type_not_allowed"}
+    ]
+    workspace.set_destination_status.assert_called_once_with(
+        "drive", Workspace.Status.SUCCESS
+    )
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_file_refused_at_creation_is_skipped(mock_cls, tmp_path, settings):
+    """A file refused at creation is listed with the id the migrator sent."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
+    create = mock_backend.create_file_item.side_effect
+    mock_backend.create_file_item.side_effect = [
+        _drive_refusal("item_create_file_extension_not_allowed"),
+        create("b.txt", parent_id="root-uuid", item_id=None),
+    ]
+    workspace = _make_workspace()
+
+    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    sent_id = mock_backend.create_file_item.call_args_list[0].kwargs["item_id"]
+    assert workspace.upload_errors == [
+        {
+            "path": "a.txt",
+            "item_id": sent_id,
+            "error": "item_create_file_extension_not_allowed",
+        }
+    ]
+    mock_backend.upload_to_s3.assert_called_once_with(
+        "https://s3.example.com/b.txt", str(tmp_path / "b.txt")
+    )
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_other_drive_error_still_stops_the_upload(mock_cls, tmp_path, settings):
+    """An error that is not a refusal of the file still stops the migration."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
+    mock_backend.notify_upload_ended.side_effect = _drive_refusal(
+        "item_upload_type_unavailable"
+    )
+    workspace = _make_workspace()
+
+    with pytest.raises(HTTPError):
+        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    assert mock_backend.notify_upload_ended.call_count == 1
+    assert not workspace.upload_errors
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")

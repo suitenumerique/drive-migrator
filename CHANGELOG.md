@@ -84,6 +84,7 @@ and this project adheres to
 - retry Drive upload-ended notification on transient network timeouts #176
 - retry Drive API calls on transient 5xx errors instead of failing #208
 - retry Resana file download and skip failing files instead of aborting #175
+- skip and list files refused by Drive instead of failing the migration
 - exclude Resana workspaces where user isn't Animateur from migration #110 #160
 - exclude Resana personal workspaces from migration by default #163
 - fix user.csv not generated for locked Resana workspaces #169
