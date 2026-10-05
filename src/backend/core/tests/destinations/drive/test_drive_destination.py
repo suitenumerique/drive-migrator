@@ -576,6 +576,60 @@ def test_export_ignores_the_generated_users_csv_when_checking_rejections(
     )
 
 
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_export_logs_rejected_files_once_without_paths(mock_cls, tmp_path, settings):
+    """Rejections are summed up in a single ERROR, with item ids and codes only."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
+
+    with (
+        patch.object(
+            DriveDestinationBackend, "_upload_tree", autospec=True
+        ) as upload_tree,
+        patch("core.destinations.drive.backend.logger") as mock_logger,
+    ):
+        upload_tree.side_effect = _upload(["a.txt", "b.txt"], ["a.txt"])
+        DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+
+    mock_logger.error.assert_called_once_with(
+        "%s file(s) rejected by Drive: %s",
+        1,
+        [("id-a.txt", "file_type_not_allowed")],
+    )
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_export_logs_nothing_at_error_without_rejection(mock_cls, tmp_path, settings):
+    """A run where Drive accepted every file produces no Sentry event."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
+    (tmp_path / "report.pdf").write_bytes(b"content")
+
+    with patch("core.destinations.drive.backend.logger") as mock_logger:
+        DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+
+    mock_logger.error.assert_not_called()
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_export_logs_each_file_before_creating_it(mock_cls, tmp_path, settings):
+    """Each upload is logged with its item id and size, before Drive is called."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = mock_cls.return_value
+    mock_backend.create_folder.return_value = {"id": "root-uuid"}
+    mock_backend.create_file_item.side_effect = RuntimeError("boom")
+    (tmp_path / "report.pdf").write_bytes(b"content")
+
+    with (
+        patch("core.destinations.drive.backend.logger") as mock_logger,
+        pytest.raises(RuntimeError),
+    ):
+        DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+
+    item_id = mock_backend.create_file_item.call_args.kwargs["item_id"]
+    mock_logger.info.assert_called_once_with("Uploading file %s (%s bytes)", item_id, 7)
+
+
 @patch("core.destinations.drive.backend.DriveUserTokenBackend")
 def test_user_token_mode_sets_status_success(mock_cls, tmp_path, settings):
     """In user_token mode, export() sets destination status to SUCCESS."""

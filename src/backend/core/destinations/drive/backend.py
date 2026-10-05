@@ -89,6 +89,16 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                 os.remove(csv_path)
             workspace.upload_errors = self._upload_log.rejected
             workspace.save(update_fields=["upload_errors"])
+            # One event per run, without paths: file names may be personal data.
+            if self._upload_log.rejected:
+                logger.error(
+                    "%s file(s) rejected by Drive: %s",
+                    len(self._upload_log.rejected),
+                    [
+                        (rejected["item_id"], rejected["error"])
+                        for rejected in self._upload_log.rejected
+                    ],
+                )
 
         source_paths = set(self._upload_log.items) - {MEMBERS_CSV_FILENAME}
         rejected_paths = {rejected["path"] for rejected in self._upload_log.rejected}
@@ -171,6 +181,10 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                 # looked up on Drive by the integrity check.
                 item_id = str(uuid.uuid4())
                 self._upload_log.items[relative_path] = item_id
+                # On a failure, the last of these Sentry breadcrumbs names the file.
+                logger.info(
+                    "Uploading file %s (%s bytes)", item_id, entry.stat().st_size
+                )
                 item = backend.create_file_item(
                     entry.name, parent_id=drive_parent_id, item_id=item_id
                 )
