@@ -425,6 +425,74 @@ def test_no_users_csv_uploaded_when_workspace_has_no_members(
     assert "users_list_by_migrator.csv" not in uploaded_names
 
 
+# ---------------------------------------------------------------------------
+# upload_errors (files rejected by Drive)
+# ---------------------------------------------------------------------------
+
+
+def _reject_one_file(destination, *args):  # pylint: disable=unused-argument
+    """Stand-in for _upload_tree recording a file refused by Drive."""
+    destination._upload_log.rejected.append(  # pylint: disable=protected-access
+        {"path": "page.txt", "item_id": "file-uuid", "error": "file_type_not_allowed"}
+    )
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_export_persists_rejected_files_on_workspace(mock_cls, tmp_path, settings):
+    """export() saves the files Drive refused onto the workspace's upload_errors."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
+    workspace = _make_workspace()
+
+    with patch.object(
+        DriveDestinationBackend, "_upload_tree", autospec=True
+    ) as upload_tree:
+        upload_tree.side_effect = _reject_one_file
+        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    assert workspace.upload_errors == [
+        {"path": "page.txt", "item_id": "file-uuid", "error": "file_type_not_allowed"}
+    ]
+    workspace.save.assert_any_call(update_fields=["upload_errors"])
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_export_resets_upload_errors_when_nothing_is_rejected(
+    mock_cls, tmp_path, settings
+):
+    """A run without rejection clears the upload_errors of a previous run."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
+    workspace = _make_workspace()
+    workspace.upload_errors = [{"path": "old.txt"}]
+
+    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    assert not workspace.upload_errors
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_export_persists_rejected_files_when_upload_fails(mock_cls, tmp_path, settings):
+    """Files refused before a fatal upload error are still saved."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
+    workspace = _make_workspace()
+
+    def reject_then_fail(destination, *args):
+        _reject_one_file(destination)
+        raise RuntimeError("boom")
+
+    with patch.object(
+        DriveDestinationBackend, "_upload_tree", autospec=True
+    ) as upload_tree:
+        upload_tree.side_effect = reject_then_fail
+        with pytest.raises(RuntimeError):
+            DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    assert len(workspace.upload_errors) == 1
+    workspace.save.assert_called_once_with(update_fields=["upload_errors"])
+
+
 @patch("core.destinations.drive.backend.DriveUserTokenBackend")
 def test_user_token_mode_sets_status_success(mock_cls, tmp_path, settings):
     """In user_token mode, export() sets destination status to SUCCESS."""

@@ -688,6 +688,7 @@ def test_task_handlers_capture_migration_finished(handler, status):
     mock_workspace.destination_statuses = {}
     mock_workspace.is_truncated = True
     mock_workspace.download_errors = [{"name": "a"}, {"name": "b"}]
+    mock_workspace.upload_errors = [{"path": "c"}]
     mock_extra_task.workspace = mock_workspace
     mock_extra_task.integrity_check_passed = False
     mock_extra_task.integrity_report = {
@@ -719,6 +720,7 @@ def test_task_handlers_capture_migration_finished(handler, status):
     assert properties["status"] == status
     assert properties["is_truncated"] is True
     assert properties["download_errors_count"] == 2
+    assert properties["upload_errors_count"] == 1
     assert properties["integrity_check_passed"] is False
     assert properties["migrated_files_count"] == 5
     assert properties["source_files_count"] == 7

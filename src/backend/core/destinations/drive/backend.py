@@ -42,6 +42,8 @@ class _UploadLog:
     root_id: str | None = None
     # Local path relative to the workspace root -> Drive item id.
     items: dict[str, str] = field(default_factory=dict)
+    # Files Drive refused, in the Workspace.upload_errors format.
+    rejected: list[dict] = field(default_factory=list)
 
 
 class DriveDestinationBackend(AbstractDestinationBackend):
@@ -85,6 +87,8 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         finally:
             if csv_path:
                 os.remove(csv_path)
+            workspace.upload_errors = self._upload_log.rejected
+            workspace.save(update_fields=["upload_errors"])
 
         if getattr(settings, "DRIVE_SHARE_MEMBERS", True):
             self._share_members(backend, workspace, root_id)
@@ -174,6 +178,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         if log is None or log.workspace_id != workspace.id or log.root_id is None:
             return {"files": {}, "extra": []}
 
+        rejections = {rejected["path"]: rejected["error"] for rejected in log.rejected}
         try:
             drive_files = self._list_drive_files(log.backend, log.root_id)
             # The listing hides pending items: look up the missing ones directly.
@@ -189,7 +194,13 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             logger.warning("Drive integrity check failed: %s", error)
             return {
                 "files": {
-                    path: {"item_id": item_id, "stage": Stage.UNVERIFIED}
+                    path: _without_none(
+                        {
+                            "item_id": item_id,
+                            "stage": Stage.UNVERIFIED,
+                            "error": rejections.get(path),
+                        }
+                    )
                     for path, item_id in log.items.items()
                 },
                 "extra": [],
@@ -205,6 +216,8 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             files[path] = _integrity_entry(item_id, items[path], local_size)
             if path == MEMBERS_CSV_FILENAME:
                 files[path]["generated"] = True
+            if path in rejections:
+                files[path]["error"] = rejections[path]
 
         extra = [
             _without_none(

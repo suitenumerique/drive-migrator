@@ -216,6 +216,25 @@ def test_file_missing_from_listing_but_pending_on_drive_is_pending(
     assert entry["upload_state"] == "pending"
 
 
+def test_file_rejected_by_drive_carries_the_drive_error(tmp_path, mock_backend):  # pylint: disable=unused-argument
+    """A file Drive refused shows the Drive error code next to its stage."""
+    _write(tmp_path / "page.txt", 3)
+    destination = DriveDestinationBackend()
+    workspace = _make_workspace()
+    destination.export(workspace, MagicMock(), str(tmp_path))
+    destination._upload_log.rejected.append(  # pylint: disable=protected-access
+        {"path": "page.txt", "item_id": "id-page.txt", "error": "file_type_not_allowed"}
+    )
+
+    result = destination.check_integrity(workspace, str(tmp_path), True)
+
+    assert result["files"]["page.txt"] == {
+        "item_id": "id-page.txt",
+        "stage": "not_created",
+        "error": "file_type_not_allowed",
+    }
+
+
 def test_drive_file_without_local_counterpart_is_extra(tmp_path, mock_backend):
     """A Drive file this run did not upload is listed in extra with its Drive path."""
     mock_backend.list_children.side_effect = lambda folder_id: {
@@ -374,6 +393,32 @@ def test_listing_failure_marks_uploaded_files_unverified(tmp_path, mock_backend)
         },
         "extra": [],
         "error": "token expired",
+    }
+
+
+def test_listing_failure_keeps_the_drive_error_of_rejected_files(
+    tmp_path, mock_backend
+):
+    """Drive refusals are known locally: an unverified report still shows them."""
+    _write(tmp_path / "page.txt", 3)
+    _write(tmp_path / "report.pdf", 3)
+    mock_backend.list_children.side_effect = RuntimeError("token expired")
+    destination = DriveDestinationBackend()
+    workspace = _make_workspace()
+    destination.export(workspace, MagicMock(), str(tmp_path))
+    destination._upload_log.rejected.append(  # pylint: disable=protected-access
+        {"path": "page.txt", "item_id": "id-page.txt", "error": "file_type_not_allowed"}
+    )
+
+    result = destination.check_integrity(workspace, str(tmp_path), True)
+
+    assert result["files"] == {
+        "page.txt": {
+            "item_id": "id-page.txt",
+            "stage": "unverified",
+            "error": "file_type_not_allowed",
+        },
+        "report.pdf": {"item_id": "id-report.pdf", "stage": "unverified"},
     }
 
 
