@@ -90,6 +90,14 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             workspace.upload_errors = self._upload_log.rejected
             workspace.save(update_fields=["upload_errors"])
 
+        source_paths = set(self._upload_log.items) - {MEMBERS_CSV_FILENAME}
+        rejected_paths = {rejected["path"] for rejected in self._upload_log.rejected}
+        if source_paths and source_paths <= rejected_paths:
+            raise RuntimeError(
+                f"All {len(source_paths)} file(s) were rejected by Drive for "
+                f"workspace {workspace.id}"
+            )
+
         if getattr(settings, "DRIVE_SHARE_MEMBERS", True):
             self._share_members(backend, workspace, root_id)
 
