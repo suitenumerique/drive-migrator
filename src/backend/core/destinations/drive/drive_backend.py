@@ -193,12 +193,14 @@ class DriveBackend:
     # --- File upload (3-step) ---
 
     def create_file_item(
-        self, filename: str, parent_id: str, item_id: str | None = None
+        self, filename: str, parent_id: str, size: int, item_id: str | None = None
     ) -> dict:
         """Step 1: Create a file item. Returns item dict including S3 presigned URL in 'policy'.
-        Pass item_id to know the item's id before the request is sent."""
+        Pass item_id to know the item's id before the request is sent. Recent Drive
+        versions require size and check the uploaded file against it, older ones
+        ignore it."""
         url = f"{self._base_url()}{self._api_prefix()}/items/{parent_id}/children/"
-        payload = {"type": "file", "filename": filename}
+        payload = {"type": "file", "filename": filename, "size": size}
         item = self._create_item(url, payload, item_id=item_id)
         if "policy" not in item:
             item = self._replace_recovered_pending_file(item, url, payload)

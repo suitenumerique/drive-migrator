@@ -50,12 +50,15 @@ def test_create_file_item_uses_given_item_id(settings):
         mock_requests.post.return_value = _json_response(
             {"id": "given-id", "policy": "https://s3.example.com/x"}
         )
-        backend.create_file_item("doc.pdf", parent_id="folder-uuid", item_id="given-id")
+        backend.create_file_item(
+            "doc.pdf", parent_id="folder-uuid", size=7, item_id="given-id"
+        )
 
     assert mock_requests.post.call_args.kwargs["json"] == {
         "id": "given-id",
         "type": "file",
         "filename": "doc.pdf",
+        "size": 7,
     }
 
 

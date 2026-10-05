@@ -127,7 +127,7 @@ def test_service_account_mode_uploads_files(mock_cls, tmp_path, settings):
     DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
 
     mock_backend.create_file_item.assert_called_once_with(
-        "report.pdf", parent_id="root-uuid", item_id=ANY
+        "report.pdf", parent_id="root-uuid", size=7, item_id=ANY
     )
     mock_backend.upload_to_s3.assert_called_once_with(
         "https://s3.example.com/file.pdf?sig=x", str(tmp_path / "report.pdf")
@@ -383,7 +383,7 @@ def test_uploads_users_csv_when_workspace_has_members(mock_cls, tmp_path, settin
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
     mock_backend.create_file_item.assert_any_call(
-        "users_list_by_migrator.csv", parent_id="root-uuid", item_id=ANY
+        "users_list_by_migrator.csv", parent_id="root-uuid", size=ANY, item_id=ANY
     )
     mock_backend.upload_to_s3.assert_any_call(
         "https://s3.example.com/users_list_by_migrator.csv?sig=x",
@@ -591,7 +591,7 @@ def _mock_two_file_upload(mock_cls, tmp_path):
     """Two local files, each getting a Drive item named after it."""
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.create_file_item.side_effect = lambda name, parent_id, item_id: {
+    mock_backend.create_file_item.side_effect = lambda name, parent_id, size, item_id: {
         "id": f"id-{name}",
         "policy": f"https://s3.example.com/{name}",
     }
@@ -630,7 +630,7 @@ def test_file_refused_at_creation_is_skipped(mock_cls, tmp_path, settings):
     create = mock_backend.create_file_item.side_effect
     mock_backend.create_file_item.side_effect = [
         _drive_refusal("item_create_file_extension_not_allowed"),
-        create("b.txt", parent_id="root-uuid", item_id=None),
+        create("b.txt", parent_id="root-uuid", size=1, item_id=None),
     ]
     workspace = _make_workspace()
 

@@ -268,11 +268,11 @@ def test_service_account_create_file_item(settings):
             "policy": "https://s3.example.com/file.pdf?sig=x",
         }
         mock_requests.post.return_value.raise_for_status = MagicMock()
-        result = backend.create_file_item("doc.pdf", parent_id="folder-uuid")
+        result = backend.create_file_item("doc.pdf", parent_id="folder-uuid", size=7)
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/folder-uuid/children/",
-        json={"id": FAKE_ITEM_ID, "type": "file", "filename": "doc.pdf"},
+        json={"id": FAKE_ITEM_ID, "type": "file", "filename": "doc.pdf", "size": 7},
         headers={"Authorization": "Bearer tok"},
         timeout=30,
     )
@@ -784,12 +784,12 @@ def test_user_token_create_file_item_uses_api_v1(settings):
         }
         mock_requests.post.return_value.raise_for_status = MagicMock()
         result = DriveUserTokenBackend(user).create_file_item(
-            "doc.pdf", parent_id="folder-uuid"
+            "doc.pdf", parent_id="folder-uuid", size=7
         )
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/api/v1.0/items/folder-uuid/children/",
-        json={"id": FAKE_ITEM_ID, "type": "file", "filename": "doc.pdf"},
+        json={"id": FAKE_ITEM_ID, "type": "file", "filename": "doc.pdf", "size": 7},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
     )

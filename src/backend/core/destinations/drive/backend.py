@@ -183,13 +183,15 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                 # looked up on Drive by the integrity check.
                 item_id = str(uuid.uuid4())
                 self._upload_log.items[relative_path] = item_id
+                size = entry.stat().st_size
                 # On a failure, the last of these Sentry breadcrumbs names the file.
-                logger.info(
-                    "Uploading file %s (%s bytes)", item_id, entry.stat().st_size
-                )
+                logger.info("Uploading file %s (%s bytes)", item_id, size)
                 try:
                     item = backend.create_file_item(
-                        entry.name, parent_id=drive_parent_id, item_id=item_id
+                        entry.name,
+                        parent_id=drive_parent_id,
+                        size=size,
+                        item_id=item_id,
                     )
                     # Drive may have replaced a recovered pending item with a new id.
                     self._upload_log.items[relative_path] = item["id"]

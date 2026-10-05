@@ -35,7 +35,7 @@ def mock_backend():
         backend.create_subfolder.side_effect = lambda name, parent_id: {
             "id": f"folder-{name}"
         }
-        backend.create_file_item.side_effect = lambda name, parent_id, item_id: {
+        backend.create_file_item.side_effect = lambda name, parent_id, size, item_id: {
             "id": f"id-{name}",
             "policy": "https://s3.example.com/x",
         }

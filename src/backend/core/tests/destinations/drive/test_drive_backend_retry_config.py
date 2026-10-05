@@ -495,7 +495,7 @@ def test_service_account_create_file_item_retries_on_server_error_then_succeeds(
     with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
         mock_requests.post.side_effect = [error_response, success_response]
         mock_requests.get.return_value = _not_found_response()
-        result = backend.create_file_item("doc.pdf", parent_id="folder-uuid")
+        result = backend.create_file_item("doc.pdf", parent_id="folder-uuid", size=7)
 
     assert mock_requests.post.call_count == 2
     assert result["id"] == FAKE_ITEM_ID
@@ -539,13 +539,15 @@ def test_service_account_create_file_item_replaces_recovered_pending_file(settin
         mock_requests.post.side_effect = [error_response, success_response]
         mock_requests.get.return_value = _found_response(recovered_item)
         mock_requests.delete.return_value = delete_response
-        result = backend.create_file_item("doc.pdf", parent_id="folder-uuid")
+        result = backend.create_file_item("doc.pdf", parent_id="folder-uuid", size=7)
 
     mock_requests.delete.assert_called_once_with(
         f"https://drive.example.com/external_api/v1.0/items/{FAKE_ITEM_ID}/",
         headers={"Authorization": "Bearer tok"},
         timeout=30,
     )
+    # The fresh item reserves the same size.
+    assert mock_requests.post.call_args.kwargs["json"]["size"] == 7
     assert result["id"] == fresh_item_id
     assert result["policy"] == "https://s3.example.com/fresh"
 
@@ -572,7 +574,7 @@ def test_service_account_create_file_item_refuses_to_replace_non_pending_recover
     ):
         mock_requests.post.return_value = error_response
         mock_requests.get.return_value = _found_response(recovered_item)
-        backend.create_file_item("doc.pdf", parent_id="folder-uuid")
+        backend.create_file_item("doc.pdf", parent_id="folder-uuid", size=7)
 
     assert mock_requests.post.call_count == 1
     mock_requests.delete.assert_not_called()
