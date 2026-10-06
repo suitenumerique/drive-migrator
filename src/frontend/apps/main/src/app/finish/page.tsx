@@ -16,10 +16,6 @@ import { useMigrationConfig } from '@/hooks/useMigrationConfig';
 
 import './page.scss';
 
-enum MigrationTargetKind {
-  ArchiveZip = 'archive-zip',
-}
-
 const LASUITE_URL = 'https://lasuite.numerique.gouv.fr';
 const MIGRATION_ILLUSTRATION_SRC = '/assets/migrator-illustration.svg';
 
@@ -36,7 +32,7 @@ export default function Finish() {
     }
   }, []);
 
-  const isArchiveZipTarget = migrationTarget === MigrationTargetKind.ArchiveZip;
+  const isArchiveZipTarget = migrationTarget === 'archive-zip';
   const { driveFrontendUrl } = useMigrationConfig();
 
   return (

@@ -9,7 +9,7 @@ import {
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { FormProvider, useForm } from 'react-hook-form';
+import { FormProvider, Resolver, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 
 import { MigrationConfirmModal } from '@/app/dashboard/_components/MigrationConfirmModal';
@@ -90,21 +90,31 @@ export const WorkspacesToMigrate = ({
     [selectableWorkspaces],
   );
 
+  const resolver: Resolver<IForm> = (data) => {
+    const oneChecked = Object.values(data).some(Boolean);
+
+    if (oneChecked) {
+      return {
+        values: data,
+        errors: {} as Record<string, never>,
+      };
+    }
+
+    return {
+      values: {} as Record<string, never>,
+      errors: {
+        root: {
+          type: 'validate',
+          message: 'error',
+        },
+      },
+    };
+  };
+
   const methods = useForm<IForm>({
     defaultValues,
     values: defaultValues,
-    resolver: (data) => {
-      const oneChecked = Object.entries(data).some(([, value]) => value);
-
-      return {
-        values: data,
-        errors: oneChecked
-          ? {}
-          : {
-              globalError: 'error',
-            },
-      };
-    },
+    resolver,
   });
 
   const selectAll = () => {
