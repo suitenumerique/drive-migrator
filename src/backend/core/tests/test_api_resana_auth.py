@@ -20,6 +20,7 @@ from rest_framework.test import APIClient
 
 from core.api.views.resana_auth import (
     PendingAuth,
+    _failure_redirect,
     _load_pending_auth,
     _store_pending_auth,
 )
@@ -211,6 +212,38 @@ def test_callback_failure_redirect_url_encodes_the_provider_error(settings):
     response = _auth_client(user).get(CALLBACK_URL, {"error": "x&resana_connected=1"})
 
     assert parse_qs(urlparse(response.url).query) == {"error": ["x&resana_connected=1"]}
+
+
+@pytest.mark.parametrize(
+    "error_code,expected",
+    [
+        ("simple", "simple"),
+        ("with spaces", "with+spaces"),
+        ("with/slashes", "with%2Fslashes"),
+        ("with?query=param", "with%3Fquery%3Dparam"),
+        ("with#fragment", "with%23fragment"),
+        ("with&and=equals", "with%26and%3Dequals"),
+        ("with\nnewline", "with%0Anewline"),
+        ("with\rreturn", "with%0Dreturn"),
+        ("with\tab", "with%09ab"),
+        ("with\b", "with%08"),
+        ("with%percent", "with%25percent"),
+        ("with\\backslash", "with%5Cbackslash"),
+        ("https://evil.example.com/steal", "https%3A%2F%2Fevil.example.com%2Fsteal"),
+    ],
+)
+def test_failure_redirect_uses_fixed_host_and_cannot_open_redirect(
+    settings, error_code, expected
+):
+    """The redirect target host/path must always come from settings, never the error code."""
+    _configure_settings(settings)
+
+    response = _failure_redirect(error_code)
+
+    assert (
+        response.url
+        == f"https://migrator.example.com/resana-connect-failed?error={expected}"
+    )
 
 
 def test_callback_redirects_to_failure_when_code_is_missing(settings):
