@@ -1,15 +1,11 @@
 # Django impress
 
 # ---- base image to inherit from ----
-FROM python:3.14.6-slim-bookworm AS base
+FROM python:3.14.6-alpine AS base
 
 # Upgrade pip to its latest release to speed up dependencies installation
-RUN python -m pip install --upgrade pip
-
-# Upgrade system packages to install security updates
-RUN apt-get update && \
-  apt-get -y upgrade && \
-  rm -rf /var/lib/apt/lists/*
+RUN python -m pip install --upgrade pip && \
+  apk upgrade --no-cache
 
 # ---- Back-end builder image ----
 FROM base AS back-builder
@@ -39,12 +35,10 @@ FROM base AS link-collector
 ARG IMPRESS_STATIC_ROOT=/data/static
 
 # Install libpangocairo & rdfind
-RUN apt-get update && \
-    apt-get install -y \
-      libpangocairo-1.0-0 \
-      libmagic1 \
-      rdfind && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+      pango \
+      file \
+      rdfind
 
 # Copy installed python dependencies
 COPY --from=back-builder /install /usr/local
@@ -68,17 +62,14 @@ FROM base AS core
 ENV PYTHONUNBUFFERED=1
 
 # Install required system libs
-RUN apt-get update && \
-    apt-get install -y \
+RUN apk add --no-cache \
       gettext \
-      libcairo2 \
-      libffi-dev \
-      libgdk-pixbuf2.0-0 \
-      libpango-1.0-0 \
-      libpangocairo-1.0-0 \
-      mime-support \
-      shared-mime-info && \
-  rm -rf /var/lib/apt/lists/*
+      cairo \
+      libffi \
+      gdk-pixbuf \
+      pango \
+      mailcap \
+      shared-mime-info
 
 # Copy entrypoint
 COPY ./docker/files/usr/local/bin/entrypoint /usr/local/bin/entrypoint
@@ -108,9 +99,7 @@ FROM core AS backend-development
 USER root:root
 
 # Install psql
-RUN apt-get update && \
-    apt-get install -y postgresql-client && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache postgresql-client
 
 # Uninstall impress and re-install it in editable mode along with development
 # dependencies
