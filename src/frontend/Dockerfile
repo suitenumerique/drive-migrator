@@ -40,7 +40,7 @@ WORKDIR /home/frontend/apps/main
 RUN yarn build
 
 # ---- Front-end image ----
-FROM nginxinc/nginx-unprivileged:alpine3.21 AS frontend-production
+FROM nginxinc/nginx-unprivileged:1.30.4-alpine3.24 AS frontend-production
 
 # Un-privileged user running the application
 ARG DOCKER_USER
