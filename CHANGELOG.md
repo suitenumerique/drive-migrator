@@ -92,6 +92,7 @@ and this project adheres to
 - fix user.csv not generated for locked Resana workspaces #169
 - fix accented filenames mangled in workspace ZIP export #166
 - pull MinIO images from Chainguard since quay.io pulls are gated
+- share migrated Drive workspaces with the exact member email, not a lookalike
 
 ### Removed
 

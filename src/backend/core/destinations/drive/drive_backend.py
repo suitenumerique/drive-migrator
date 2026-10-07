@@ -392,7 +392,15 @@ class DriveBackend:
         response.raise_for_status()
         data = response.json()
         results = data if isinstance(data, list) else data.get("results", [])
-        return results[0] if results else None
+        # The search is fuzzy: only a user with this very email is them.
+        return next(
+            (
+                user
+                for user in results
+                if (user.get("email") or "").casefold() == email.casefold()
+            ),
+            None,
+        )
 
     @_retry_on_transient_error
     def share_with_user(self, item_id: str, user_id: str) -> None:
