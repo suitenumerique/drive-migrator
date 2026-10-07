@@ -651,12 +651,12 @@ def test_user_token_raises_when_no_refresh_token():
 
 
 # ---------------------------------------------------------------------------
-# DriveUserTokenBackend — uses /api/v1.0/ endpoints
+# DriveUserTokenBackend — uses /external_api/v1.0/ endpoints
 # ---------------------------------------------------------------------------
 
 
 def test_user_token_create_folder_uses_api_v1(settings):
-    """create_folder() uses /api/v1.0/ (not /external_api/) when in user_token mode."""
+    """create_folder() uses /external_api/v1.0/ (not /external_api/) when in user_token mode."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
@@ -667,7 +667,7 @@ def test_user_token_create_folder_uses_api_v1(settings):
         DriveUserTokenBackend(user).create_folder("My Workspace")
 
     mock_requests.post.assert_called_once_with(
-        "https://drive.example.com/api/v1.0/items/",
+        "https://drive.example.com/external_api/v1.0/items/",
         json={"id": FAKE_ITEM_ID, "type": "folder", "title": "My Workspace"},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
@@ -675,7 +675,7 @@ def test_user_token_create_folder_uses_api_v1(settings):
 
 
 def test_user_token_create_subfolder_uses_api_v1(settings):
-    """create_subfolder() uses /api/v1.0/items/{parent_id}/children/."""
+    """create_subfolder() uses /external_api/v1.0/items/{parent_id}/children/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
@@ -686,7 +686,7 @@ def test_user_token_create_subfolder_uses_api_v1(settings):
         DriveUserTokenBackend(user).create_subfolder("docs", parent_id="parent-uuid")
 
     mock_requests.post.assert_called_once_with(
-        "https://drive.example.com/api/v1.0/items/parent-uuid/children/",
+        "https://drive.example.com/external_api/v1.0/items/parent-uuid/children/",
         json={"id": FAKE_ITEM_ID, "type": "folder", "title": "docs"},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
@@ -694,7 +694,7 @@ def test_user_token_create_subfolder_uses_api_v1(settings):
 
 
 def test_user_token_create_file_item_uses_api_v1(settings):
-    """create_file_item() uses /api/v1.0/items/{parent_id}/children/."""
+    """create_file_item() uses /external_api/v1.0/items/{parent_id}/children/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
@@ -710,7 +710,7 @@ def test_user_token_create_file_item_uses_api_v1(settings):
         )
 
     mock_requests.post.assert_called_once_with(
-        "https://drive.example.com/api/v1.0/items/folder-uuid/children/",
+        "https://drive.example.com/external_api/v1.0/items/folder-uuid/children/",
         json={"id": FAKE_ITEM_ID, "type": "file", "filename": "doc.pdf", "size": 7},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
@@ -719,7 +719,7 @@ def test_user_token_create_file_item_uses_api_v1(settings):
 
 
 def test_user_token_notify_upload_ended_uses_api_v1(settings):
-    """notify_upload_ended() uses /api/v1.0/items/{id}/upload-ended/."""
+    """notify_upload_ended() uses /external_api/v1.0/items/{id}/upload-ended/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
@@ -729,14 +729,14 @@ def test_user_token_notify_upload_ended_uses_api_v1(settings):
         DriveUserTokenBackend(user).notify_upload_ended("file-uuid")
 
     mock_requests.post.assert_called_once_with(
-        "https://drive.example.com/api/v1.0/items/file-uuid/upload-ended/",
+        "https://drive.example.com/external_api/v1.0/items/file-uuid/upload-ended/",
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
     )
 
 
 def test_user_token_share_with_user_uses_api_v1(settings):
-    """share_with_user() uses /api/v1.0/items/{id}/accesses/."""
+    """share_with_user() uses /external_api/v1.0/items/{id}/accesses/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
@@ -746,7 +746,7 @@ def test_user_token_share_with_user_uses_api_v1(settings):
         DriveUserTokenBackend(user).share_with_user("item-uuid", "user-uuid")
 
     mock_requests.post.assert_called_once_with(
-        "https://drive.example.com/api/v1.0/items/item-uuid/accesses/",
+        "https://drive.example.com/external_api/v1.0/items/item-uuid/accesses/",
         json={"user_id": "user-uuid", "role": "owner"},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
@@ -754,7 +754,7 @@ def test_user_token_share_with_user_uses_api_v1(settings):
 
 
 def test_user_token_invite_by_email_uses_api_v1(settings):
-    """invite_by_email() uses /api/v1.0/items/{id}/invitations/."""
+    """invite_by_email() uses /external_api/v1.0/items/{id}/invitations/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
@@ -764,7 +764,7 @@ def test_user_token_invite_by_email_uses_api_v1(settings):
         DriveUserTokenBackend(user).invite_by_email("item-uuid", "new@example.com")
 
     mock_requests.post.assert_called_once_with(
-        "https://drive.example.com/api/v1.0/items/item-uuid/invitations/",
+        "https://drive.example.com/external_api/v1.0/items/item-uuid/invitations/",
         json={"email": "new@example.com", "role": "owner"},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
@@ -772,7 +772,7 @@ def test_user_token_invite_by_email_uses_api_v1(settings):
 
 
 def test_user_token_find_user_by_email_always_uses_api_v1(settings):
-    """find_user_by_email() always uses /api/v1.0/users/ (same as service account mode)."""
+    """find_user_by_email() always uses /external_api/v1.0/users/ (same as service account mode)."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
@@ -785,7 +785,7 @@ def test_user_token_find_user_by_email_always_uses_api_v1(settings):
         DriveUserTokenBackend(user).find_user_by_email("alice@example.com")
 
     mock_requests.get.assert_called_once_with(
-        "https://drive.example.com/api/v1.0/users/",
+        "https://drive.example.com/external_api/v1.0/users/",
         params={"q": "alice@example.com"},
         headers={"Authorization": "Bearer initial-tok"},
         timeout=30,
