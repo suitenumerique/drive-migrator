@@ -3,6 +3,7 @@
 # pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
 
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
 from django.utils import timezone
@@ -12,6 +13,7 @@ from django_celery_results.models import TaskResult
 
 from core.backends.source import SourceFile, SourceFolder
 from core.models import ExtraTaskInfo, User, Workspace
+from core.processing.plan import build_plan
 from core.processing.tasks import (
     cleanup_workspace_dir,
     create_task_result_on_publish,
@@ -33,6 +35,20 @@ from core.sources.resana.token_manager import ResanaTokenExpired
 def work_directory(settings, tmp_path):
     """Keep export task filesystem operations inside a temporary directory."""
     settings.APP_WORK_DIR = str(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def migration_run():
+    """Keep the run's working rows out of the database: workspaces are mocks here."""
+    with (
+        patch("core.processing.tasks.create_migration_run") as create,
+        patch("core.processing.tasks.record_retrieval") as record,
+        patch("core.processing.tasks.delete_migration_run") as delete,
+    ):
+        create.side_effect = lambda workspace, task_id, plan: SimpleNamespace(
+            workspace=workspace
+        )
+        yield SimpleNamespace(create=create, record=record, delete=delete)
 
 
 @pytest.fixture()
@@ -149,12 +165,39 @@ def test_export_does_not_flag_workspace_when_limit_is_set_but_not_exceeded(
 
 
 def test_export_builds_local_folder(workspace, user):
-    """export() calls FolderCreator.create_folder() with workspace, folder tree, and source backend."""
-    folder_tree = SourceFolder(name="root")
+    """export() calls FolderCreator.create_folder() with workspace, plan, and source backend."""
+    folder_tree = SourceFolder(name="root", children=[SourceFolder(name="sub")])
     source_backend, creator, _ = _run_export(workspace, user, source_folder=folder_tree)
     creator.create_folder.assert_called_once_with(
-        workspace, folder_tree, source_backend
+        workspace, build_plan(folder_tree), source_backend
     )
+
+
+def test_export_stores_the_plan_in_a_migration_run(workspace, user, migration_run):
+    """export() creates the run of its task from the same plan as the local folder."""
+    folder_tree = SourceFolder(name="root", children=[SourceFolder(name="sub")])
+
+    _, creator, _ = _run_export(workspace, user, source_folder=folder_tree)
+
+    migration_run.create.assert_called_once_with(
+        workspace, ANY, build_plan(folder_tree)
+    )
+    task_id = migration_run.create.call_args.args[1]
+    migration_run.record.assert_called_once_with(ANY, creator, "/tmp/ws-1")
+    assert migration_run.record.call_args.args[0].workspace is workspace
+    migration_run.delete.assert_called_once_with(task_id)
+
+
+def test_export_deletes_the_migration_run_when_it_fails(workspace, user, migration_run):
+    """The working rows are purged whatever the outcome of the run."""
+    dest_drive = MagicMock()
+    dest_drive.name = "drive"
+    dest_drive.export.side_effect = RuntimeError("Drive down")
+
+    with pytest.raises(RuntimeError, match="Drive down"):
+        _run_export(workspace, user, dest_backends=[dest_drive])
+
+    migration_run.delete.assert_called_once()
 
 
 def test_export_calls_prepare_export(workspace, user):

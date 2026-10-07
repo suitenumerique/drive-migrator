@@ -8,11 +8,10 @@ from celery.utils.log import get_task_logger
 from core.backends.source import (
     AbstractSourceBackend,
     SourceFile,
-    SourceFolder,
     SourceTokenExpired,
 )
 from core.models import Workspace
-from core.processing.plan import PlannedFile, build_plan
+from core.processing.plan import MigrationPlan, PlannedFile
 from core.utils import sizeof_fmt
 
 logger = get_task_logger(__name__)
@@ -34,11 +33,10 @@ class FolderCreator:
     def create_folder(
         self,
         workspace: Workspace,
-        folder: SourceFolder,
+        plan: MigrationPlan,
         source_backend: AbstractSourceBackend,
     ) -> str:
         self.workspace = workspace
-        plan = build_plan(folder)
         self.files_count = len(plan.files)
         self.delete_folder(workspace)
 
