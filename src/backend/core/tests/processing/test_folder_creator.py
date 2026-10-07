@@ -11,9 +11,13 @@ from core.backends.source import (
     SourceFolder,
     SourceTokenExpired,
 )
-from core.models import Workspace
+from core.factories import WorkspaceFactory
+from core.models import MigrationFile, Workspace
 from core.processing.folder_creator import FolderCreator
+from core.processing.migration_run import create_migration_run
 from core.processing.plan import build_plan
+
+pytestmark = pytest.mark.django_db
 
 
 def _write_empty_file(_file, destination):
@@ -27,6 +31,11 @@ def _make_backend():
     backend = MagicMock(spec=AbstractSourceBackend)
     backend.download_file = MagicMock(side_effect=_write_empty_file)
     return backend
+
+
+def _run(folder):
+    """The working rows of a run planned from folder."""
+    return create_migration_run(WorkspaceFactory(), "task-1", build_plan(folder))
 
 
 def _make_workspace(workspace_id="ws-1"):
@@ -60,7 +69,7 @@ def test_create_folder_creates_root_dir(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert os.path.isdir(tmp_path / "workspace_ws1")
 
@@ -76,7 +85,7 @@ def test_create_folder_creates_child_dirs(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert os.path.isdir(tmp_path / "workspace_ws2" / "subdir")
 
@@ -97,7 +106,7 @@ def test_create_folder_downloads_files(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert backend.download_file.call_count == 2
     calls = [c[0] for c in backend.download_file.call_args_list]
@@ -117,7 +126,7 @@ def test_create_folder_downloads_root_level_files(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert backend.download_file.call_count == 1
     called_file = backend.download_file.call_args[0][0]
@@ -132,7 +141,7 @@ def test_create_folder_returns_local_path(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    result = creator.create_folder(workspace, build_plan(folder), backend)
+    result = creator.create_folder(workspace, _run(folder), backend)
 
     assert result == str(tmp_path / "workspace_ws4")
 
@@ -149,7 +158,7 @@ def test_create_folder_clears_existing_dir(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert not (workspace_dir / "stale_file.txt").exists()
 
@@ -162,7 +171,7 @@ def test_create_folder_does_not_create_root_folder_as_subdir(tmp_path, settings)
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     workspace_dir = tmp_path / "workspace_ws6"
     assert os.path.isdir(workspace_dir)
@@ -214,7 +223,7 @@ def test_create_folder_recurses_into_nested_subfolders(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert os.path.isdir(tmp_path / "workspace_ws9" / "level1" / "level2")
 
@@ -230,7 +239,7 @@ def test_create_folder_sanitizes_slash_in_folder_name(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     workspace_dir = tmp_path / "workspace_ws12"
     assert not (workspace_dir / "GT_Tronc").exists()
@@ -250,7 +259,7 @@ def test_create_folder_sanitizes_slash_in_file_name(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     called_dest = backend.download_file.call_args[0][1]
     assert called_dest == str(tmp_path / "workspace_ws13" / "sub" / "report-final.pdf")
@@ -275,7 +284,7 @@ def test_create_folder_refuses_the_files_of_a_dot_dot_folder(tmp_path, settings)
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert _downloaded_paths(backend) == [str(tmp_path / "workspace_ws30" / "y.txt")]
     assert [failed["id"] for failed in creator.failed_files] == ["f1"]
@@ -297,7 +306,7 @@ def test_create_folder_refuses_the_subtree_of_a_dot_dot_folder(tmp_path, setting
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert not backend.download_file.called
     assert [failed["id"] for failed in creator.failed_files] == ["f1"]
@@ -317,7 +326,7 @@ def test_create_folder_refuses_a_file_designating_a_folder(tmp_path, settings, n
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert not backend.download_file.called
     assert [failed["id"] for failed in creator.failed_files] == ["f1"]
@@ -339,7 +348,7 @@ def test_create_folder_refuses_a_file_name_with_a_relative_prefix(
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert not backend.download_file.called
     assert [failed["id"] for failed in creator.failed_files] == ["f1"]
@@ -357,7 +366,7 @@ def test_create_folder_refuses_a_folder_name_with_a_relative_prefix(tmp_path, se
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert not backend.download_file.called
     assert [failed["id"] for failed in creator.failed_files] == ["f1"]
@@ -374,7 +383,7 @@ def test_create_folder_refuses_the_files_of_an_empty_folder_name(tmp_path, setti
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert not backend.download_file.called
     assert [failed["id"] for failed in creator.failed_files] == ["f1"]
@@ -394,7 +403,7 @@ def test_create_folder_logs_truncated_filename(tmp_path, settings):
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     # download_file must have been called with a path shorter than the original
     called_dest = backend.download_file.call_args[0][1]
@@ -423,7 +432,7 @@ def test_create_folder_continues_after_one_file_download_fails(tmp_path, setting
     backend.download_file.side_effect = [RuntimeError("403 Forbidden"), None]
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)  # must not raise
+    creator.create_folder(workspace, _run(folder), backend)  # must not raise
 
     assert backend.download_file.call_count == 2
 
@@ -445,7 +454,7 @@ def test_create_folder_stops_when_the_source_token_expired(tmp_path, settings):
 
     creator = FolderCreator()
     with pytest.raises(SourceTokenExpired):
-        creator.create_folder(workspace, build_plan(folder), backend)
+        creator.create_folder(workspace, _run(folder), backend)
 
     assert backend.download_file.call_count == 1
     assert [failed["name"] for failed in creator.failed_files] == ["first.pdf"]
@@ -463,7 +472,7 @@ def test_create_folder_records_failed_downloads(tmp_path, settings):
     backend.download_file.side_effect = RuntimeError("403 Forbidden")
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert len(creator.failed_files) == 1
     assert creator.failed_files[0]["name"] == "broken.docx"
@@ -492,7 +501,7 @@ def test_create_folder_records_failed_download_path_relative_to_workspace_root(
     backend.download_file.side_effect = RuntimeError("403 Forbidden")
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert creator.failed_files[0]["path"] == os.path.join(
         "level1", "level2", "broken.docx"
@@ -511,7 +520,7 @@ def test_create_folder_does_not_count_failed_download_as_success(tmp_path, setti
     backend.download_file.side_effect = RuntimeError("boom")
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert creator.files_success == 0
 
@@ -527,7 +536,7 @@ def test_create_folder_succeeding_downloads_are_not_reported_as_failed(
     backend = _make_backend()
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     assert not creator.failed_files
     assert creator.files_success == 1
@@ -558,7 +567,7 @@ def test_failed_download_removes_partial_file(tmp_path, settings):
     backend.download_file.side_effect = download_file
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), backend)
+    creator.create_folder(workspace, _run(folder), backend)
 
     workspace_dir = tmp_path / "workspace_ws19"
     assert not (workspace_dir / "broken.docx").exists()
@@ -576,12 +585,49 @@ def test_create_folder_ensures_filename_uniqueness(tmp_path, settings):
     )
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), _make_backend())
+    creator.create_folder(workspace, _run(folder), _make_backend())
 
     assert creator.written_files == {
         "f1": os.path.join("sub", "doc.pdf"),
         "f2": os.path.join("sub", "doc (1).pdf"),
     }
+
+
+def test_create_folder_records_each_download_on_its_row(tmp_path, settings):
+    """Every file of the run gets the outcome of its own download."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws24")
+    files = [
+        SourceFile(id="f1", name="ok", extension=".txt", download_url="x"),
+        SourceFile(id="f2", name="broken", extension=".txt", download_url="x"),
+    ]
+    backend = _make_backend()
+
+    def download_file(file, destination):
+        if file.id == "f2":
+            raise RuntimeError("403 Forbidden")
+        _write_empty_file(file, destination)
+
+    backend.download_file.side_effect = download_file
+    run = _run(SourceFolder(name="root", files=files))
+
+    FolderCreator().create_folder(workspace, run, backend)
+
+    assert [(row.path, row.status) for row in run.files.all()] == [
+        ("ok.txt", MigrationFile.Status.DOWNLOADED),
+        ("broken.txt", MigrationFile.Status.DOWNLOAD_FAILED),
+    ]
+
+
+def test_create_folder_creates_empty_planned_dirs(tmp_path, settings):
+    """Folders holding no file are created too."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws25")
+    folder = SourceFolder(name="root", children=[SourceFolder(name="empty")])
+
+    FolderCreator().create_folder(workspace, _run(folder), _make_backend())
+
+    assert os.path.isdir(tmp_path / "workspace_ws25" / "empty")
 
 
 def test_create_folder_counts_the_bytes_written(tmp_path, settings):
@@ -605,7 +651,7 @@ def test_create_folder_counts_the_bytes_written(tmp_path, settings):
 
     creator = FolderCreator()
     creator.create_folder(
-        workspace, build_plan(SourceFolder(name="root", files=files)), backend
+        workspace, _run(SourceFolder(name="root", files=files)), backend
     )
 
     assert creator.bytes_written == 7
@@ -630,7 +676,7 @@ def test_create_folder_records_written_files_by_source_id(tmp_path, settings):
     )
 
     creator = FolderCreator()
-    creator.create_folder(workspace, build_plan(folder), _make_backend())
+    creator.create_folder(workspace, _run(folder), _make_backend())
 
     assert creator.written_files == {
         "f1": "readme.pdf",
@@ -648,7 +694,7 @@ def test_create_folder_records_source_id_on_failed_downloads(tmp_path, settings)
 
     creator = FolderCreator()
     creator.create_folder(
-        workspace, build_plan(SourceFolder(name="root", files=[file])), backend
+        workspace, _run(SourceFolder(name="root", files=[file])), backend
     )
 
     assert creator.failed_files[0]["id"] == "f1"
@@ -666,7 +712,7 @@ def test_create_folder_flags_download_that_wrote_no_file(tmp_path, settings):
 
     creator = FolderCreator()
     creator.create_folder(
-        workspace, build_plan(SourceFolder(name="root", files=[file])), backend
+        workspace, _run(SourceFolder(name="root", files=[file])), backend
     )
 
     assert creator.not_written_ids == {"f1"}

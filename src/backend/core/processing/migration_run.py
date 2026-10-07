@@ -3,8 +3,17 @@
 import itertools
 import os
 
+from celery.utils.log import get_task_logger
+
+from core.backends.source import (
+    AbstractSourceBackend,
+    SourceFile,
+    SourceTokenExpired,
+)
 from core.models import MigrationFile, MigrationRun, Workspace
 from core.processing.plan import MigrationPlan
+
+logger = get_task_logger(__name__)
 
 BULK_BATCH_SIZE = 1000
 
@@ -46,29 +55,52 @@ def create_migration_run(
     return run
 
 
-def record_retrieval(run: MigrationRun, creator, local_folder_path: str) -> None:
-    """Store what FolderCreator did with each file of the run."""
-    failed_by_id = {failed["id"]: failed for failed in creator.failed_files}
-    files = list(run.files.all())
-
-    for migration_file in files:
-        source_id = migration_file.source["id"]
-        if source_id in creator.written_files:
-            migration_file.status = MigrationFile.Status.DOWNLOADED
-            migration_file.size = os.path.getsize(
-                os.path.join(local_folder_path, migration_file.path)
+def download_migration_file(
+    migration_file: MigrationFile,
+    source_backend: AbstractSourceBackend,
+    destination: str,
+) -> None:
+    """Download one file of a run to destination, then record the outcome on its
+    row. One file failing must not abort the rest of the run, so only raises
+    SourceTokenExpired, once recorded: every remaining file would fail the same
+    way."""
+    file = SourceFile.from_dict(migration_file.source)
+    size = None
+    error = ""
+    token_expired = None
+    try:
+        source_backend.download_file(file, destination)
+    # Broad on purpose: source_backend is backend-agnostic (Resana, Osmose,
+    # filesystem...), so we can't target a specific exception type here.
+    except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        logger.error("Failed to download %s: %s", file.name_with_extension, exc)
+        if os.path.exists(destination):
+            os.remove(destination)
+        status = MigrationFile.Status.DOWNLOAD_FAILED
+        error = str(exc)
+        if isinstance(exc, SourceTokenExpired):
+            token_expired = exc
+    else:
+        if os.path.isfile(destination):
+            status = MigrationFile.Status.DOWNLOADED
+            size = os.path.getsize(destination)
+        else:
+            logger.error(
+                "Download of %s reported success but wrote no file",
+                file.name_with_extension,
             )
-        elif source_id in failed_by_id:
-            migration_file.status = (
-                MigrationFile.Status.NOT_WRITTEN
-                if source_id in creator.not_written_ids
-                else MigrationFile.Status.DOWNLOAD_FAILED
-            )
-            migration_file.error = failed_by_id[source_id]["error"]
+            status = MigrationFile.Status.NOT_WRITTEN
+            error = "Download reported success but wrote no file"
 
-    MigrationFile.objects.bulk_update(
-        files, ["status", "size", "error"], batch_size=BULK_BATCH_SIZE
+    migration_file.status = status
+    migration_file.size = size
+    migration_file.error = error
+    # A single UPDATE: save() would also validate the row with extra queries.
+    MigrationFile.objects.filter(pk=migration_file.pk).update(
+        status=status, size=size, error=error
     )
+    if token_expired is not None:
+        raise token_expired
 
 
 def delete_migration_run(task_id: str) -> None:

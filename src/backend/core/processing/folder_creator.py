@@ -5,13 +5,9 @@ from django.conf import settings
 
 from celery.utils.log import get_task_logger
 
-from core.backends.source import (
-    AbstractSourceBackend,
-    SourceFile,
-    SourceTokenExpired,
-)
-from core.models import Workspace
-from core.processing.plan import MigrationPlan, PlannedFile
+from core.backends.source import AbstractSourceBackend, SourceTokenExpired
+from core.models import MigrationFile, MigrationRun, Workspace
+from core.processing.migration_run import download_migration_file
 from core.utils import sizeof_fmt
 
 logger = get_task_logger(__name__)
@@ -33,24 +29,25 @@ class FolderCreator:
     def create_folder(
         self,
         workspace: Workspace,
-        plan: MigrationPlan,
+        run: MigrationRun,
         source_backend: AbstractSourceBackend,
     ) -> str:
         self.workspace = workspace
-        self.files_count = len(plan.files)
+        self.files_count = run.files.count()
         self.delete_folder(workspace)
 
         path = self.get_workspace_path(workspace)
         os.makedirs(path, exist_ok=True)
-        for directory in plan.dirs:
+        for directory in run.dirs:
             os.makedirs(os.path.join(path, directory), exist_ok=True)
 
-        for refused in plan.refused:
-            self.__add_failed_file(refused.source, refused.path, refused.error)
-
-        for index, planned_file in enumerate(plan.files, start=1):
+        for index, migration_file in enumerate(run.files.iterator(), start=1):
+            if migration_file.status != MigrationFile.Status.PENDING:
+                # Refused while planning: nothing to download.
+                self.__add_failed_file(migration_file)
+                continue
             logger.info("Downloading file %s/%s ...", index, self.files_count)
-            self.__download_file(planned_file, path, source_backend)
+            self.__download_file(migration_file, path, source_backend)
 
         return path
 
@@ -64,45 +61,28 @@ class FolderCreator:
 
     def __download_file(
         self,
-        planned_file: PlannedFile,
+        migration_file: MigrationFile,
         root: str,
         source_backend: AbstractSourceBackend,
     ):
-        file = planned_file.source
-        relative_path = planned_file.path
-        destination = os.path.join(root, relative_path)
-
         try:
-            source_backend.download_file(file, destination)
-        except SourceTokenExpired as error:
-            # Every remaining file would fail the same way: stop the run,
-            # so the user is asked to log in again.
-            self.__add_failed_file(file, relative_path, str(error))
+            download_migration_file(
+                migration_file, source_backend, os.path.join(root, migration_file.path)
+            )
+        except SourceTokenExpired:
+            # The run stops, so the user is asked to log in again.
+            self.__add_failed_file(migration_file)
             raise
-        # Broad on purpose: source_backend is backend-agnostic (Resana, Osmose,
-        # filesystem...), so we can't target a specific exception type here. One
-        # file failing must not abort the rest of the workspace's download.
-        except Exception as error:  # noqa: BLE001  # pylint: disable=broad-exception-caught
-            logger.error("Failed to download %s: %s", file.name_with_extension, error)
-            if os.path.exists(destination):
-                os.remove(destination)
-            self.__add_failed_file(file, relative_path, str(error))
+        source_id = migration_file.source["id"]
+
+        if migration_file.status != MigrationFile.Status.DOWNLOADED:
+            if migration_file.status == MigrationFile.Status.NOT_WRITTEN:
+                self.not_written_ids.add(source_id)
+            self.__add_failed_file(migration_file)
             return
 
-        if not os.path.isfile(destination):
-            logger.error(
-                "Download of %s reported success but wrote no file",
-                file.name_with_extension,
-            )
-            self.not_written_ids.add(file.id)
-            self.__add_failed_file(
-                file, relative_path, "Download reported success but wrote no file"
-            )
-            return
-
-        self.written_files[file.id] = relative_path
-
-        self.bytes_written += os.path.getsize(destination)
+        self.written_files[source_id] = migration_file.path
+        self.bytes_written += migration_file.size
         logger.info(
             "Directory size: %s (%s)",
             sizeof_fmt(self.bytes_written),
@@ -110,12 +90,13 @@ class FolderCreator:
         )
         self.files_success += 1
 
-    def __add_failed_file(self, file: SourceFile, relative_path: str, error: str):
+    def __add_failed_file(self, migration_file: MigrationFile):
+        source = migration_file.source
         self.failed_files.append(
             {
-                "id": file.id,
-                "name": file.name_with_extension,
-                "path": relative_path,
-                "error": error,
+                "id": source["id"],
+                "name": source["name"] + source["extension"],
+                "path": migration_file.path,
+                "error": migration_file.error,
             }
         )
