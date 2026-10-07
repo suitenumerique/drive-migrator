@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [v0.8.10] - 2026-10-07
+
 ### Added
 
 - setup Celery
@@ -99,5 +101,5 @@ and this project adheres to
 
 - delete unused var in Makefile
 
-
-[unreleased]: https://github.com/numerique-gouv/impress/main
+[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.8.10...HEAD
+[v0.8.10]: https://github.com/suitenumerique/drive-migrator/releases/v0.8.10
