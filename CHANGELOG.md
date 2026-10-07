@@ -10,6 +10,8 @@ and this project adheres to
 
 ### Changed
 
+- Use Drive's resource server (external APIs) instead of frontend APIs
+
 #### Dependencies
 
 - Upgrade `Django` to `5.2.17`

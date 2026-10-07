@@ -145,13 +145,19 @@ def user_has_usable_drive_token(user) -> bool:
 class DriveBackend:
     """Base HTTP client for La Suite Drive API.
 
-    Subclasses implement _refresh() and _api_prefix() to select the auth strategy
-    and the API family (/external_api/v1.0 vs /api/v1.0).
+    Subclasses implement _refresh() to select the auth strategy.
     """
+
+    API_PREFIX: str = "/external_api/v1.0"
 
     def __init__(self):
         self._access_token = None
         self._token_expires_at = None
+
+    @property
+    def api_root_url(self) -> str:
+        """Get API root URL."""
+        return f"{settings.DRIVE_API_BASE_URL}{DriveBackend.API_PREFIX}"
 
     def _get_token(self) -> str:
         """Return a valid access token, refreshing proactively if near expiry."""
@@ -167,12 +173,6 @@ class DriveBackend:
     def _refresh(self):
         raise NotImplementedError
 
-    def _api_prefix(self) -> str:
-        raise NotImplementedError
-
-    def _base_url(self) -> str:
-        return settings.DRIVE_API_BASE_URL
-
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._get_token()}"}
 
@@ -180,13 +180,13 @@ class DriveBackend:
 
     def create_folder(self, title: str) -> dict:
         """Create a root folder in Drive. Returns the item dict (includes 'id')."""
-        url = f"{self._base_url()}{self._api_prefix()}/items/"
+        url = f"{self.api_root_url}/items/"
         payload = {"type": "folder", "title": title}
         return self._create_item(url, payload)
 
     def create_subfolder(self, title: str, parent_id: str) -> dict:
         """Create a child folder inside an existing Drive folder."""
-        url = f"{self._base_url()}{self._api_prefix()}/items/{parent_id}/children/"
+        url = f"{self.api_root_url}/items/{parent_id}/children/"
         payload = {"type": "folder", "title": title}
         return self._create_item(url, payload)
 
@@ -199,7 +199,7 @@ class DriveBackend:
         Pass item_id to know the item's id before the request is sent. Recent Drive
         versions require size and check the uploaded file against it, older ones
         ignore it."""
-        url = f"{self._base_url()}{self._api_prefix()}/items/{parent_id}/children/"
+        url = f"{self.api_root_url}/items/{parent_id}/children/"
         payload = {"type": "file", "filename": filename, "size": size}
         item = self._create_item(url, payload, item_id=item_id)
         if "policy" not in item:
@@ -224,7 +224,7 @@ class DriveBackend:
     @_retry_on_transient_error
     def _delete_item(self, item_id: str) -> None:
         """DELETE /items/{id}/ (soft delete)."""
-        url = f"{self._base_url()}{self._api_prefix()}/items/{item_id}/"
+        url = f"{self.api_root_url}/items/{item_id}/"
         response = requests.delete(url, headers=self._headers(), timeout=30)
         response.raise_for_status()
 
@@ -278,7 +278,7 @@ class DriveBackend:
     def list_children(self, item_id: str) -> list[dict]:
         """Return all children of a folder, following pagination. Drive hides
         items still in PENDING upload state from this listing."""
-        url = f"{self._base_url()}{self._api_prefix()}/items/{item_id}/children/"
+        url = f"{self.api_root_url}/items/{item_id}/children/"
         params = {"page_size": _LIST_PAGE_SIZE}
         children = []
         while url:
@@ -295,7 +295,7 @@ class DriveBackend:
 
     def _get_item_if_exists(self, item_id: str) -> dict | None:
         """GET /items/{id}/, treating a 404 as 'not created yet' rather than an error."""
-        url = f"{self._base_url()}{self._api_prefix()}/items/{item_id}/"
+        url = f"{self.api_root_url}/items/{item_id}/"
         response = requests.get(url, headers=self._headers(), timeout=30)
         if response.status_code == 404:
             return None
@@ -343,7 +343,7 @@ class DriveBackend:
         """Step 3: notify Drive the upload is complete. A retried timeout/5xx may
         land on an item that's no longer PENDING - see _is_upload_already_processed().
         """
-        url = f"{self._base_url()}{self._api_prefix()}/items/{item_id}/upload-ended/"
+        url = f"{self.api_root_url}/items/{item_id}/upload-ended/"
         max_attempts = settings.DRIVE_RETRY_MAX_ATTEMPTS
         for attempt in range(1, max_attempts + 1):
             retryable_error = None
@@ -384,7 +384,7 @@ class DriveBackend:
     def find_user_by_email(self, email: str) -> dict | None:
         """Resolve an email to a Drive user dict. Returns None if not found."""
         response = requests.get(
-            f"{self._base_url()}/api/v1.0/users/",
+            f"{self.api_root_url}/users/",
             params={"q": email},
             headers=self._headers(),
             timeout=30,
@@ -407,7 +407,7 @@ class DriveBackend:
         """Grant owner access. Retried on 5xx: worst case is a duplicate grant,
         cheaper than the user silently ending up with no access."""
         response = requests.post(
-            f"{self._base_url()}{self._api_prefix()}/items/{item_id}/accesses/",
+            f"{self.api_root_url}/items/{item_id}/accesses/",
             json={"user_id": user_id, "role": "owner"},
             headers=self._headers(),
             timeout=30,
@@ -419,7 +419,7 @@ class DriveBackend:
         """Invite as owner. Retried on 5xx: worst case is a duplicate email,
         cheaper than the user never being invited."""
         response = requests.post(
-            f"{self._base_url()}{self._api_prefix()}/items/{item_id}/invitations/",
+            f"{self.api_root_url}/items/{item_id}/invitations/",
             json={"email": email, "role": "owner"},
             headers=self._headers(),
             timeout=30,
@@ -429,9 +429,6 @@ class DriveBackend:
 
 class DriveServiceAccountBackend(DriveBackend):
     """Uses OAuth2 client_credentials grant. Targets /external_api/v1.0/."""
-
-    def _api_prefix(self) -> str:
-        return "/external_api/v1.0"
 
     @_retry_on_transient_error
     def _refresh(self):
@@ -455,7 +452,7 @@ class DriveServiceAccountBackend(DriveBackend):
 
 
 class DriveUserTokenBackend(DriveBackend):
-    """Uses the authenticated user's ProConnect token. Targets /api/v1.0/.
+    """Uses the authenticated user's ProConnect token. Targets /external_api/v1.0/.
 
     The token is seeded from user.oidc_access_token and refreshed via
     user.oidc_refresh_token when it expires. Updated tokens are persisted
@@ -467,9 +464,6 @@ class DriveUserTokenBackend(DriveBackend):
         self._user = user
         self._access_token = decrypt_token(user.oidc_access_token) or None
         self._token_expires_at = user.oidc_token_expires_at
-
-    def _api_prefix(self) -> str:
-        return "/api/v1.0"
 
     @_retry_on_transient_error
     def _refresh(self):

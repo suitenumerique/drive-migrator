@@ -297,7 +297,7 @@ class Base(Configuration):
         environ_name="DRIVE_OIDC_CLIENT_SECRET", environ_prefix=None, default=""
     )
     # "service_account": client_credentials grant via /external_api/v1.0/ (default)
-    # "user_token": authenticated user's ProConnect token via /api/v1.0/
+    # "user_token": authenticated user's ProConnect token via /external_api/v1.0/
     DRIVE_AUTH_MODE = values.Value(
         "service_account", environ_name="DRIVE_AUTH_MODE", environ_prefix=None
     )

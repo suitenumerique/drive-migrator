@@ -117,7 +117,7 @@ def test_list_children_follows_pagination(settings):
 
 
 def test_user_token_list_children_uses_api_v1(settings):
-    """list_children() uses /api/v1.0/ in user_token mode."""
+    """list_children() uses /external_api/v1.0/ in user_token mode."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
     user = MagicMock()
     user.oidc_access_token = encrypt_token("user-tok")
@@ -128,5 +128,5 @@ def test_user_token_list_children_uses_api_v1(settings):
         DriveUserTokenBackend(user).list_children("folder-uuid")
 
     assert mock_requests.get.call_args.args == (
-        "https://drive.example.com/api/v1.0/items/folder-uuid/children/",
+        "https://drive.example.com/external_api/v1.0/items/folder-uuid/children/",
     )

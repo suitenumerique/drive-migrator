@@ -55,7 +55,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
     Two auth modes are supported via DRIVE_AUTH_MODE:
     - "service_account" (default): uses OAuth2 client_credentials grant and
       /external_api/v1.0/. The migration user is explicitly shared as owner.
-    - "user_token": uses the authenticated user's ProConnect token and /api/v1.0/.
+    - "user_token": uses the authenticated user's ProConnect token and /external_api/v1.0/.
       Drive automatically assigns ownership to the token holder, so the migration
       user is excluded from the sharing step.
     """
