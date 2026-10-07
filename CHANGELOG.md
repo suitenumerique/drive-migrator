@@ -49,6 +49,7 @@ and this project adheres to
 - add opt-in per-file migration integrity report #235
 - show migrated/source file counts and gaps on workspace cards #235
 - lock Resana workspace and grant folder access during migration #215
+- add Drive status and root folder id to the workspace admin CSV export
 
 ### Changed
 

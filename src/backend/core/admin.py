@@ -278,7 +278,17 @@ class WorkspaceAdmin(admin.ModelAdmin):
         backend = ResanaBackend()
 
         writer.writerow(
-            ["user", "domain", "titre", "destination", "date", "archive", "resana"]
+            [
+                "user",
+                "domain",
+                "titre",
+                "destination",
+                "date",
+                "archive",
+                "resana",
+                "drive",
+                "drive_id",
+            ]
         )
         for workspace in queryset:
             writer.writerow(self._export_csv_row(backend, workspace))
@@ -288,7 +298,7 @@ class WorkspaceAdmin(admin.ModelAdmin):
     @staticmethod
     def _export_csv_row(backend, workspace):
         """domain email, titre du workspace, organisation destination, date,
-        archive (o/n), resana (o/n)"""
+        archive (o/n), resana (o/n), drive (o/n), id du dossier racine Drive"""
         user = workspace.migration_user
         task_info = (
             ExtraTaskInfo.objects.filter(workspace=workspace).order_by("-id").first()
@@ -305,6 +315,8 @@ class WorkspaceAdmin(admin.ModelAdmin):
             task_info.task_result.date_done if task_info else "",
             workspace.get_destination_status("archive"),
             workspace.get_destination_status("resana"),
+            workspace.get_destination_status("drive"),
+            workspace.get_destination_metadata("drive").get("workspace_id", ""),
         ]
 
     export_as_csv.short_description = "Export Selected"

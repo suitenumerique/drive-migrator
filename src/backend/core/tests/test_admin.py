@@ -160,8 +160,9 @@ def test_workspace_inline_links_task_result():
 
 
 def test_workspace_export_as_csv_writes_one_line_per_workspace():
-    """export_as_csv lists user, domain, title, Resana organization, last run date
-    and destination statuses, and tolerates a workspace without migration user."""
+    """export_as_csv lists user, domain, title, Resana organization, last run date,
+    destination statuses and Drive root id, and tolerates a workspace without
+    migration user."""
     ResanaEmailMapping.objects.create(
         domain="example.com",
         resana_organization_name="Org",
@@ -171,7 +172,12 @@ def test_workspace_export_as_csv_writes_one_line_per_workspace():
     migrated = WorkspaceFactory(
         title="Migrated",
         migration_user=user,
-        destination_statuses={"archive": "SUCCESS", "resana": "FAILURE"},
+        destination_statuses={
+            "archive": "SUCCESS",
+            "resana": "FAILURE",
+            "drive": "SUCCESS",
+        },
+        destination_metadata={"drive": {"workspace_id": "drive-root-id"}},
     )
     # TaskResult.date_done is set automatically on save.
     date_done = _extra_task(migrated, user=user).task_result.date_done
@@ -186,7 +192,17 @@ def test_workspace_export_as_csv_writes_one_line_per_workspace():
     assert response["Content-Disposition"] == "attachment; filename=core.workspace.csv"
     rows = list(csv.reader(io.StringIO(response.content.decode())))
     assert rows == [
-        ["user", "domain", "titre", "destination", "date", "archive", "resana"],
+        [
+            "user",
+            "domain",
+            "titre",
+            "destination",
+            "date",
+            "archive",
+            "resana",
+            "drive",
+            "drive_id",
+        ],
         [
             "alice@example.com",
             "example.com",
@@ -195,6 +211,8 @@ def test_workspace_export_as_csv_writes_one_line_per_workspace():
             str(date_done),
             "SUCCESS",
             "FAILURE",
+            "SUCCESS",
+            "drive-root-id",
         ],
-        ["", "", "Orphan", "", "", "NONE", "NONE"],
+        ["", "", "Orphan", "", "", "NONE", "NONE", "NONE", ""],
     ]
