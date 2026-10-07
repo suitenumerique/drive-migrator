@@ -468,8 +468,9 @@ def test_export_feeds_integrity_tracker_and_saves_it(workspace, user, mock_track
     tracker = mock_tracker_cls.return_value
     tracker.set_kept_files.assert_called_once_with(folder)
     tracker.set_retrieval.assert_called_once_with(
-        creator, creator.get_workspace_path.return_value
+        ANY, creator.get_workspace_path.return_value
     )
+    assert tracker.set_retrieval.call_args.args[0].workspace is workspace
     tracker.add_exported_destination.assert_called_once_with(dest_drive)
     tracker.save.assert_called_once_with(ANY, run_failed=False)
 

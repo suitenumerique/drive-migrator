@@ -183,7 +183,7 @@ def _export_workspace(run, user, source_backend, integrity_tracker):
     workspace = run.workspace
     logger.info("Calling create_folder ...")
     creator = FolderCreator()
-    integrity_tracker.set_retrieval(creator, creator.get_workspace_path(workspace))
+    integrity_tracker.set_retrieval(run, creator.get_workspace_path(workspace))
     try:
         local_path = creator.create_folder(workspace, run, source_backend)
     finally:

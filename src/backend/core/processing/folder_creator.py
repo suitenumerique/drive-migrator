@@ -18,11 +18,6 @@ class FolderCreator:
         self.files_count = None
         self.files_success = 0
         self.failed_files = []
-        # Source file id -> path relative to the workspace root, for every file
-        # actually written to disk.
-        self.written_files = {}
-        # Source file ids whose download returned without error but left no file.
-        self.not_written_ids = set()
         self.bytes_written = 0
         self.workspace = None
 
@@ -73,15 +68,10 @@ class FolderCreator:
             # The run stops, so the user is asked to log in again.
             self.__add_failed_file(migration_file)
             raise
-        source_id = migration_file.source["id"]
-
         if migration_file.status != MigrationFile.Status.DOWNLOADED:
-            if migration_file.status == MigrationFile.Status.NOT_WRITTEN:
-                self.not_written_ids.add(source_id)
             self.__add_failed_file(migration_file)
             return
 
-        self.written_files[source_id] = migration_file.path
         self.bytes_written += migration_file.size
         logger.info(
             "Directory size: %s (%s)",

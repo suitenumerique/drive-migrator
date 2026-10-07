@@ -9,6 +9,11 @@ and this project adheres to
 ## [Unreleased]
 - Split the backend settings into configuration mixins
 
+### Changed
+
+- Track each file of a migration in its own database row, the first step
+  toward migrating each file in its own task #242
+
 ### Fixed
 
 - Refresh the Resana offline token before its 1 h idle timeout, so long

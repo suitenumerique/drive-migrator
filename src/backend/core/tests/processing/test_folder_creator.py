@@ -584,13 +584,10 @@ def test_create_folder_ensures_filename_uniqueness(tmp_path, settings):
         name="root", children=[SourceFolder(name="sub", files=[first, second])]
     )
 
-    creator = FolderCreator()
-    creator.create_folder(workspace, _run(folder), _make_backend())
+    FolderCreator().create_folder(workspace, _run(folder), _make_backend())
 
-    assert creator.written_files == {
-        "f1": os.path.join("sub", "doc.pdf"),
-        "f2": os.path.join("sub", "doc (1).pdf"),
-    }
+    sub_dir = tmp_path / "workspace_ws11" / "sub"
+    assert sorted(os.listdir(sub_dir)) == ["doc (1).pdf", "doc.pdf"]
 
 
 def test_create_folder_records_each_download_on_its_row(tmp_path, settings):
@@ -658,30 +655,8 @@ def test_create_folder_counts_the_bytes_written(tmp_path, settings):
 
 
 # ---------------------------------------------------------------------------
-# Integrity tracking: written files and silent download losses
+# Failed downloads reported on the workspace
 # ---------------------------------------------------------------------------
-
-
-def test_create_folder_records_written_files_by_source_id(tmp_path, settings):
-    """written_files maps each downloaded source file id to its path relative
-    to the workspace root, after name sanitization."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    workspace = _make_workspace("ws20")
-    root_file = SourceFile(id="f1", name="readme", extension=".pdf", download_url="x")
-    nested_file = SourceFile(id="f2", name="a/b", extension=".txt", download_url="x")
-    folder = SourceFolder(
-        name="root",
-        files=[root_file],
-        children=[SourceFolder(name="sub", files=[nested_file])],
-    )
-
-    creator = FolderCreator()
-    creator.create_folder(workspace, _run(folder), _make_backend())
-
-    assert creator.written_files == {
-        "f1": "readme.pdf",
-        "f2": os.path.join("sub", "a-b.txt"),
-    }
 
 
 def test_create_folder_records_source_id_on_failed_downloads(tmp_path, settings):
@@ -698,12 +673,11 @@ def test_create_folder_records_source_id_on_failed_downloads(tmp_path, settings)
     )
 
     assert creator.failed_files[0]["id"] == "f1"
-    assert not creator.written_files
 
 
 def test_create_folder_flags_download_that_wrote_no_file(tmp_path, settings):
     """A download that returns without error but writes nothing is reported as
-    failed, flagged in not_written_ids and not counted as a success."""
+    failed and not counted as a success."""
     settings.APP_WORK_DIR = str(tmp_path)
     workspace = _make_workspace("ws22")
     file = SourceFile(id="f1", name="ghost", extension=".pdf", download_url="x")
@@ -715,8 +689,6 @@ def test_create_folder_flags_download_that_wrote_no_file(tmp_path, settings):
         workspace, _run(SourceFolder(name="root", files=[file])), backend
     )
 
-    assert creator.not_written_ids == {"f1"}
-    assert not creator.written_files
     assert creator.files_success == 0
     assert creator.failed_files == [
         {
