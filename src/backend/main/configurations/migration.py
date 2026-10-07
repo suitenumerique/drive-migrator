@@ -35,6 +35,13 @@ class MigrationBackendsMixin:
         environ_name="MIGRATION_FILE_LIMIT_PER_WORKSPACE",
         environ_prefix=None,
     )
+    # Files failing in a row (rejections aside) after which a file-by-file
+    # destination is deemed unusable and gets no more files of the run.
+    MIGRATION_DESTINATION_MAX_CONSECUTIVE_FAILURES = values.PositiveIntegerValue(
+        10,
+        environ_name="MIGRATION_DESTINATION_MAX_CONSECUTIVE_FAILURES",
+        environ_prefix=None,
+    )
 
     # Filesystem source backend
     FILESYSTEM_SOURCE_ROOT = values.Value(

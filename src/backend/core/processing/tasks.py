@@ -18,6 +18,7 @@ from core.backends.source import (
 )
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
+from core.processing.file_exports import FileExports
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.processing.integrity import IntegrityTracker, Stage
@@ -181,43 +182,98 @@ def export(self, data):  # pylint: disable=unused-argument
 
 def _export_workspace(run, user, source_backend, integrity_tracker):
     workspace = run.workspace
-    logger.info("Calling create_folder ...")
     creator = FolderCreator()
-    integrity_tracker.set_retrieval(run, creator.get_workspace_path(workspace))
+    local_path = creator.get_workspace_path(workspace)
+    integrity_tracker.set_retrieval(run, local_path)
+
+    # Before the downloads: file-by-file destinations need the members to close.
+    logger.info("Calling prepare_export ...")
+    source_backend.prepare_export(workspace, local_path)
+
+    destinations = _pending_destinations(workspace)
+    for destination in destinations:
+        # Registered first so a destination that fails midway is still checked.
+        integrity_tracker.add_exported_destination(destination)
+    file_by_file = [d for d in destinations if d.exports_file_by_file]
+    legacy = [d for d in destinations if not d.exports_file_by_file]
+    file_exports = FileExports(run, user, file_by_file)
+
     try:
-        local_path = creator.create_folder(workspace, run, source_backend)
-    finally:
-        # Also when an expired source token stopped the downloads midway.
-        if creator.failed_files:
-            workspace.download_errors = creator.failed_files
-            workspace.save(update_fields=["download_errors"])
-            logger.warning(
-                "%s file(s) failed to download: %s",
-                len(creator.failed_files),
-                creator.failed_files,
+        file_exports.open()
+        logger.info("Calling create_folder ...")
+        try:
+            local_path = creator.create_folder(
+                workspace,
+                run,
+                source_backend,
+                on_downloaded=_file_handover(file_exports, file_by_file, legacy),
             )
+        except SourceTokenExpired:
+            # Also keep the files that failed before the token expired.
+            _save_download_errors(workspace, creator)
+            raise
+        _check_downloads(workspace, creator)
+        list_workspace_dir(workspace)
+    except BaseException:
+        file_exports.abort()
+        raise
+
+    failures = file_exports.close()
+    for destination in legacy:
+        logger.info("Calling %s export ...", destination.name)
+        destination.export(workspace, user, local_path)
+
+    if failures:
+        raise RuntimeError(
+            f"Export failed for {', '.join(failures)} on workspace {workspace.id}"
+        ) from next(iter(failures.values()))
+
+
+def _file_handover(file_exports, file_by_file, legacy):
+    """What to do with each downloaded file: hand it to the file-by-file
+    destinations, and drop it unless a legacy destination reads it back."""
+    if not file_by_file:
+        return None
+    if legacy:
+        return file_exports.put
+
+    def put_and_drop(migration_file, local_path):
+        file_exports.put(migration_file, local_path)
+        os.remove(local_path)
+
+    return put_and_drop
+
+
+def _pending_destinations(workspace) -> list:
+    destinations = []
+    for destination in DestinationRegistry.get_all():
+        status = workspace.get_destination_status(destination.name)
+        logger.info("%s status = %s", destination.name, status)
+        if status == Workspace.Status.PENDING:
+            destinations.append(destination)
+    return destinations
+
+
+def _save_download_errors(workspace, creator) -> None:
+    if creator.failed_files:
+        workspace.download_errors = creator.failed_files
+        workspace.save(update_fields=["download_errors"])
+        logger.warning(
+            "%s file(s) failed to download: %s",
+            len(creator.failed_files),
+            creator.failed_files,
+        )
+
+
+def _check_downloads(workspace, creator) -> None:
+    """Keep the failed downloads on the workspace; fail when none succeeded."""
+    _save_download_errors(workspace, creator)
 
     if creator.files_count and creator.files_success == 0:
         raise RuntimeError(
             f"All {creator.files_count} file(s) failed to download for "
             f"workspace {workspace.id}"
         )
-
-    list_workspace_dir(workspace)
-
-    logger.info("Calling prepare_export ...")
-    source_backend.prepare_export(workspace, local_path)
-
-    for dest_backend in DestinationRegistry.get_all():
-        dest_name = dest_backend.name
-        logger.info(
-            "%s status = %s", dest_name, workspace.get_destination_status(dest_name)
-        )
-        if workspace.get_destination_status(dest_name) == Workspace.Status.PENDING:
-            logger.info("Calling %s export ...", dest_name)
-            # Registered first so a destination that fails midway is still checked.
-            integrity_tracker.add_exported_destination(dest_backend)
-            dest_backend.export(workspace, user, local_path)
 
 
 # From https://github.com/celery/django-celery-results/issues/286#issuecomment-1279161047

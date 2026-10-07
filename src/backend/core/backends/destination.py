@@ -40,6 +40,16 @@ class RejectedFile:
     item_id: str | None = None
 
 
+class FileExportStatus(StrEnum):
+    """What a file-by-file destination did with one file, see put_file()."""
+
+    SENT = "sent"
+    # Refused by the destination because of the file itself (e.g. its type).
+    REJECTED = "rejected"
+    # Lost for another reason; several in a row disable the destination.
+    FAILED = "failed"
+
+
 class AbstractDestinationBackend(ABC):
     """
     Contract for any platform that can receive a migrated workspace.
@@ -55,6 +65,9 @@ class AbstractDestinationBackend(ABC):
 
     name: str  # e.g. "archive", "resana", "drive"
     label: str  # Human-readable label for UI, e.g. "La Suite Drive"
+    # True when the destination receives the files one by one through
+    # open_export(), put_file() and close_export() instead of export().
+    exports_file_by_file = False
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -94,6 +107,34 @@ class AbstractDestinationBackend(ABC):
     def get_account_creation_url(self) -> str | None:
         """Where the user creates their account, under USER_CREATED."""
         return None
+
+    # --- File-by-file export (when exports_file_by_file is True) ---
+
+    def open_export(self, user, run) -> None:
+        """
+        Prepare the destination before any file of the run. Whatever the next
+        calls need goes to run.destinations_state[self.name].
+        """
+        raise NotImplementedError
+
+    def put_file(self, user, run, migration_file, local_path: str) -> None:
+        """
+        Send one downloaded file, then record what happened to it in
+        migration_file.results[self.name], with a FileExportStatus as "status".
+        Raise only when the destination itself is unusable (e.g. revoked token):
+        it then gets no more files.
+        """
+        raise NotImplementedError
+
+    def close_export(self, user, run) -> None:
+        """
+        Finish the export once every file was put: generated files, sharing,
+        mail. Must set the destination status, like export().
+        """
+        raise NotImplementedError
+
+    def abort_export(self, run) -> None:  # noqa: B027
+        """Best effort, after the export failed: keep a trace of what it did."""
 
     # --- Optional hooks (default: raise NotImplementedError) ---
 

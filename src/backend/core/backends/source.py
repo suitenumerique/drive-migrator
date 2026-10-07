@@ -130,8 +130,8 @@ class AbstractSourceBackend(ABC):
 
     def prepare_export(self, workspace, local_folder_path: str) -> None:  # noqa: B027
         """
-        Optional hook called after the local folder is assembled and before
-        destinations are invoked.
+        Optional hook called before the files are downloaded and handed to the
+        destinations.
 
         Implementations should populate workspace.members with the list of workspace
         members fetched from the source platform, then call workspace.save().
