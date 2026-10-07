@@ -10,13 +10,27 @@ RUN python -m pip install --upgrade pip && \
 # ---- Back-end builder image ----
 FROM base AS back-builder
 
-WORKDIR /builder
+# Configure uv
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+# Disable Python downloads, because we want to use the system interpreter
+# across both images. If using a managed Python version, it needs to be copied
+# from the build image into the final image.
+ENV UV_PYTHON_DOWNLOADS=0
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /bin/
+
+WORKDIR /app
 
 # Copy required python dependencies
-COPY ./src/backend /builder
-
-RUN mkdir /install && \
-  pip install --prefix=/install .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=src/backend/uv.lock,target=uv.lock \
+    --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
+      uv sync --locked --no-install-project --no-dev
+COPY src/backend /app
+RUN --mount=type=cache,target=/root/.cache/uv \
+      uv sync --locked --no-dev
 
 
 # ---- mails ----
@@ -31,8 +45,8 @@ RUN yarn install --frozen-lockfile && \
 
 
 # ---- static link collector ----
-FROM base AS link-collector
-ARG IMPRESS_STATIC_ROOT=/data/static
+FROM back-builder AS link-collector
+ARG MIGRATOR_STATIC_ROOT=/data/static
 
 # Install libpangocairo & rdfind
 RUN apk add --no-cache \
@@ -40,21 +54,22 @@ RUN apk add --no-cache \
       file \
       rdfind
 
-# Copy installed python dependencies
-COPY --from=back-builder /install /usr/local
-
-# Copy impress application (see .dockerignore)
-COPY ./src/backend /app/
+# Copy the application from the builder
+COPY --from=back-builder /app /app
 
 WORKDIR /app
 
 # collectstatic
 RUN DJANGO_CONFIGURATION=Build DJANGO_JWT_PRIVATE_SIGNING_KEY=Dummy \
-    python manage.py collectstatic --noinput
+    uv run python manage.py collectstatic --noinput
 
 # Replace duplicated file by a symlink to decrease the overall size of the
 # final image
-RUN rdfind -makesymlinks true -followsymlinks true -makeresultsfile false ${IMPRESS_STATIC_ROOT}
+RUN rdfind \
+  -makesymlinks true \
+  -followsymlinks true \
+  -makeresultsfile false \
+  ${MIGRATOR_STATIC_ROOT}
 
 # ---- Core application image ----
 FROM base AS core
@@ -63,12 +78,13 @@ ENV PYTHONUNBUFFERED=1
 
 # Install required system libs
 RUN apk add --no-cache \
-      gettext \
       cairo \
-      libffi \
       gdk-pixbuf \
-      pango \
+      gettext \
+      libffi \
+      libmagic \
       mailcap \
+      pango \
       shared-mime-info
 
 # Copy entrypoint
@@ -80,10 +96,7 @@ COPY ./docker/files/usr/local/bin/entrypoint /usr/local/bin/entrypoint
 RUN chmod g=u /etc/passwd
 
 # Copy installed python dependencies
-COPY --from=back-builder /install /usr/local
-
-# Copy impress application (see .dockerignore)
-COPY ./src/backend /app/
+COPY --from=back-builder /app /app
 
 WORKDIR /app
 
@@ -95,28 +108,33 @@ ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
 # ---- Development image ----
 FROM core AS backend-development
 
+ARG DOCKER_USER
+
+# Configure uv
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_CACHE_DIR=/opt/cache
+
 # Switch back to the root user to install development dependencies
 USER root:root
 
 # Install psql
 RUN apk add --no-cache postgresql-client
 
-# Uninstall impress and re-install it in editable mode along with development
-# dependencies
-RUN pip uninstall -y impress
-RUN pip install -e .[dev]
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /bin/
+
+# Install development dependencies and ensure the virtual
+# environment belongs to the DOCKER_USER
+RUN uv sync --all-extras --locked && \
+    chown -R "${DOCKER_USER}" /opt/venv /opt/cache
 
 # Restore the un-privileged user running the application
-ARG DOCKER_USER
 USER ${DOCKER_USER}
 
-# Target database host (e.g. database engine following docker compose services
-# name) & port
-ENV DB_HOST=postgresql \
-    DB_PORT=5432
-
 # Run django development server
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["uv", "run", "python", "manage.py", "runserver", "0.0.0.0:8000"]
 
 
 # ---- Flower image ----
@@ -126,12 +144,12 @@ FROM backend-development AS celery-flower
 USER root:root
 
 # Run django development server
-CMD ["celery", "-A", "main.celery_app", "flower"]
+CMD ["uv", "run", "celery", "-A", "main.celery_app", "flower"]
 
 # ---- Production image ----
 FROM core AS backend-production
 
-ARG IMPRESS_STATIC_ROOT=/data/static
+ARG MIGRATOR_STATIC_ROOT=/data/static
 
 # Gunicorn
 RUN mkdir -p /usr/local/etc/gunicorn
@@ -142,10 +160,10 @@ ARG DOCKER_USER
 USER ${DOCKER_USER}
 
 # Copy statics
-COPY --from=link-collector ${IMPRESS_STATIC_ROOT} ${IMPRESS_STATIC_ROOT}
+COPY --from=link-collector ${MIGRATOR_STATIC_ROOT} ${MIGRATOR_STATIC_ROOT}
 
 # Copy impress mails
 COPY --from=mail-builder /mail/backend/core/templates/mail /app/core/templates/mail
 
 # The default command runs gunicorn WSGI server in impress's main module
-CMD ["gunicorn", "-c", "/usr/local/etc/gunicorn/main.py", "main.wsgi:application"]
+CMD ["uv", "run", "gunicorn", "-c", "/usr/local/etc/gunicorn/main.py", "main.wsgi:application"]

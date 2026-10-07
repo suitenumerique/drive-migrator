@@ -88,7 +88,17 @@ function _dc_exec() {
 #
 # ARGS : django's manage.py command arguments
 function _django_manage() {
-    _dc_run "app-dev" python manage.py "$@"
+    _dc_run "app-dev" uv run python manage.py "$@"
+}
+
+# _uv: wrap uv command with docker compose
+#
+# usage : _uv [options] [ARGS...] 
+#
+# options: uv command options
+# ARGS   : uv command arguments
+function _uv() {
+    _dc_run "app-dev" uv "$@"
 }
 
 # _set_openstack_project: select an OpenStack project from the openrc files defined in the

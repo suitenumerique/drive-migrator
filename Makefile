@@ -43,11 +43,12 @@ COMPOSE_EXEC        = $(COMPOSE) exec
 COMPOSE_EXEC_APP    = $(COMPOSE_EXEC) app-dev
 COMPOSE_RUN         = $(COMPOSE) run --rm
 COMPOSE_RUN_APP     = $(COMPOSE_RUN) app-dev
+COMPOSE_RUN_APP_UV  = $(COMPOSE_RUN_APP) uv run
 WAIT_DB             = @$(COMPOSE_RUN) dockerize -wait tcp://$(DB_HOST):$(DB_PORT) -timeout 60s
 
 # -- Backend
-MANAGE              = $(COMPOSE_RUN_APP) python manage.py
-FRONT_YARN          = $(COMPOSE_RUN) -w //app/src/frontend node yarn
+MANAGE              = $(COMPOSE_RUN_APP) uv run python manage.py
+FRONT_YARN          = $(COMPOSE_RUN) -w /app/src/frontend node yarn
 MAIL_YARN           = $(COMPOSE_RUN) -w /app/src/mail node yarn
 TSCLIENT_YARN       = $(COMPOSE_RUN) -w /app/src/tsclient node yarn
 
@@ -155,12 +156,12 @@ lint: \
 
 lint-ruff-format: ## format back-end python sources with ruff
 	@echo 'lint:ruff-format started…'
-	@$(COMPOSE_RUN_APP) ruff format .
+	@$(COMPOSE_RUN_APP_UV) ruff format .
 .PHONY: lint-ruff-format
 
 lint-ruff-check: ## lint back-end python sources with ruff
 	@echo 'lint:ruff-check started…'
-	@$(COMPOSE_RUN_APP) ruff check . --fix
+	@$(COMPOSE_RUN_APP_UV) ruff check . --fix
 .PHONY: lint-ruff-check
 
 lint-pylint: ## lint back-end python sources with pylint only on changed files from main

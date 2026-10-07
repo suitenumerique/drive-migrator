@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.10.7,<0.13.0"]
+build-backend = "uv_build"
 
 [project]
 name = "migrator"
@@ -18,7 +18,7 @@ classifiers = [
 ]
 description = "An application to print markdown to pdf from a set of managed templates."
 keywords = ["Django", "Contacts", "Templates", "RBAC"]
-license = { file = "LICENSE" }
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -87,12 +87,16 @@ dev = [
     "types-requests==2.31.0.10",
 ]
 
-[tool.setuptools]
-packages = { find = { where = ["."], exclude = ["tests"] } }
-zip-safe = true
+[tool.uv]
+package = false
 
-[tool.distutils.bdist_wheel]
-universal = true
+[tool.uv.build-backend]
+module-root = ""
+source-exclude = [
+    "**/tests/**",
+    "**/test_*.py",
+    "**/tests.py",
+]
 
 [tool.ruff]
 exclude = [
