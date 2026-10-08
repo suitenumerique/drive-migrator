@@ -23,7 +23,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "Brotli==1.2.0",
-    "PyJWT==2.13.0",
+    "PyJWT==2.15.0",
     "WeasyPrint>=60.2",
     "boto3==1.35.64",
     "celery[redis]==5.3.6",
