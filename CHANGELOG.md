@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+#### Dependencies
+
+- Upgrade `Django` to `5.2.17`
+- Upgrade `PyJWT` to `2.15.1`
+
 ## [v0.8.10] - 2026-10-07
 
 ### Added

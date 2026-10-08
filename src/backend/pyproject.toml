@@ -23,7 +23,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "Brotli==1.2.0",
-    "PyJWT==2.13.0",
+    "pyjwt==2.15.1",
     "WeasyPrint>=60.2",
     "boto3==1.35.64",
     "celery[redis]==5.3.6",
@@ -38,7 +38,7 @@ dependencies = [
     "django-redis==5.4.0",
     "django-storages[s3]==1.14.2",
     "django-timezone-field>=5.1",
-    "django==5.2.16",
+    "django==5.2.17",
     "djangorestframework==3.17.2",
     "dockerflow==2022.8.0",
     "drf_spectacular==0.26.5",
