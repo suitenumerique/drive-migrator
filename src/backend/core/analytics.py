@@ -1,7 +1,11 @@
 """PostHog utilities."""
 
+import os
+from collections import Counter
+
 from django.conf import settings
 
+import magic
 import posthog
 
 from core.models import Workspace
@@ -14,6 +18,35 @@ def workspaces_counts(user) -> dict:
         "workspaces_not_migrated": user.workspaces.filter(
             status=Workspace.Status.NONE
         ).count(),
+    }
+
+
+def local_files_stats(path) -> dict:
+    """Return the size and file types of a local workspace folder."""
+    if not os.path.isdir(path):
+        return {}
+    counts = Counter()
+    sizes = Counter()
+    for root, _, filenames in os.walk(path):
+        for filename in filenames:
+            file_path = os.path.join(root, filename)
+            file_type = (
+                os.path.splitext(filename)[1].lower(),
+                magic.from_file(file_path, mime=True),
+            )
+            counts[file_type] += 1
+            sizes[file_type] += os.path.getsize(file_path)
+    return {
+        "workspace_size_bytes": sum(sizes.values()),
+        "file_types": [
+            {
+                "extension": extension,
+                "mime_type": mime_type,
+                "count": counts[extension, mime_type],
+                "size_bytes": sizes[extension, mime_type],
+            }
+            for extension, mime_type in sorted(counts)
+        ],
     }
 
 

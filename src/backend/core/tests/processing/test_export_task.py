@@ -705,6 +705,10 @@ def test_task_handlers_capture_migration_finished(handler, status):
         patch("core.processing.tasks.cleanup_workspace_dir"),
         patch("core.processing.tasks.MailsManager"),
         patch("core.processing.tasks.workspaces_counts", return_value={"c": 1}),
+        patch(
+            "core.processing.tasks.local_files_stats",
+            return_value={"workspace_size_bytes": 3},
+        ),
         patch("core.processing.tasks.posthog_capture") as capture,
     ):
         mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
@@ -727,6 +731,7 @@ def test_task_handlers_capture_migration_finished(handler, status):
     assert properties["analysis_unfinished_count"] == 2
     assert 42 <= properties["duration_seconds"] < 60
     assert properties["$set"] == {"c": 1}
+    assert properties["workspace_size_bytes"] == 3
 
 
 def test_migration_finished_file_counts_are_none_without_integrity_report():

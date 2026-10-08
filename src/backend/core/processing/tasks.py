@@ -8,7 +8,7 @@ from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
 
-from core.analytics import posthog_capture, workspaces_counts
+from core.analytics import local_files_stats, posthog_capture, workspaces_counts
 from core.backends.destination import DestinationRegistry
 from core.backends.source import SourceFolder, SourceManager, truncate_folder_files
 from core.mails_manager import MailsManager
@@ -97,6 +97,8 @@ def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
                 timezone.now() - extra_task.task_result.date_created
             ).total_seconds(),
             "$set": workspaces_counts(extra_task.user),
+            # Called before cleanup_workspace_dir, the local folder still exists.
+            **local_files_stats(FolderCreator().get_workspace_path(workspace)),
         },
         workspace=workspace,
     )

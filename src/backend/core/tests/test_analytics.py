@@ -7,7 +7,7 @@ from django.test import override_settings
 import pytest
 
 from core import factories
-from core.analytics import posthog_capture, workspaces_counts
+from core.analytics import local_files_stats, posthog_capture, workspaces_counts
 from core.models import Workspace
 
 pytestmark = pytest.mark.django_db
@@ -37,6 +37,36 @@ def test_posthog_capture_with_workspace(capture):
             "destinations": ["drive"],
         },
     )
+
+
+def test_local_files_stats(tmp_path):
+    (tmp_path / "report.PDF").write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "notes.txt").write_text("hello")
+    (tmp_path / "sub" / "README").write_text("hi")
+    (tmp_path / "sub" / "other.txt").write_text("world!")
+    assert local_files_stats(str(tmp_path)) == {
+        "workspace_size_bytes": 22,
+        "file_types": [
+            {"extension": "", "mime_type": "text/plain", "count": 1, "size_bytes": 2},
+            {
+                "extension": ".pdf",
+                "mime_type": "application/pdf",
+                "count": 1,
+                "size_bytes": 9,
+            },
+            {
+                "extension": ".txt",
+                "mime_type": "text/plain",
+                "count": 2,
+                "size_bytes": 11,
+            },
+        ],
+    }
+
+
+def test_local_files_stats_without_folder(tmp_path):
+    assert not local_files_stats(str(tmp_path / "missing"))
 
 
 def test_workspaces_counts():
