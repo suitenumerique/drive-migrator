@@ -59,8 +59,12 @@ function _dc_run() {
     if [ -z $USER_ID ]; then
         user_args=""
     fi
+    no_deps_opt="--no-deps"
+    if [ -z "${NO_DEPS}" ] || [ "${NO_DEPS}" -eq 0 ]; then
+        no_deps_opt=""
+    fi
 
-    _docker_compose run --rm $user_args "$@"
+    _docker_compose run --rm ${user_args} ${no_deps_opt} "$@"
 }
 
 # _dc_exec: wrap docker compose exec command
