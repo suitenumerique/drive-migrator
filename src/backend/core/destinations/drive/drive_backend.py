@@ -384,7 +384,7 @@ class DriveBackend:
     def find_user_by_email(self, email: str) -> dict | None:
         """Resolve an email to a Drive user dict. Returns None if not found."""
         response = requests.get(
-            f"{self._base_url()}/api/v1.0/users/",
+            f"{self._base_url()}{self._api_prefix()}/users/",
             params={"q": email},
             headers=self._headers(),
             timeout=30,
@@ -469,7 +469,7 @@ class DriveUserTokenBackend(DriveBackend):
         self._token_expires_at = user.oidc_token_expires_at
 
     def _api_prefix(self) -> str:
-        return "/api/v1.0"
+        return "/external_api/v1.0"
 
     @_retry_on_transient_error
     def _refresh(self):

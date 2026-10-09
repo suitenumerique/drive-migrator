@@ -128,5 +128,5 @@ def test_user_token_list_children_uses_api_v1(settings):
         DriveUserTokenBackend(user).list_children("folder-uuid")
 
     assert mock_requests.get.call_args.args == (
-        "https://drive.example.com/api/v1.0/items/folder-uuid/children/",
+        "https://drive.example.com/external_api/v1.0/items/folder-uuid/children/",
     )

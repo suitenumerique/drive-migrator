@@ -36,7 +36,7 @@ def test_service_account_find_user_by_email_paginated(settings):
         result = backend.find_user_by_email("alice@example.com")
 
     mock_requests.get.assert_called_once_with(
-        "https://drive.example.com/api/v1.0/users/",
+        "https://drive.example.com/external_api/v1.0/users/",
         params={"q": "alice@example.com"},
         headers={"Authorization": "Bearer tok"},
         timeout=30,
