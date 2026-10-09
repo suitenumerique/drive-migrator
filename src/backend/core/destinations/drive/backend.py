@@ -10,17 +10,19 @@ from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 
 from celery.utils.log import get_task_logger
-from requests.exceptions import HTTPError
+from requests.exceptions import HTTPError, RequestException
 
 from core.backends.destination import (
     MEMBERS_CSV_FILENAME,
     AbstractDestinationBackend,
 )
 from core.destinations.drive.drive_backend import (
+    WAF_BLOCKED,
     DriveBackend,
     DriveServiceAccountBackend,
     DriveUserTokenBackend,
     get_file_rejection_code,
+    is_waf_block,
 )
 from core.mails_manager import MailsManager
 from core.models import Workspace
@@ -186,6 +188,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                 size = entry.stat().st_size
                 # On a failure, the last of these Sentry breadcrumbs names the file.
                 logger.info("Uploading file %s (%s bytes)", item_id, size)
+                item = None
                 try:
                     item = backend.create_file_item(
                         entry.name,
@@ -201,6 +204,9 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                     # Only a refusal of this file is skipped: any other error
                     # would hit every file.
                     code = get_file_rejection_code(error)
+                    # Only the creation carries the file name the WAF may block.
+                    if code is None and item is None:
+                        code = self._get_waf_block_code(backend, error, drive_parent_id)
                     if code is None:
                         raise
                     self._upload_log.rejected.append(
@@ -210,6 +216,19 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                             "error": code,
                         }
                     )
+
+    @staticmethod
+    def _get_waf_block_code(backend, error, drive_parent_id: str) -> str | None:
+        """Return WAF_BLOCKED if the WAF blocked this file, None otherwise. The WAF
+        answers a block of every request (rate limit, IP reputation...) the same
+        way: a payload-less request to the same folder tells them apart."""
+        if not is_waf_block(error):
+            return None
+        try:
+            backend.get_item(drive_parent_id)
+        except RequestException:
+            return None
+        return WAF_BLOCKED
 
     def check_integrity(
         self, workspace, local_folder_path: str, wait_for_analysis: bool
