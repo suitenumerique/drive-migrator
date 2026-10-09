@@ -91,7 +91,12 @@ def sanitize_path_component(name):
     Replace path separators in a single path segment (folder or file name)
     so a source name containing "/" can't be split into unintended sub-paths.
     """
-    return name.replace("/", "-").replace(os.sep, "-")
+    name = name.replace("/", "-").replace(os.sep, "-")
+    # "." and ".." would designate the current or parent folder, writing out
+    # of the workspace folder.
+    if name in (os.curdir, os.pardir):
+        return "-" * len(name)
+    return name
 
 
 def truncate_path_parts(path, max_folder_length=200, max_files_length=190):

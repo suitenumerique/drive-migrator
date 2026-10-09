@@ -248,6 +248,73 @@ def test_create_folder_sanitizes_slash_in_file_name(tmp_path, settings):
     assert called_dest == str(tmp_path / "workspace_ws13" / "sub" / "report-final.pdf")
 
 
+def _downloaded_paths(backend):
+    return [call.args[1] for call in backend.download_file.call_args_list]
+
+
+def _is_inside(path, directory):
+    return os.path.commonpath([os.path.realpath(path), str(directory)]) == str(
+        directory
+    )
+
+
+def test_create_folder_keeps_a_dot_dot_folder_inside_the_workspace(tmp_path, settings):
+    """A source folder named ".." must not write its files above the workspace."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws30")
+    file = SourceFile(id="f1", name="x", extension=".txt", download_url="x")
+    folder = SourceFolder(name="root", children=[SourceFolder(name="..", files=[file])])
+    backend = _make_backend()
+
+    FolderCreator().create_folder(workspace, folder, backend)
+
+    workspace_dir = (tmp_path / "workspace_ws30").resolve()
+    [destination] = _downloaded_paths(backend)
+    assert _is_inside(destination, workspace_dir)
+    assert not (tmp_path / "x.txt").exists()
+
+
+def test_create_folder_keeps_nested_dot_dot_folders_inside_the_workspace(
+    tmp_path, settings
+):
+    """Chained ".." folders can't climb out of the workspace either."""
+    settings.APP_WORK_DIR = str(tmp_path / "work")
+    workspace = _make_workspace("ws31")
+    file = SourceFile(id="f1", name="x", extension=".txt", download_url="x")
+    folder = SourceFolder(
+        name="root",
+        children=[
+            SourceFolder(name="..", children=[SourceFolder(name="..", files=[file])])
+        ],
+    )
+    backend = _make_backend()
+
+    FolderCreator().create_folder(workspace, folder, backend)
+
+    workspace_dir = (tmp_path / "work" / "workspace_ws31").resolve()
+    [destination] = _downloaded_paths(backend)
+    assert _is_inside(destination, workspace_dir)
+    assert not (tmp_path / "x.txt").exists()
+
+
+def test_create_folder_keeps_a_dot_dot_file_inside_its_folder(tmp_path, settings):
+    """A source file named ".." is written as a file of its folder."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws32")
+    file = SourceFile(id="f1", name="..", extension="", download_url="x")
+    folder = SourceFolder(
+        name="root", children=[SourceFolder(name="sub", files=[file])]
+    )
+    backend = _make_backend()
+
+    FolderCreator().create_folder(workspace, folder, backend)
+
+    [destination] = _downloaded_paths(backend)
+    assert os.path.dirname(os.path.normpath(destination)) == str(
+        tmp_path / "workspace_ws32" / "sub"
+    )
+
+
 def test_create_folder_logs_truncated_filename(tmp_path, settings):
     """When a filename is truncated, create_folder() uses the truncated path."""
     settings.APP_WORK_DIR = str(tmp_path)
