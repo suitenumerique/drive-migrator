@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- sanitize "." and ".." source names when building the local folder
+
 ## [v0.8.10] - 2026-10-07
 
 ### Added
