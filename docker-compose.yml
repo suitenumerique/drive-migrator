@@ -76,6 +76,8 @@ services:
     image: osmose-migration:backend-development
     command:
       [
+        "uv",
+        "run",
         "celery",
         "-A",
         "main.celery_app",
