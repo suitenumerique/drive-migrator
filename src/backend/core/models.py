@@ -30,6 +30,7 @@ DRIVE_REJECTION_REASONS = {
     "file_type_not_allowed": "Type de fichier non autorisé",
     "file_size_exceeded": "Fichier trop volumineux",
     "file_size_mismatch": "Fichier corrompu pendant le transfert",
+    "blocked_upstream": "Fichier bloqué en amont de Drive (ex. pare-feu)",
 }
 
 
@@ -133,7 +134,8 @@ class Workspace(BaseModel):
 
     # Files Drive refused during the last Drive export, which skipped them.
     # Each entry: {"path": str, "item_id": str, "error": str}, where "path" is
-    # relative to the workspace root and "error" is the Drive error code.
+    # relative to the workspace root and "error" is a FileRejection value (see
+    # core.destinations.drive.drive_backend).
     upload_errors = models.JSONField(default=list, blank=True)
 
     def get_destination_status(self, destination_name: str) -> str:

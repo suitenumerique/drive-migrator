@@ -3,7 +3,8 @@
 import csv
 import io
 
-from core.models import Workspace
+from core.destinations.drive.drive_backend import FileRejection
+from core.models import DRIVE_REJECTION_REASONS, Workspace
 
 
 def _rows(content: str) -> list[list[str]]:
@@ -88,6 +89,7 @@ def test_get_failed_files_csv_labels_every_drive_rejection_code():
         "file_type_not_allowed": "Type de fichier non autorisé",
         "file_size_exceeded": "Fichier trop volumineux",
         "file_size_mismatch": "Fichier corrompu pendant le transfert",
+        "blocked_upstream": "Fichier bloqué en amont de Drive (ex. pare-feu)",
     }
     workspace = Workspace(
         download_errors=[],
@@ -99,6 +101,11 @@ def test_get_failed_files_csv_labels_every_drive_rejection_code():
     rows = _rows(workspace.get_failed_files_csv("Osmose"))
 
     assert {row[4]: row[3] for row in rows[1:]} == codes
+
+
+def test_every_file_rejection_has_a_reason():
+    """A new FileRejection can't reach the CSV without its readable reason."""
+    assert set(DRIVE_REJECTION_REASONS) == set(FileRejection)
 
 
 def test_get_failed_files_csv_keeps_unknown_drive_code():

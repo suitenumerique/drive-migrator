@@ -10,7 +10,7 @@ from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 
 from celery.utils.log import get_task_logger
-from requests.exceptions import HTTPError
+from requests.exceptions import HTTPError, RequestException
 
 from core.backends.destination import (
     MEMBERS_CSV_FILENAME,
@@ -20,7 +20,8 @@ from core.destinations.drive.drive_backend import (
     DriveBackend,
     DriveServiceAccountBackend,
     DriveUserTokenBackend,
-    get_file_rejection_code,
+    FileRejection,
+    get_file_rejection,
 )
 from core.mails_manager import MailsManager
 from core.models import Workspace
@@ -44,7 +45,7 @@ class _UploadLog:
     root_id: str | None = None
     # Local path relative to the workspace root -> Drive item id.
     items: dict[str, str] = field(default_factory=dict)
-    # Files Drive refused, in the Workspace.upload_errors format.
+    # Files refused on upload, in the Workspace.upload_errors format.
     rejected: list[dict] = field(default_factory=list)
 
 
@@ -94,7 +95,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             # One event per run, without paths: file names may be personal data.
             if self._upload_log.rejected:
                 logger.error(
-                    "%s file(s) rejected by Drive: %s",
+                    "%s file(s) rejected on upload: %s",
                     len(self._upload_log.rejected),
                     [
                         (rejected["item_id"], rejected["error"])
@@ -106,7 +107,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         rejected_paths = {rejected["path"] for rejected in self._upload_log.rejected}
         if source_paths and source_paths <= rejected_paths:
             raise RuntimeError(
-                f"All {len(source_paths)} file(s) were rejected by Drive for "
+                f"All {len(source_paths)} file(s) were rejected on upload for "
                 f"workspace {workspace.id}"
             )
 
@@ -186,6 +187,8 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                 size = entry.stat().st_size
                 # On a failure, the last of these Sentry breadcrumbs names the file.
                 logger.info("Uploading file %s (%s bytes)", item_id, size)
+                # Only a refusal of this file is skipped: any other error
+                # would hit every file.
                 try:
                     item = backend.create_file_item(
                         entry.name,
@@ -193,23 +196,45 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                         size=size,
                         item_id=item_id,
                     )
-                    # Drive may have replaced a recovered pending item with a new id.
-                    self._upload_log.items[relative_path] = item["id"]
+                except HTTPError as error:
+                    rejection = get_file_rejection(error, at_creation=True)
+                    if rejection is None or (
+                        rejection is FileRejection.BLOCKED_UPSTREAM
+                        and not self._is_drive_reachable(backend, drive_parent_id)
+                    ):
+                        raise
+                    self._reject(relative_path, rejection)
+                    continue
+                # Drive may have replaced a recovered pending item with a new id.
+                self._upload_log.items[relative_path] = item["id"]
+                try:
                     backend.upload_to_s3(item["policy"], entry.path)
                     backend.notify_upload_ended(item["id"])
                 except HTTPError as error:
-                    # Only a refusal of this file is skipped: any other error
-                    # would hit every file.
-                    code = get_file_rejection_code(error)
-                    if code is None:
+                    rejection = get_file_rejection(error)
+                    if rejection is None:
                         raise
-                    self._upload_log.rejected.append(
-                        {
-                            "path": relative_path,
-                            "item_id": self._upload_log.items[relative_path],
-                            "error": code,
-                        }
-                    )
+                    self._reject(relative_path, rejection)
+
+    def _reject(self, relative_path: str, rejection: FileRejection) -> None:
+        """Record a file skipped because it was refused."""
+        self._upload_log.rejected.append(
+            {
+                "path": relative_path,
+                "item_id": self._upload_log.items[relative_path],
+                "error": rejection.value,
+            }
+        )
+
+    @staticmethod
+    def _is_drive_reachable(backend, folder_id: str) -> bool:
+        """Probe the folder with a payload-less request: False if it is blocked
+        too, so the block is not the file's."""
+        try:
+            backend.get_item(folder_id)
+        except RequestException:
+            return False
+        return True
 
     def check_integrity(
         self, workspace, local_folder_path: str, wait_for_analysis: bool

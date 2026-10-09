@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Skip files blocked in front of Drive instead of failing the run
+
 ## [v0.9.0] - 2026-10-14
 
 ### Added
