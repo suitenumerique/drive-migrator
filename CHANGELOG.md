@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Skip files the WAF in front of Drive blocks instead of failing the run
+
 ### Changed
 
 #### Dependencies

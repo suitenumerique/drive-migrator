@@ -34,6 +34,9 @@ _FILE_REJECTION_CODES = (
     "file_size_exceeded",
     "file_size_mismatch",
 )
+# The Incapsula WAF in front of Drive blocks some file names (e.g.
+# "index.php.jpg") with a 403 HTML page: such a file is skipped with this code.
+WAF_BLOCKED = "waf_blocked"
 # Drive caps page_size with its MAX_PAGE_SIZE setting (200 by default).
 _LIST_PAGE_SIZE = 200
 
@@ -93,6 +96,16 @@ def _is_upload_already_processed(error: HTTPError) -> bool:
     """A retried ReadTimeout can hit this 400 if the original call actually
     already succeeded."""
     return _has_error_code(error, 400, _UPLOAD_STATE_NOT_PENDING)
+
+
+def is_waf_block(error: HTTPError) -> bool:
+    """Check whether error is the Incapsula WAF's 403 block page."""
+    response = error.response
+    return (
+        response is not None
+        and response.status_code == 403
+        and "Incapsula" in response.text
+    )
 
 
 def get_file_rejection_code(error: HTTPError) -> str | None:

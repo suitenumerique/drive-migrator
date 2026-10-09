@@ -587,6 +587,15 @@ def _drive_refusal(code):
     return HTTPError("400 Client Error", response=response)
 
 
+def _waf_block():
+    """Build the HTTPError the Incapsula WAF in front of Drive raises."""
+    response = MagicMock(
+        status_code=403, text="Request unsuccessful. Incapsula incident ID: 42"
+    )
+    response.json.side_effect = ValueError
+    return HTTPError("403 Client Error", response=response)
+
+
 def _mock_two_file_upload(mock_cls, tmp_path):
     """Two local files, each getting a Drive item named after it."""
     mock_backend = mock_cls.return_value
@@ -647,6 +656,63 @@ def test_file_refused_at_creation_is_skipped(mock_cls, tmp_path, settings):
     mock_backend.upload_to_s3.assert_called_once_with(
         "https://s3.example.com/b.txt", str(tmp_path / "b.txt")
     )
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_file_blocked_by_waf_at_creation_is_skipped(mock_cls, tmp_path, settings):
+    """A file whose creation the WAF blocks is skipped once a payload-less request
+    to its folder shows the WAF does not block every request."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
+    create = mock_backend.create_file_item.side_effect
+    mock_backend.create_file_item.side_effect = [
+        _waf_block(),
+        create("b.txt", parent_id="root-uuid", size=1, item_id=None),
+    ]
+    workspace = _make_workspace()
+
+    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    mock_backend.get_item.assert_called_once_with("root-uuid")
+    sent_id = mock_backend.create_file_item.call_args_list[0].kwargs["item_id"]
+    assert workspace.upload_errors == [
+        {"path": "a.txt", "item_id": sent_id, "error": "waf_blocked"}
+    ]
+    mock_backend.upload_to_s3.assert_called_once_with(
+        "https://s3.example.com/b.txt", str(tmp_path / "b.txt")
+    )
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_waf_blocking_every_request_stops_the_upload(mock_cls, tmp_path, settings):
+    """A WAF block the payload-less probe also gets (rate limit, IP reputation...)
+    is not the file's: the migration stops instead of skipping every file."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
+    mock_backend.create_file_item.side_effect = _waf_block()
+    mock_backend.get_item.side_effect = _waf_block()
+    workspace = _make_workspace()
+
+    with pytest.raises(HTTPError):
+        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    assert mock_backend.create_file_item.call_count == 1
+    assert not workspace.upload_errors
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_waf_block_at_upload_ended_stops_the_upload(mock_cls, tmp_path, settings):
+    """upload-ended carries no file name: a WAF block there is not the file's."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
+    mock_backend.notify_upload_ended.side_effect = _waf_block()
+    workspace = _make_workspace()
+
+    with pytest.raises(HTTPError):
+        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    mock_backend.get_item.assert_not_called()
+    assert not workspace.upload_errors
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
