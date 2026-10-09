@@ -4,6 +4,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from core.backends.source import (
     AbstractSourceBackend,
@@ -99,6 +100,7 @@ def _patch_get_workspaces_clients(
     mock_members_client.return_value.get_workspaces.return_value = (
         portal_workspaces or []
     )
+    mock_members_client.return_value.get_locked_workspaces.return_value = []
 
 
 def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
@@ -421,6 +423,211 @@ def test_get_workspaces_excludes_workspace_absent_from_lister_mes_espaces(settin
                 result = ResanaSourceBackend().get_workspaces(user)
 
     assert not result
+
+
+# ---------------------------------------------------------------------------
+# get_workspaces() — locked workspaces
+# ---------------------------------------------------------------------------
+
+_LOCKED_RAW_WORKSPACES = [
+    {"uuid": "ws-locked", "name": "TEST - espace PLU", "isPersonalWorkspace": False},
+]
+_LOCKED_WORKSPACES = [
+    {"slug": "2137438", "name": "TEST - espace PLU", "uuid": "ws-locked"},
+]
+
+
+def _get_workspaces_with_locked_role(settings, role_label=None, role_error=None):
+    """Run get_workspaces() on one locked workspace whose role badge is mocked."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client,
+                    mock_members,
+                    raw_workspaces=_LOCKED_RAW_WORKSPACES,
+                )
+                mock_members.return_value.get_locked_workspaces.return_value = (
+                    _LOCKED_WORKSPACES
+                )
+                get_role = mock_members.return_value.get_own_role_label
+                get_role.return_value = role_label
+                get_role.side_effect = role_error
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    get_role.assert_called_once_with("2137438")
+    return result
+
+
+def test_get_workspaces_includes_locked_workspace_when_user_is_animateur(settings):
+    """A locked workspace, missing from listerMesEspacesV2, is listed for its Animateur."""
+    result = _get_workspaces_with_locked_role(settings, role_label="Animateur")
+
+    assert [ws.id for ws in result] == ["ws-locked"]
+
+
+@pytest.mark.parametrize("role_label", ["Contributeur", "Lecteur"])
+def test_get_workspaces_excludes_locked_workspace_when_user_is_not_animateur(
+    settings, role_label
+):
+    """A locked workspace is not listed for a Contributeur or Lecteur."""
+    result = _get_workspaces_with_locked_role(settings, role_label=role_label)
+
+    assert not result
+
+
+def test_get_workspaces_logs_unexpected_role_label(settings):
+    """An unexpected role label excludes the workspace and is logged."""
+    with patch("core.sources.resana.backend.logger") as mock_logger:
+        result = _get_workspaces_with_locked_role(settings, role_label="Animatrice")
+
+    assert not result
+    mock_logger.warning.assert_called_once()
+    assert "Animatrice" in mock_logger.warning.call_args.args
+
+
+def test_get_workspaces_excludes_locked_workspace_when_role_is_unknown(settings):
+    """A locked workspace without a readable role badge is excluded (fail closed)."""
+    result = _get_workspaces_with_locked_role(settings, role_label=None)
+
+    assert not result
+
+
+def test_get_workspaces_excludes_locked_workspace_when_role_lookup_fails(settings):
+    """An HTTP error while reading the role excludes the locked workspace only."""
+    result = _get_workspaces_with_locked_role(
+        settings, role_error=requests.HTTPError("500")
+    )
+
+    assert not result
+
+
+def _run_get_workspaces(settings, *, raw_workspaces, locked_workspaces, **clients):
+    """Run get_workspaces() and return (result, mocked ResanaMembersClient instance)."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    settings.RESANA_MIGRATE_PERSONAL_WORKSPACES = True
+    user = MagicMock()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.InterstisClient") as mock_client:
+            with patch(
+                "core.sources.resana.backend.ResanaMembersClient"
+            ) as mock_members:
+                _patch_get_workspaces_clients(
+                    mock_client, mock_members, raw_workspaces=raw_workspaces, **clients
+                )
+                members = mock_members.return_value
+                if isinstance(locked_workspaces, Exception):
+                    members.get_locked_workspaces.side_effect = locked_workspaces
+                else:
+                    members.get_locked_workspaces.return_value = locked_workspaces
+                members.get_own_role_label.return_value = "Animateur"
+                result = ResanaSourceBackend().get_workspaces(user)
+
+    return result, members
+
+
+def test_get_workspaces_lists_unlocked_and_locked_managed_workspaces(settings):
+    """Unlocked GESTIONNAIRE and locked Animateur workspaces are listed together."""
+    result, _ = _run_get_workspaces(
+        settings,
+        raw_workspaces=[
+            {"uuid": "ws-1", "name": "Ouvert", "isPersonalWorkspace": False},
+            *_LOCKED_RAW_WORKSPACES,
+        ],
+        locked_workspaces=_LOCKED_WORKSPACES,
+        workspaces_with_role=[
+            {"slug": "slug-1", "name": "Ouvert", "role_code": "GESTIONNAIRE"}
+        ],
+        portal_workspaces=[{"slug": "slug-1", "name": "Ouvert", "uuid": "ws-1"}],
+    )
+
+    assert [ws.id for ws in result] == ["ws-1", "ws-locked"]
+
+
+def test_get_workspaces_skips_role_lookup_for_locked_personal_workspace(settings):
+    """The role page isn't fetched for a locked personal workspace."""
+    result, members = _run_get_workspaces(
+        settings,
+        raw_workspaces=[
+            {"uuid": "ws-locked", "name": "Perso", "isPersonalWorkspace": True}
+        ],
+        locked_workspaces=_LOCKED_WORKSPACES,
+    )
+
+    members.get_own_role_label.assert_not_called()
+    assert [ws.id for ws in result] == ["ws-locked"]
+
+
+def test_get_workspaces_skips_role_lookup_for_locked_workspace_absent_from_ged(
+    settings,
+):
+    """The role page isn't fetched for a locked workspace the GED API doesn't list."""
+    _, members = _run_get_workspaces(
+        settings,
+        raw_workspaces=[
+            {"uuid": "ws-other", "name": "Autre", "isPersonalWorkspace": False}
+        ],
+        locked_workspaces=_LOCKED_WORKSPACES,
+    )
+
+    members.get_own_role_label.assert_not_called()
+
+
+def test_get_workspaces_skips_locked_listing_when_all_workspaces_are_known(settings):
+    """listerMesEspaces isn't called when no GED workspace is left to resolve."""
+    _, members = _run_get_workspaces(
+        settings,
+        raw_workspaces=[
+            {"uuid": "ws-1", "name": "Ouvert", "isPersonalWorkspace": False}
+        ],
+        locked_workspaces=_LOCKED_WORKSPACES,
+        workspaces_with_role=[
+            {"slug": "slug-1", "name": "Ouvert", "role_code": "GESTIONNAIRE"}
+        ],
+        portal_workspaces=[{"slug": "slug-1", "name": "Ouvert", "uuid": "ws-1"}],
+    )
+
+    members.get_locked_workspaces.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.ConnectionError("down"),
+        ValueError("not json"),
+        AttributeError("'list' object has no attribute 'get'"),
+        KeyError("id"),
+        TypeError("bad payload"),
+    ],
+)
+def test_get_workspaces_keeps_unlocked_workspaces_when_locked_listing_fails(
+    settings, error
+):
+    """A failing locked-workspace listing doesn't break the whole listing."""
+    result, _ = _run_get_workspaces(
+        settings,
+        raw_workspaces=[
+            {"uuid": "ws-1", "name": "Ouvert", "isPersonalWorkspace": False},
+            *_LOCKED_RAW_WORKSPACES,
+        ],
+        locked_workspaces=error,
+        workspaces_with_role=[
+            {"slug": "slug-1", "name": "Ouvert", "role_code": "GESTIONNAIRE"}
+        ],
+        portal_workspaces=[{"slug": "slug-1", "name": "Ouvert", "uuid": "ws-1"}],
+    )
+
+    assert [ws.id for ws in result] == ["ws-1"]
 
 
 # ---------------------------------------------------------------------------

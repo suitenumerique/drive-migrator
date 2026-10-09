@@ -3,15 +3,23 @@
 Uses the same interstis_access token as the documented GED API, but talks to the
 undocumented internal PHP endpoints (reverse-engineered from the portal's XHR calls).
 Limited to what's needed to populate Workspace.members; does not read per-file permissions.
+The user's role on a locked workspace is the one exception scraped from an HTML page.
 
 The PHPSESSID and CSRF token both come from the resana-migrator bridge response
 (see ResanaTokenManager), not from decoding the access token or scraping HTML.
 """
 
+import html
+import re
+
 import requests
 
 _REQUEST_TIMEOUT = 30
 GESTIONNAIRE_CODE = "GESTIONNAIRE"
+# Role badge labels, as shown in the workspace page header.
+ANIMATEUR_LABEL = "Animateur"
+ROLE_LABELS = {ANIMATEUR_LABEL, "Contributeur", "Lecteur"}
+_ROLE_BADGE_RE = re.compile(r"ic-layout-header__user-status[^>]*>\s*([^<]*?)\s*<")
 
 
 class ResanaMembersClient:
@@ -85,6 +93,28 @@ class ResanaMembersClient:
             if workspace["uuid"] == uuid:
                 return workspace["slug"]
         return None
+
+    def get_own_role_label(self, slug: str) -> str | None:
+        """Return the current user's role label in `slug` ("Animateur", ...), or None.
+
+        Locked workspaces are missing from listerMesEspacesV2, so their role is read
+        from the badge in the consulter page header. None means no badge was found,
+        e.g. the portal redirected or served its login page (expired PHP session).
+        """
+        # A redirect may land on another page whose badge shows the role in the
+        # session's current workspace, not in `slug`.
+        resp = self.session.get(
+            f"{self.base_url}/public/perimetre/consulter/{slug}",
+            timeout=_REQUEST_TIMEOUT,
+            allow_redirects=False,
+        )
+        resp.raise_for_status()
+        if resp.status_code != 200:
+            return None
+        match = _ROLE_BADGE_RE.search(resp.text)
+        if match is None:
+            return None
+        return html.unescape(match.group(1)) or None
 
     def _fetch_raw_members(self, slug: str) -> list[dict]:
         """Return the raw listerUtilisateurByPerimetreAndGroupe payload.

@@ -7,6 +7,7 @@ bridge response (see ResanaTokenManager), not scraped from JWT claims or HTML pa
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from core.sources.resana.resana_members_client import ResanaMembersClient
 
@@ -59,6 +60,7 @@ def _make_client():
             base_url=BASE_URL,
         )
     client.session = MagicMock()
+    client.session.get.return_value.status_code = 200
     return client
 
 
@@ -498,3 +500,91 @@ def test_get_workspaces_with_role_empty_when_no_tabs():
     result = client.get_workspaces_with_role()
 
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# get_own_role_label() — role badge in the consulter page header
+# ---------------------------------------------------------------------------
+
+_CONSULTER_PAGE_TEMPLATE = """
+<div class="ic-layout-header__user">
+    <p class="ic-layout-header__user-name">POC DINUM</p>
+    <p class="ic-layout-header__user-status ifs-13 iitalic">{label}</p>
+</div>
+"""
+
+_LOGIN_PAGE = "<html><head><title>Connexion</title></head><body></body></html>"
+
+
+def test_get_own_role_label_gets_consulter_page():
+    """get_own_role_label() GETs the workspace's consulter page."""
+    client = _make_client()
+    client.session.get.return_value.text = _CONSULTER_PAGE_TEMPLATE.format(
+        label="Animateur"
+    )
+
+    client.get_own_role_label(SLUG)
+
+    client.session.get.assert_called_once_with(
+        f"{BASE_URL}/public/perimetre/consulter/{SLUG}",
+        timeout=30,
+        allow_redirects=False,
+    )
+
+
+@pytest.mark.parametrize("label", ["Animateur", "Contributeur", "Lecteur"])
+def test_get_own_role_label_returns_header_badge(label):
+    """get_own_role_label() returns the role badge shown in the page header."""
+    client = _make_client()
+    client.session.get.return_value.text = _CONSULTER_PAGE_TEMPLATE.format(label=label)
+
+    assert client.get_own_role_label(SLUG) == label
+
+
+def test_get_own_role_label_returns_none_without_badge():
+    """get_own_role_label() returns None when the page has no role badge (login page)."""
+    client = _make_client()
+    client.session.get.return_value.text = _LOGIN_PAGE
+
+    assert client.get_own_role_label(SLUG) is None
+
+
+def test_get_own_role_label_raises_on_http_error():
+    """get_own_role_label() propagates HTTP errors."""
+    client = _make_client()
+    client.session.get.return_value.raise_for_status.side_effect = requests.HTTPError(
+        "500"
+    )
+
+    with pytest.raises(requests.HTTPError):
+        client.get_own_role_label(SLUG)
+
+
+@pytest.mark.parametrize("label", ["", "<span>Animateur</span>"])
+def test_get_own_role_label_returns_none_for_empty_or_nested_badge(label):
+    """get_own_role_label() returns None when the badge has no direct text."""
+    client = _make_client()
+    client.session.get.return_value.text = _CONSULTER_PAGE_TEMPLATE.format(label=label)
+
+    assert client.get_own_role_label(SLUG) is None
+
+
+def test_get_own_role_label_unescapes_html_entities():
+    """get_own_role_label() decodes HTML entities in the badge text."""
+    client = _make_client()
+    client.session.get.return_value.text = _CONSULTER_PAGE_TEMPLATE.format(
+        label="Anim&#97;teur"
+    )
+
+    assert client.get_own_role_label(SLUG) == "Animateur"
+
+
+def test_get_own_role_label_returns_none_on_redirect():
+    """get_own_role_label() ignores a redirect, whose target may show another workspace's badge."""
+    client = _make_client()
+    client.session.get.return_value.status_code = 302
+    client.session.get.return_value.text = _CONSULTER_PAGE_TEMPLATE.format(
+        label="Animateur"
+    )
+
+    assert client.get_own_role_label(SLUG) is None

@@ -18,7 +18,9 @@ from core.backends.source import (
 from core.sources.resana.interstis_client import InterstisClient
 from core.sources.resana.resana_lock_client import ResanaLockClient, ResanaLockError
 from core.sources.resana.resana_members_client import (
+    ANIMATEUR_LABEL,
     GESTIONNAIRE_CODE,
+    ROLE_LABELS,
     ResanaMembersClient,
 )
 from core.sources.resana.token_manager import ResanaTokenExpired, ResanaTokenManager
@@ -100,9 +102,18 @@ class ResanaSourceBackend(AbstractSourceBackend):
             for ws in members_client.get_workspaces()
             if ws["slug"] in manager_slugs
         }
+        raw_workspaces = client.get_workspaces()
+        unresolved_uuids = {
+            ws["uuid"]
+            for ws in raw_workspaces
+            if not ws.get("isPersonalWorkspace") and ws["uuid"] not in manager_uuids
+        }
+        manager_uuids |= self._get_managed_locked_workspace_uuids(
+            members_client, unresolved_uuids
+        )
 
         workspaces = []
-        for ws in client.get_workspaces():
+        for ws in raw_workspaces:
             name = html.unescape(ws["name"])
             if ws.get("isPersonalWorkspace"):
                 if not settings.RESANA_MIGRATE_PERSONAL_WORKSPACES:
@@ -111,6 +122,62 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 continue
             workspaces.append(SourceWorkspace(id=ws["uuid"], title=name, raw_data=ws))
         return workspaces
+
+    @staticmethod
+    def _get_managed_locked_workspace_uuids(
+        members_client, candidate_uuids: set[str]
+    ) -> set[str]:
+        """Return the uuids among `candidate_uuids` of locked workspaces the user
+        is Animateur of.
+
+        Locked workspaces are missing from listerMesEspacesV2, so the role is read
+        from each workspace page instead. Any doubt excludes the workspace.
+        """
+        if not candidate_uuids:
+            return set()
+        try:
+            locked_workspaces = members_client.get_locked_workspaces()
+        # The listing is parsed without validation: an unexpected payload shape
+        # surfaces as KeyError/TypeError/AttributeError, and must not fail the sync.
+        except (
+            requests.RequestException,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ):
+            logger.warning(
+                "Could not list locked Resana workspaces, skipping them",
+                exc_info=True,
+            )
+            return set()
+        uuids = set()
+        for ws in locked_workspaces:
+            if ws["uuid"] not in candidate_uuids:
+                continue
+            try:
+                role_label = members_client.get_own_role_label(ws["slug"])
+            except requests.RequestException:
+                logger.warning(
+                    "Could not read role on locked Resana workspace %s, skipping it",
+                    ws["slug"],
+                    exc_info=True,
+                )
+                continue
+            if role_label is None:
+                logger.warning(
+                    "No role badge on locked Resana workspace %s, skipping it",
+                    ws["slug"],
+                )
+            elif role_label == ANIMATEUR_LABEL:
+                uuids.add(ws["uuid"])
+            elif role_label not in ROLE_LABELS:
+                logger.warning(
+                    "Unexpected role %r on locked Resana workspace %s, skipping it",
+                    role_label,
+                    ws["slug"],
+                )
+        return uuids
 
     def get_workspace_structure(self, workspace) -> SourceFolder:
         self._user = workspace.migration_user
