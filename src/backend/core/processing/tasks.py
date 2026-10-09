@@ -12,6 +12,7 @@ from core.analytics import local_files_stats, posthog_capture, workspaces_counts
 from core.backends.destination import DestinationRegistry
 from core.backends.source import SourceFolder, SourceManager, truncate_folder_files
 from core.mails_manager import MailsManager
+from core.metrics import DOWNLOAD_ERRORS, record_migration_finished
 from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
@@ -168,6 +169,7 @@ def _export_workspace(workspace, user, folder, source_backend, integrity_tracker
     if creator.failed_files:
         workspace.download_errors = creator.failed_files
         workspace.save(update_fields=["download_errors"])
+        DOWNLOAD_ERRORS.inc(len(creator.failed_files))
         logger.warning(
             "%s file(s) failed to download: %s",
             len(creator.failed_files),
@@ -226,6 +228,7 @@ def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
     workspace = extra_task.workspace
     workspace.save()
     capture_migration_finished(extra_task, "success")
+    record_migration_finished(extra_task, "success")
 
     cleanup_workspace_dir(workspace)
 
@@ -245,6 +248,7 @@ def task_failure(sender=None, **kwargs):
             workspace.set_destination_status(dest_name, Workspace.Status.FAILURE)
     workspace.save()
     capture_migration_finished(extra_task, "failure")
+    record_migration_finished(extra_task, "failure")
 
     cleanup_workspace_dir(workspace)
 
