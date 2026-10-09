@@ -159,6 +159,9 @@ COPY docker/files/usr/local/etc/gunicorn/main.py /usr/local/etc/gunicorn/main.py
 ARG DOCKER_USER
 USER ${DOCKER_USER}
 
+# Add dependencies to the PATH
+ENV PATH="/app/.venv/bin:$PATH"
+
 # Copy statics
 COPY --from=link-collector ${MIGRATOR_STATIC_ROOT} ${MIGRATOR_STATIC_ROOT}
 
@@ -166,4 +169,4 @@ COPY --from=link-collector ${MIGRATOR_STATIC_ROOT} ${MIGRATOR_STATIC_ROOT}
 COPY --from=mail-builder /mail/backend/core/templates/mail /app/core/templates/mail
 
 # The default command runs gunicorn WSGI server in impress's main module
-CMD ["uv", "run", "gunicorn", "-c", "/usr/local/etc/gunicorn/main.py", "main.wsgi:application"]
+CMD ["gunicorn", "-c", "/usr/local/etc/gunicorn/main.py", "main.wsgi:application"]
