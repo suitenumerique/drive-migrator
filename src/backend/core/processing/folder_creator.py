@@ -9,6 +9,7 @@ from core.backends.source import AbstractSourceBackend, SourceFile, SourceFolder
 from core.models import Workspace
 from core.utils import (
     ensure_file_uniqueness,
+    ensure_inside_directory,
     get_dir_size,
     sanitize_path_component,
     sizeof_fmt,
@@ -75,6 +76,12 @@ class FolderCreator:
         path = truncate_path_parts(
             os.path.join(current_dir, sanitize_path_component(folder.name))
         )
+        try:
+            ensure_inside_directory(os.path.join(current_dir, folder.name), current_dir)
+        except ValueError as error:
+            logger.error("Refusing folder %s: %s", folder.name, error)
+            self.__refuse_folder_files(folder, path, str(error))
+            return
         if not os.path.exists(path):
             os.mkdir(path)
 
@@ -95,6 +102,21 @@ class FolderCreator:
             destination = os.path.join(
                 path, sanitize_path_component(file.name_with_extension)
             )
+            try:
+                ensure_inside_directory(
+                    os.path.join(path, file.name_with_extension), path
+                )
+            except ValueError as error:
+                logger.error("Refusing file %s: %s", file.name_with_extension, error)
+                self.__add_failed_file(
+                    file,
+                    os.path.relpath(
+                        destination, self.get_workspace_path(self.workspace)
+                    ),
+                    str(error),
+                )
+                continue
+
             destination_truncated = truncate_path_parts(destination)
             if destination != destination_truncated:
                 logger.info(
@@ -145,6 +167,28 @@ class FolderCreator:
             size_formatted = sizeof_fmt(size)
             logger.info("Directory size: %s (%s)", size_formatted, size)
             self.files_success += 1
+
+    def __refuse_folder_files(self, folder: SourceFolder, path: str, error: str):
+        """Report every file of a refused folder, and of its sub-folders, as
+        failed."""
+        for file in folder.files:
+            self.files_current += 1
+            self.__add_failed_file(
+                file,
+                os.path.relpath(
+                    os.path.join(
+                        path, sanitize_path_component(file.name_with_extension)
+                    ),
+                    self.get_workspace_path(self.workspace),
+                ),
+                error,
+            )
+        for child in folder.children:
+            self.__refuse_folder_files(
+                child,
+                os.path.join(path, sanitize_path_component(child.name)),
+                error,
+            )
 
     def __add_failed_file(self, file: SourceFile, relative_path: str, error: str):
         self.failed_files.append(

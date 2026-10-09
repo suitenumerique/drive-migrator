@@ -1,5 +1,6 @@
 import os
 from logging import getLogger
+from pathlib import Path
 
 from core.models import FeatureFlag
 
@@ -92,6 +93,19 @@ def sanitize_path_component(name):
     so a source name containing "/" can't be split into unintended sub-paths.
     """
     return name.replace("/", "-").replace(os.sep, "-")
+
+
+def ensure_inside_directory(path, directory):
+    """
+    Raise ValueError unless path, once resolved, is an entry of directory, so a
+    source name like "." or ".." can't write out of its folder.
+    """
+    resolved_directory = Path(directory).resolve()
+    resolved_path = Path(path).resolve()
+    if resolved_path == resolved_directory or not resolved_path.is_relative_to(
+        resolved_directory
+    ):
+        raise ValueError(f"{path} is not inside {directory}")
 
 
 def truncate_path_parts(path, max_folder_length=200, max_files_length=190):

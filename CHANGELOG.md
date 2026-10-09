@@ -20,6 +20,7 @@ and this project adheres to
 ### Fixed
 
 - list locked Resana workspaces the user is Animateur of
+- Refuse source files resolving out of their folder in the local workspace
 
 ## [v0.8.10] - 2026-10-07
 

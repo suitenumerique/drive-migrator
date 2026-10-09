@@ -3,6 +3,8 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from core.backends.source import AbstractSourceBackend, SourceFile, SourceFolder
 from core.models import Workspace
 from core.processing.folder_creator import FolderCreator
@@ -246,6 +248,130 @@ def test_create_folder_sanitizes_slash_in_file_name(tmp_path, settings):
 
     called_dest = backend.download_file.call_args[0][1]
     assert called_dest == str(tmp_path / "workspace_ws13" / "sub" / "report-final.pdf")
+
+
+def _downloaded_paths(backend):
+    return [call.args[1] for call in backend.download_file.call_args_list]
+
+
+def test_create_folder_refuses_the_files_of_a_dot_dot_folder(tmp_path, settings):
+    """Files of a source folder named ".." are refused instead of being written
+    above the workspace, while the other files are still downloaded."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws30")
+    escaping = SourceFile(id="f1", name="x", extension=".txt", download_url="x")
+    regular = SourceFile(id="f2", name="y", extension=".txt", download_url="y")
+    folder = SourceFolder(
+        name="root",
+        children=[SourceFolder(name="..", files=[escaping])],
+        files=[regular],
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert _downloaded_paths(backend) == [str(tmp_path / "workspace_ws30" / "y.txt")]
+    assert [failed["id"] for failed in creator.failed_files] == ["f1"]
+    assert not (tmp_path / "x.txt").exists()
+
+
+def test_create_folder_refuses_the_subtree_of_a_dot_dot_folder(tmp_path, settings):
+    """Sub-folders of a ".." folder are neither created above the workspace nor
+    downloaded."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws31")
+    file = SourceFile(id="f1", name="x", extension=".txt", download_url="x")
+    folder = SourceFolder(
+        name="root",
+        children=[
+            SourceFolder(name="..", children=[SourceFolder(name="evil", files=[file])])
+        ],
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert not backend.download_file.called
+    assert [failed["id"] for failed in creator.failed_files] == ["f1"]
+    assert not (tmp_path / "evil").exists()
+
+
+@pytest.mark.parametrize("name", [".", ".."])
+def test_create_folder_refuses_a_file_designating_a_folder(tmp_path, settings, name):
+    """A source file named "." or ".." is refused instead of overwriting a
+    folder."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws32")
+    file = SourceFile(id="f1", name=name, extension="", download_url="x")
+    folder = SourceFolder(
+        name="root", children=[SourceFolder(name="sub", files=[file])]
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert not backend.download_file.called
+    assert [failed["id"] for failed in creator.failed_files] == ["f1"]
+    assert os.path.isdir(tmp_path / "workspace_ws32" / "sub")
+
+
+@pytest.mark.parametrize("name", ["../..", "../../foo.txt", "../sibling.txt"])
+def test_create_folder_refuses_a_file_name_with_a_relative_prefix(
+    tmp_path, settings, name
+):
+    """A source file name climbing out of its folder is refused instead of
+    being migrated under a sanitized name."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws33")
+    file = SourceFile(id="f1", name=name, extension="", download_url="x")
+    folder = SourceFolder(
+        name="root", children=[SourceFolder(name="sub", files=[file])]
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert not backend.download_file.called
+    assert [failed["id"] for failed in creator.failed_files] == ["f1"]
+
+
+def test_create_folder_refuses_a_folder_name_with_a_relative_prefix(tmp_path, settings):
+    """A source folder name climbing out of its parent is refused with its
+    files instead of being created under a sanitized name."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws34")
+    file = SourceFile(id="f1", name="x", extension=".txt", download_url="x")
+    folder = SourceFolder(
+        name="root", children=[SourceFolder(name="../evil", files=[file])]
+    )
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert not backend.download_file.called
+    assert [failed["id"] for failed in creator.failed_files] == ["f1"]
+    assert os.listdir(tmp_path / "workspace_ws34") == []
+
+
+def test_create_folder_refuses_the_files_of_an_empty_folder_name(tmp_path, settings):
+    """A source folder whose name is empty, e.g. once cleaned up by the Osmose
+    backend, is not supported: its files are reported as failed."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws35")
+    file = SourceFile(id="f1", name="x", extension=".txt", download_url="x")
+    folder = SourceFolder(name="root", children=[SourceFolder(name="", files=[file])])
+    backend = _make_backend()
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
+
+    assert not backend.download_file.called
+    assert [failed["id"] for failed in creator.failed_files] == ["f1"]
 
 
 def test_create_folder_logs_truncated_filename(tmp_path, settings):
