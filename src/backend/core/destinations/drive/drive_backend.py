@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 from datetime import timedelta
+from enum import StrEnum
 
 from django.conf import settings
 from django.utils import timezone
@@ -27,13 +28,6 @@ logger = get_task_logger(__name__)
 
 _UPLOAD_STATE_NOT_PENDING = "item_upload_state_not_pending"
 _EXISTING_ID = "item_create_existing_id"
-# Drive refuses the file itself, at creation or upload-ended: it is skipped.
-_FILE_REJECTION_CODES = (
-    "item_create_file_extension_not_allowed",
-    "file_type_not_allowed",
-    "file_size_exceeded",
-    "file_size_mismatch",
-)
 # Drive caps page_size with its MAX_PAGE_SIZE setting (200 by default).
 _LIST_PAGE_SIZE = 200
 
@@ -95,10 +89,51 @@ def _is_upload_already_processed(error: HTTPError) -> bool:
     return _has_error_code(error, 400, _UPLOAD_STATE_NOT_PENDING)
 
 
-def get_file_rejection_code(error: HTTPError) -> str | None:
-    """Return the Drive code refusing the file itself, None for any other error."""
+def _is_blocked_upstream(error: HTTPError) -> bool:
+    """Drive API errors are always JSON, so a non-JSON 403 comes upfront."""
+    response = error.response
+    if response is None or response.status_code != 403:
+        return False
+    try:
+        response.json()
+    except ValueError:
+        return True
+    return False
+
+
+class FileRejection(StrEnum):
+    """Known refusals of a file itself: the file is skipped, the migration goes on."""
+
+    EXTENSION_NOT_ALLOWED = "item_create_file_extension_not_allowed"
+    TYPE_NOT_ALLOWED = "file_type_not_allowed"
+    SIZE_EXCEEDED = "file_size_exceeded"
+    SIZE_MISMATCH = "file_size_mismatch"
+    # Something in front of Drive (e.g. a WAF) may block some file names, like
+    # "index.php.jpg": only the creation request carries the file name.
+    BLOCKED_UPSTREAM = "blocked_upstream"
+
+    @property
+    def at_creation_only(self) -> bool:
+        """Only the creation request carries the file name."""
+        return self is FileRejection.BLOCKED_UPSTREAM
+
+    def matches(self, error: HTTPError) -> bool:
+        if self is FileRejection.BLOCKED_UPSTREAM:
+            return _is_blocked_upstream(error)
+        return _has_error_code(error, 400, self.value)
+
+
+def get_file_rejection(
+    error: HTTPError, at_creation: bool = False
+) -> FileRejection | None:
+    """Return the known refusal of the file itself, None for any other error."""
     return next(
-        (code for code in _FILE_REJECTION_CODES if _has_error_code(error, 400, code)),
+        (
+            rejection
+            for rejection in FileRejection
+            if (at_creation or not rejection.at_creation_only)
+            and rejection.matches(error)
+        ),
         None,
     )
 

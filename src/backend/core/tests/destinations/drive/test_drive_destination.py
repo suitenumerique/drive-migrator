@@ -3,7 +3,8 @@
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
-from requests.exceptions import HTTPError
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError, Timeout
 
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.drive.backend import DriveDestinationBackend
@@ -427,7 +428,7 @@ def test_no_users_csv_uploaded_when_workspace_has_no_members(
 
 
 # ---------------------------------------------------------------------------
-# upload_errors (files rejected by Drive)
+# upload_errors (files rejected on upload)
 # ---------------------------------------------------------------------------
 
 
@@ -587,6 +588,13 @@ def _drive_refusal(code):
     return HTTPError("400 Client Error", response=response)
 
 
+def _upstream_block():
+    """Build the HTTPError something in front of Drive (e.g. a WAF) raises."""
+    response = MagicMock(status_code=403, text="<html>Request unsuccessful.</html>")
+    response.json.side_effect = ValueError
+    return HTTPError("403 Client Error", response=response)
+
+
 def _mock_two_file_upload(mock_cls, tmp_path):
     """Two local files, each getting a Drive item named after it."""
     mock_backend = mock_cls.return_value
@@ -649,6 +657,80 @@ def test_file_refused_at_creation_is_skipped(mock_cls, tmp_path, settings):
     )
 
 
+@pytest.mark.parametrize(
+    "probed_folder", [{"id": "root-uuid"}, None], ids=["found", "not-found"]
+)
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_file_blocked_upstream_at_creation_is_skipped(
+    mock_cls, probed_folder, tmp_path, settings
+):
+    """A file whose creation is blocked in front of Drive is skipped once a
+    payload-less request to its folder gets an answer from Drive, even a 404."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
+    mock_backend.get_item.return_value = probed_folder
+    create = mock_backend.create_file_item.side_effect
+    mock_backend.create_file_item.side_effect = [
+        _upstream_block(),
+        create("b.txt", parent_id="root-uuid", size=1, item_id=None),
+    ]
+    workspace = _make_workspace()
+
+    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    mock_backend.get_item.assert_called_once_with("root-uuid")
+    sent_id = mock_backend.create_file_item.call_args_list[0].kwargs["item_id"]
+    assert workspace.upload_errors == [
+        {"path": "a.txt", "item_id": sent_id, "error": "blocked_upstream"}
+    ]
+    mock_backend.upload_to_s3.assert_called_once_with(
+        "https://s3.example.com/b.txt", str(tmp_path / "b.txt")
+    )
+
+
+@pytest.mark.parametrize(
+    "probe_error",
+    [_upstream_block(), Timeout(), RequestsConnectionError()],
+    ids=["blocked", "timeout", "connection-error"],
+)
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_upstream_block_of_every_request_stops_the_upload(
+    mock_cls, probe_error, tmp_path, settings
+):
+    """A block the payload-less probe also gets (rate limit, IP reputation...)
+    is not the file's: the creation error stops the migration instead of
+    skipping every file."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
+    blocked = _upstream_block()
+    mock_backend.create_file_item.side_effect = blocked
+    mock_backend.get_item.side_effect = probe_error
+    workspace = _make_workspace()
+
+    with pytest.raises(HTTPError) as excinfo:
+        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    assert excinfo.value is blocked
+
+    assert mock_backend.create_file_item.call_count == 1
+    assert not workspace.upload_errors
+
+
+@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
+def test_upstream_block_at_upload_ended_stops_the_upload(mock_cls, tmp_path, settings):
+    """upload-ended carries no file name: a block there is not the file's."""
+    settings.DRIVE_AUTH_MODE = "service_account"
+    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
+    mock_backend.notify_upload_ended.side_effect = _upstream_block()
+    workspace = _make_workspace()
+
+    with pytest.raises(HTTPError):
+        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+
+    mock_backend.get_item.assert_not_called()
+    assert not workspace.upload_errors
+
+
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
 def test_other_drive_error_still_stops_the_upload(mock_cls, tmp_path, settings):
     """An error that is not a refusal of the file still stops the migration."""
@@ -682,7 +764,7 @@ def test_export_logs_rejected_files_once_without_paths(mock_cls, tmp_path, setti
         DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
 
     mock_logger.error.assert_called_once_with(
-        "%s file(s) rejected by Drive: %s",
+        "%s file(s) rejected on upload: %s",
         1,
         [("id-a.txt", "file_type_not_allowed")],
     )
