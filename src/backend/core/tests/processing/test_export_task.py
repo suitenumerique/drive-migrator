@@ -9,6 +9,7 @@ from django.utils import timezone
 
 import pytest
 from django_celery_results.models import TaskResult
+from prometheus_client import REGISTRY
 
 from core.backends.source import SourceFolder
 from core.models import ExtraTaskInfo, User, Workspace
@@ -178,11 +179,16 @@ def test_export_persists_download_errors_on_workspace(workspace, user):
         mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
         mock_fc.return_value.failed_files = failed_files
         mock_dr.get_all.return_value = []
+        download_errors = REGISTRY.get_sample_value("migrator_download_errors_total")
 
         export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
 
     assert workspace.download_errors == failed_files
     workspace.save.assert_called()
+    assert (
+        REGISTRY.get_sample_value("migrator_download_errors_total")
+        == download_errors + 1
+    )
 
 
 def test_export_does_not_save_download_errors_when_all_files_succeed(
@@ -593,6 +599,7 @@ def test_task_success_handler_saves_workspace_and_cleans_up():
         patch("core.processing.tasks.TaskResult") as mock_tr_cls,
         patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
         patch("core.processing.tasks.cleanup_workspace_dir") as mock_cleanup,
+        patch("core.processing.tasks.record_migration_finished") as mock_record,
     ):
         mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
         mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
@@ -601,6 +608,7 @@ def test_task_success_handler_saves_workspace_and_cleans_up():
 
     mock_workspace.save.assert_called_once()
     mock_cleanup.assert_called_once_with(mock_workspace)
+    mock_record.assert_called_once_with(mock_extra_task, "success")
 
 
 # ---------------------------------------------------------------------------
@@ -627,6 +635,7 @@ def test_task_failure_handler_sets_pending_statuses_to_failure():
         patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
         patch("core.processing.tasks.cleanup_workspace_dir"),
         patch("core.processing.tasks.MailsManager"),
+        patch("core.processing.tasks.record_migration_finished") as mock_record,
     ):
         mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
         mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
@@ -637,6 +646,7 @@ def test_task_failure_handler_sets_pending_statuses_to_failure():
         "archive", Workspace.Status.FAILURE
     )
     mock_workspace.save.assert_called_once()
+    mock_record.assert_called_once_with(mock_extra_task, "failure")
 
 
 def test_task_failure_handler_sends_fail_mail():
@@ -655,6 +665,7 @@ def test_task_failure_handler_sends_fail_mail():
         patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
         patch("core.processing.tasks.cleanup_workspace_dir"),
         patch("core.processing.tasks.MailsManager") as mock_mails_cls,
+        patch("core.processing.tasks.record_migration_finished"),
     ):
         mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
         mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task

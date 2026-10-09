@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/3.1/ref/settings/
 
 import json
 import os
+import tempfile
 from socket import gethostbyname, gethostname
 
 from django.utils.translation import gettext_lazy as _
@@ -76,6 +77,8 @@ class Base(Configuration):
     # Security
     ALLOWED_HOSTS = values.ListValue([])
     SECRET_KEY = values.Value(None)
+    # Django's default, made explicit for setup_prometheus_metrics
+    SECURE_REDIRECT_EXEMPT = []
 
     # Application definition
     ROOT_URLCONF = "main.urls"
@@ -543,6 +546,29 @@ class Base(Configuration):
         "https://eu.i.posthog.com", environ_name="POSTHOG_HOST", environ_prefix=None
     )
 
+    # Prometheus metrics, opt-in (see docs/metrics.md)
+    PROMETHEUS_METRICS_ENABLED = values.BooleanValue(
+        False, environ_name="PROMETHEUS_METRICS_ENABLED", environ_prefix=None
+    )
+    PROMETHEUS_API_KEY = values.Value(
+        None, environ_name="PROMETHEUS_API_KEY", environ_prefix=None
+    )
+    # Let a scraper reach /metrics over plain http, past the proxy terminating TLS.
+    PROMETHEUS_METRICS_SSL_REDIRECT_EXEMPT = values.BooleanValue(
+        False,
+        environ_name="PROMETHEUS_METRICS_SSL_REDIRECT_EXEMPT",
+        environ_prefix=None,
+    )
+    # Shared by the processes of one host: gunicorn workers, Celery children.
+    PROMETHEUS_MULTIPROC_DIR = values.Value(
+        None, environ_name="PROMETHEUS_MULTIPROC_DIR", environ_prefix=None
+    )
+    PROMETHEUS_WORKER_METRICS_PORT = values.PositiveIntegerValue(
+        8001, environ_name="PROMETHEUS_WORKER_METRICS_PORT", environ_prefix=None
+    )
+    # Per-process gauges that would pile up, one series per dead process.
+    PROMETHEUS_EXPORT_MIGRATIONS = False
+
     # Easy thumbnails
     THUMBNAIL_EXTENSION = "webp"
     THUMBNAIL_TRANSPARENCY_EXTENSION = "webp"
@@ -678,12 +704,55 @@ class Base(Configuration):
         }
 
     @classmethod
+    def setup_prometheus_metrics(cls):
+        """Wire django-prometheus into the settings, mutated in place."""
+        if not cls.PROMETHEUS_API_KEY:
+            raise ValueError(
+                "PROMETHEUS_METRICS_ENABLED requires PROMETHEUS_API_KEY to be set."
+            )
+
+        # Read by prometheus_client when first imported.
+        multiproc_dir = cls.PROMETHEUS_MULTIPROC_DIR or os.path.join(
+            tempfile.gettempdir(), f"migrator-prometheus-{os.getuid()}"
+        )
+        os.makedirs(multiproc_dir, mode=0o700, exist_ok=True)
+        os.environ["PROMETHEUS_MULTIPROC_DIR"] = multiproc_dir
+        # The celery CLI loads Flower's plugin, which imports it earlier.
+        # pylint: disable-next=import-outside-toplevel
+        from prometheus_client import values as prometheus_values
+
+        prometheus_values.ValueClass = prometheus_values.get_value_class()
+
+        cls.INSTALLED_APPS.append("django_prometheus")
+        cls.MIDDLEWARE.insert(0, "core.metrics.PrometheusAuthMiddleware")
+        cls.MIDDLEWARE.insert(
+            1, "django_prometheus.middleware.PrometheusBeforeMiddleware"
+        )
+        cls.MIDDLEWARE.append("django_prometheus.middleware.PrometheusAfterMiddleware")
+
+        database = cls.DATABASES["default"]
+        if database["ENGINE"] in (
+            "django.db.backends.postgresql",
+            "django.db.backends.postgresql_psycopg2",
+        ):
+            database["ENGINE"] = "django_prometheus.db.backends.postgresql"
+        cache = cls.CACHES["default"]
+        if cache["BACKEND"] == "django_redis.cache.RedisCache":
+            cache["BACKEND"] = "django_prometheus.cache.backends.redis.RedisCache"
+
+        if cls.PROMETHEUS_METRICS_SSL_REDIRECT_EXEMPT:
+            cls.SECURE_REDIRECT_EXEMPT.append("^metrics$")
+
+    @classmethod
     def post_setup(cls):
         """Post setup configuration.
         This is the place where you can configure settings that require other
         settings to be loaded.
         """
         super().post_setup()
+
+        if cls.PROMETHEUS_METRICS_ENABLED:
+            cls.setup_prometheus_metrics()
 
         # The SENTRY_DSN setting should be available to activate sentry for an environment
         if cls.SENTRY_DSN is not None:
@@ -748,6 +817,9 @@ class Development(Base):
 
     SESSION_COOKIE_SECURE = False
     SOCIAL_AUTH_REDIRECT_IS_HTTPS = True
+
+    PROMETHEUS_METRICS_ENABLED = True
+    PROMETHEUS_API_KEY = "dev-metrics-key"
 
     def __init__(self):
         # pylint: disable=invalid-name

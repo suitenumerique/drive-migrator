@@ -3,6 +3,7 @@
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
+from prometheus_client import REGISTRY
 from requests.exceptions import HTTPError
 
 from core.backends.destination import AbstractDestinationBackend
@@ -610,9 +611,15 @@ def test_file_refused_at_upload_ended_is_skipped(mock_cls, tmp_path, settings):
         None,
     ]
     workspace = _make_workspace()
+    sample = (
+        "migrator_drive_upload_rejections_total",
+        {"reason": "file_type_not_allowed"},
+    )
+    rejections = REGISTRY.get_sample_value(*sample) or 0
 
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
+    assert REGISTRY.get_sample_value(*sample) == rejections + 1
     assert mock_backend.notify_upload_ended.call_count == 2
     assert workspace.upload_errors == [
         {"path": "a.txt", "item_id": "id-a.txt", "error": "file_type_not_allowed"}
