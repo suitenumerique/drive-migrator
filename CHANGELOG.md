@@ -15,6 +15,10 @@ and this project adheres to
 - Upgrade `Django` to `5.2.17`
 - Upgrade `PyJWT` to `2.15.1`
 
+### Fixed
+
+- list locked Resana workspaces the user is Animateur of
+
 ## [v0.8.10] - 2026-10-07
 
 ### Added
