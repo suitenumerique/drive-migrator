@@ -109,3 +109,85 @@ def test_send_migration_mail_respects_force_to_setting():
         settings.APP_EMAIL_FORCE_TO = original
 
     assert mail.outbox[0].to == ["forced@example.com"]
+
+
+ALL_TEMPLATES = [
+    "fail",
+    "archive_download",
+    "drive_ready",
+    "resana_ready",
+    "resana_ready_errors",
+]
+
+
+def _workspace_with_errors():
+    return Workspace(
+        title="Équipe projet",
+        download_errors=[
+            {"id": "1", "name": "a.pdf", "path": "Docs/a.pdf", "error": "boom"}
+        ],
+        upload_errors=[
+            {"path": "b.exe", "item_id": "i", "error": "file_type_not_allowed"}
+        ],
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("template_name", ALL_TEMPLATES)
+def test_send_migration_mail_attaches_failed_files_csv(template_name):
+    """Every migration mail carries the CSV of the files that failed."""
+    workspace = _workspace_with_errors()
+    user = MagicMock()
+    user.email = "user@example.com"
+
+    MailsManager().send_migration_mail(
+        user, workspace, template_name, {"title": "Some Title"}
+    )
+
+    sent = mail.outbox[0]
+    assert len(sent.attachments) == 1
+    filename, content, mimetype = sent.attachments[0]
+    assert filename == "fichiers-non-migres-equipe-projet.csv"
+    assert mimetype == "text/csv"
+    assert content == workspace.get_failed_files_csv(
+        SourceManager().get_backend().label
+    )
+    for body in (sent.body, sent.alternatives[0][0]):
+        assert "2 fichiers n'ont pas pu être migrés" in body
+        assert "fichier joint" in body
+
+
+@pytest.mark.django_db
+def test_send_migration_mail_uses_singular_for_one_failed_file():
+    """The mail sentence agrees with a single failed file."""
+    workspace = Workspace(
+        title="Équipe projet",
+        download_errors=[{"id": "1", "name": "a.pdf", "path": "a.pdf", "error": "x"}],
+        upload_errors=[],
+    )
+    user = MagicMock()
+    user.email = "user@example.com"
+
+    MailsManager().send_migration_mail(
+        user, workspace, "drive_ready", {"title": "Some Title"}
+    )
+
+    assert "1 fichier n'a pas pu être migré" in mail.outbox[0].body
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("template_name", ALL_TEMPLATES)
+def test_send_migration_mail_has_no_attachment_without_failed_files(template_name):
+    """No attachment and no failed-files sentence when every file was migrated."""
+    workspace = Workspace(title="Équipe projet", download_errors=[], upload_errors=[])
+    user = MagicMock()
+    user.email = "user@example.com"
+
+    MailsManager().send_migration_mail(
+        user, workspace, template_name, {"title": "Some Title"}
+    )
+
+    sent = mail.outbox[0]
+    assert sent.attachments == []
+    for body in (sent.body, sent.alternatives[0][0]):
+        assert "fichier joint" not in body

@@ -20,6 +20,8 @@
             {% trans "Télécharger l'archive"%}
           </mj-button>
 
+          <mj-include path="./partial/failed_files.mjml" />
+
           <mj-include path="./partial/support.mjml" />
 
           <!-- Signature -->

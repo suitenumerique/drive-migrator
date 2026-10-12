@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Attach a CSV of files that failed to migrate to the notification e-mail #256
+
 ### Changed
 
 - Use Drive's resource server (external APIs) instead of frontend APIs

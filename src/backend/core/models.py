@@ -1,6 +1,9 @@
 """
 Declare and configure the models for the core application
 """
+import csv
+import io
+import posixpath
 import uuid
 from logging import getLogger
 
@@ -16,6 +19,18 @@ from django_celery_results.models import TaskResult
 from timezone_field import TimeZoneField
 
 logger = getLogger(__name__)
+
+
+FAILED_FILES_CSV_HEADER = ["Chemin", "Nom du fichier", "Étape", "Motif", "Code"]
+
+DOWNLOAD_FAILED_CODE = "download_failed"
+
+DRIVE_REJECTION_REASONS = {
+    "item_create_file_extension_not_allowed": "Extension de fichier non autorisée",
+    "file_type_not_allowed": "Type de fichier non autorisé",
+    "file_size_exceeded": "Fichier trop volumineux",
+    "file_size_mismatch": "Fichier corrompu pendant le transfert",
+}
 
 
 class BaseModel(models.Model):
@@ -139,6 +154,43 @@ class Workspace(BaseModel):
         self.download_errors = []
         self.upload_errors = []
         self.save(update_fields=["download_errors", "upload_errors"])
+
+    def get_failed_files_csv(self, source_label: str) -> str | None:
+        """Return the CSV of the files a migration could not migrate, attached
+        to its e-mail, or None when none failed.
+
+        The raw download exception is left out: it may hold internal URLs and is
+        already in the logs and the integrity report.
+        """
+        rows = [
+            [
+                error["path"],
+                error["name"],
+                f"Récupération depuis {source_label}",
+                f"Le fichier n'a pas pu être récupéré depuis {source_label}",
+                DOWNLOAD_FAILED_CODE,
+            ]
+            for error in self.download_errors
+        ] + [
+            [
+                error["path"],
+                posixpath.basename(error["path"]),
+                "Envoi vers Drive",
+                DRIVE_REJECTION_REASONS.get(error["error"], "Fichier refusé par Drive"),
+                error["error"],
+            ]
+            for error in self.upload_errors
+        ]
+        if not rows:
+            return None
+
+        # BOM and semicolons: what Excel expects to open a French CSV directly.
+        output = io.StringIO()
+        output.write("\ufeff")
+        writer = csv.writer(output, delimiter=";")
+        writer.writerow(FAILED_FILES_CSV_HEADER)
+        writer.writerows(rows)
+        return output.getvalue()
 
     def sync_status(self):
         self.status = self.compute_status()

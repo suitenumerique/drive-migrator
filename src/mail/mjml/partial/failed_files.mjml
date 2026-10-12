@@ -1,0 +1,3 @@
+<mj-raw>{% if failed_files_count %}</mj-raw>
+<mj-text>{% blocktrans count counter=failed_files_count %}{{ counter }} fichier n'a pas pu être migré. Vous en trouverez le détail dans le fichier joint à ce mail.{% plural %}{{ counter }} fichiers n'ont pas pu être migrés. Vous en trouverez la liste dans le fichier joint à ce mail.{% endblocktrans %}</mj-text>
+<mj-raw>{% endif %}</mj-raw>
