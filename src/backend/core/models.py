@@ -134,6 +134,12 @@ class Workspace(BaseModel):
     def set_destination_metadata(self, destination_name: str, data: dict) -> None:
         self.destination_metadata[destination_name] = data
 
+    def reset_migration_errors(self) -> None:
+        """Clear the file errors of a previous run, so its mails do not report them."""
+        self.download_errors = []
+        self.upload_errors = []
+        self.save(update_fields=["download_errors", "upload_errors"])
+
     def sync_status(self):
         self.status = self.compute_status()
 

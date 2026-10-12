@@ -1,5 +1,7 @@
 """Tests for the generic Workspace model."""
 
+from unittest.mock import patch
+
 from core.models import Workspace
 
 
@@ -141,3 +143,20 @@ def test_compute_status_single_destination_all_combinations():
         assert (
             workspace.status == expected
         ), f"dest_a={dest_a}, dest_b={dest_b} → expected {expected}, got {workspace.status}"
+
+
+def test_reset_migration_errors_clears_and_saves_both_lists():
+    """reset_migration_errors() empties the file errors of a previous run."""
+    workspace = Workspace(
+        download_errors=[{"name": "old.docx", "error": "403 Forbidden"}],
+        upload_errors=[{"path": "old.exe", "error": "file_type_not_allowed"}],
+    )
+
+    with patch.object(Workspace, "save") as mock_save:
+        workspace.reset_migration_errors()
+
+    assert not workspace.download_errors
+    assert not workspace.upload_errors
+    mock_save.assert_called_once_with(
+        update_fields=["download_errors", "upload_errors"]
+    )

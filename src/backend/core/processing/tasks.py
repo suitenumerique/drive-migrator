@@ -117,6 +117,8 @@ def export(self, data):  # pylint: disable=unused-argument
     )
     user = User.objects.get(id=data["user"]["id"])
 
+    workspace.reset_migration_errors()
+
     source_backend = SourceManager().get_backend()
     list_work_dir()
 

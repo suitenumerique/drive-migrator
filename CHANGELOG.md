@@ -21,6 +21,7 @@ and this project adheres to
 
 - list locked Resana workspaces the user is Animateur of
 - Refuse source files resolving out of their folder in the local workspace
+- Reset previous workspace migration errors when a new migration starts #256
 
 ## [v0.8.10] - 2026-10-07
 

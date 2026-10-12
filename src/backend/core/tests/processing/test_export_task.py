@@ -185,6 +185,25 @@ def test_export_persists_download_errors_on_workspace(workspace, user):
     workspace.save.assert_called()
 
 
+def test_export_resets_previous_run_errors_before_starting(workspace, user):
+    """export() clears the errors of a previous run before the source is called."""
+    source_backend = MagicMock()
+
+    def check_reset(_workspace):
+        workspace.reset_migration_errors.assert_called_once_with()
+        raise RuntimeError("stop")
+
+    source_backend.begin_export.side_effect = check_reset
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        pytest.raises(RuntimeError, match="stop"),
+    ):
+        mock_sm.return_value.get_backend.return_value = source_backend
+        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+
+
 def test_export_does_not_save_download_errors_when_all_files_succeed(
     workspace, user, settings
 ):
