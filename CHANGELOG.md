@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Skip files blocked in front of Drive instead of failing the run
+
 ### Changed
 
 - Use Drive's resource server (external APIs) instead of frontend APIs
