@@ -62,7 +62,7 @@ const AccessOption = ({
   onSelect,
 }: {
   icon: ReactNode;
-  title: string;
+  title: ReactNode;
   description: string;
   isSelected: boolean;
   isDisabled?: boolean;
@@ -143,7 +143,14 @@ export const SharedAccessModal = ({
           />
           <AccessOption
             icon={<TransferAccessIcon />}
-            title={t('Transférer les accès')}
+            title={
+              <>
+                {t('Transférer les accès')}{' '}
+                <span className="shared-access-modal__option-title-note">
+                  {t('Recopie des accès pas encore disponible')}
+                </span>
+              </>
+            }
             description={t(
               "L'outil reprendra les accès existants quand il le peut. À éviter si l'arborescence est complexe : certains accès peuvent être mal appliqués.",
             )}

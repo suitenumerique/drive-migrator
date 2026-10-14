@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- Indicate that access transfer is not yet available in migration dialog
+
 ## [v0.9.0] - 2026-10-14
 
 ### Added
