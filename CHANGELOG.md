@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [v0.9.0] - 2026-10-14
+
 ### Added
 
 - Attach a CSV of files that failed to migrate to the notification e-mail #256
@@ -120,5 +122,6 @@ and this project adheres to
 
 - delete unused var in Makefile
 
-[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.8.10...HEAD
+[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.9.0...main
+[v0.9.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.9.0
 [v0.8.10]: https://github.com/suitenumerique/drive-migrator/releases/v0.8.10
