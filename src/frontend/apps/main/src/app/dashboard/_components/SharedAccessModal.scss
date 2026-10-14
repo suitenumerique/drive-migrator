@@ -74,6 +74,11 @@
     color: var(--c--contextuals--content--semantic--neutral--primary);
   }
 
+  &__option-title-note {
+    font-weight: 500;
+    color: var(--c--contextuals--content--semantic--error--primary);
+  }
+
   &__option-description {
     margin: 4px 0 0;
     font-size: 12px;
