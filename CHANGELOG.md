@@ -16,6 +16,10 @@ and this project adheres to
   `LOGGING_LEVEL_LOGGERS_ROOT`); Celery workers keep their `-l` level for
   tasks and libraries
 
+### Changed
+
+- Indicate that access transfer is not yet available in migration dialog
+
 ## [v0.10.0] - 2026-10-19
 
 ### Added
