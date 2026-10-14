@@ -19,6 +19,12 @@ urlpatterns = [
     path("__debug__/", include("debug_toolbar.urls")),
 ]
 
+# Outside of /api/ so that the application ingress does not publish it.
+if settings.PROMETHEUS_METRICS_ENABLED:
+    from core.metrics import METRICS_PATH, metrics_view
+
+    urlpatterns += [path(METRICS_PATH.lstrip("/"), metrics_view)]
+
 if settings.DEBUG:
     urlpatterns = (
         urlpatterns

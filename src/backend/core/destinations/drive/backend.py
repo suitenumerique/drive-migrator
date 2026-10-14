@@ -23,6 +23,7 @@ from core.destinations.drive.drive_backend import (
     get_file_rejection_code,
 )
 from core.mails_manager import MailsManager
+from core.metrics import DRIVE_UPLOAD_REJECTIONS
 from core.models import Workspace
 from core.processing.integrity import Stage
 
@@ -203,6 +204,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                     code = get_file_rejection_code(error)
                     if code is None:
                         raise
+                    DRIVE_UPLOAD_REJECTIONS.labels(code).inc()
                     self._upload_log.rejected.append(
                         {
                             "path": relative_path,

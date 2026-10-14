@@ -35,6 +35,7 @@ dependencies = [
     "django-filter==24.2",
     "django-hijack==3.6.1",
     "django-parler==2.3",
+    "django-prometheus==2.5.0",
     "django-redis==5.4.0",
     "django-storages[s3]==1.14.2",
     "django-timezone-field>=5.1",
