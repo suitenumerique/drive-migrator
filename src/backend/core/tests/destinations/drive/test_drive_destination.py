@@ -8,6 +8,7 @@ from requests.exceptions import HTTPError, Timeout
 
 from core.backends.destination import AbstractDestinationBackend, RejectedFile
 from core.destinations.drive.backend import DriveDestinationBackend
+from core.destinations.drive.drive_backend import FileRejection
 from core.models import Workspace
 
 
@@ -880,3 +881,30 @@ def test_export_sends_drive_ready_mail(
     assert str(args[3]["title"])
     assert kwargs == {}
 
+
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [
+        (
+            "item_create_file_extension_not_allowed",
+            "Extension de fichier non autorisée",
+        ),
+        ("file_type_not_allowed", "Type de fichier non autorisé"),
+        ("file_size_exceeded", "Fichier trop volumineux"),
+        ("file_size_mismatch", "Fichier corrompu pendant le transfert"),
+        ("blocked_upstream", "Fichier bloqué en amont de Drive (ex. pare-feu)"),
+        ("new_code", "Fichier refusé par La Suite Drive"),
+    ],
+)
+def test_describe_rejection_explains_each_drive_code(code, reason):
+    """Each known Drive code gets its own reason, an unknown one the default."""
+    assert DriveDestinationBackend().describe_rejection(code) == reason
+
+
+@pytest.mark.parametrize("rejection", list(FileRejection))
+def test_every_file_rejection_has_a_reason(rejection):
+    """A new FileRejection can't reach the CSV without its readable reason."""
+    assert (
+        DriveDestinationBackend().describe_rejection(rejection)
+        != "Fichier refusé par La Suite Drive"
+    )

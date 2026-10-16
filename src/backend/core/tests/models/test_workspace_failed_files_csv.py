@@ -3,8 +3,32 @@
 import csv
 import io
 
-from core.destinations.drive.drive_backend import FileRejection
-from core.models import DRIVE_REJECTION_REASONS, Workspace
+import pytest
+
+from core.backends.destination import AbstractDestinationBackend, DestinationRegistry
+from core.models import Workspace
+
+
+class RefusingDestination(AbstractDestinationBackend):
+    """Destination without its own rejection reasons."""
+
+    name = "refusing"
+    label = "Refusing Destination"
+
+    def export(self, workspace, user, local_folder_path):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _destinations(settings):
+    """Register Drive and a destination keeping the default rejection reason."""
+    settings.DESTINATION_BACKENDS = [
+        "core.destinations.drive.backend.DriveDestinationBackend",
+        f"{__name__}.RefusingDestination",
+    ]
+    DestinationRegistry.clear_cache()
+    yield
+    DestinationRegistry.clear_cache()
 
 
 def _rows(content: str) -> list[list[str]]:
@@ -59,11 +83,12 @@ def test_get_failed_files_csv_lists_download_errors():
 
 
 def test_get_failed_files_csv_lists_drive_rejections():
-    """A Drive refusal is listed with the label matching its Drive code."""
+    """A Drive refusal is listed with the reason Drive gives for its code."""
     workspace = Workspace(
         download_errors=[],
         upload_errors=[
             {
+                "destination": "drive",
                 "path": "Divers/setup.exe",
                 "item_id": "item-1",
                 "error": "file_type_not_allowed",
@@ -76,51 +101,66 @@ def test_get_failed_files_csv_lists_drive_rejections():
     assert rows[1] == [
         "Divers/setup.exe",
         "setup.exe",
-        "Envoi vers Drive",
+        "Envoi vers La Suite Drive",
         "Type de fichier non autorisé",
         "file_type_not_allowed",
     ]
 
 
-def test_get_failed_files_csv_labels_every_drive_rejection_code():
-    """Each known Drive rejection code gets its own readable reason."""
-    codes = {
-        "item_create_file_extension_not_allowed": "Extension de fichier non autorisée",
-        "file_type_not_allowed": "Type de fichier non autorisé",
-        "file_size_exceeded": "Fichier trop volumineux",
-        "file_size_mismatch": "Fichier corrompu pendant le transfert",
-        "blocked_upstream": "Fichier bloqué en amont de Drive (ex. pare-feu)",
-    }
+def test_get_failed_files_csv_uses_the_reason_of_the_refusing_destination():
+    """Any destination names the step and explains its own codes."""
     workspace = Workspace(
         download_errors=[],
         upload_errors=[
-            {"path": f"{code}.bin", "item_id": code, "error": code} for code in codes
+            {"destination": "refusing", "path": "a/b.txt", "error": "some_code"}
         ],
     )
 
     rows = _rows(workspace.get_failed_files_csv("Osmose"))
 
-    assert {row[4]: row[3] for row in rows[1:]} == codes
+    assert rows[1] == [
+        "a/b.txt",
+        "b.txt",
+        "Envoi vers Refusing Destination",
+        "Fichier refusé par Refusing Destination",
+        "some_code",
+    ]
 
 
-def test_every_file_rejection_has_a_reason():
-    """A new FileRejection can't reach the CSV without its readable reason."""
-    assert set(DRIVE_REJECTION_REASONS) == set(FileRejection)
-
-
-def test_get_failed_files_csv_keeps_unknown_drive_code():
-    """An unknown Drive code still gets a generic reason and keeps its code."""
+def test_get_failed_files_csv_names_an_unregistered_destination():
+    """An entry of a destination no longer configured still gets a row, so the
+    CSV, and the mail it is attached to, never fail on it."""
     workspace = Workspace(
         download_errors=[],
-        upload_errors=[{"path": "a.txt", "item_id": "i", "error": "new_code"}],
+        upload_errors=[{"destination": "gone", "path": "a.txt", "error": "nope"}],
     )
 
     rows = _rows(workspace.get_failed_files_csv("Osmose"))
 
-    assert rows[1][3:] == ["Fichier refusé par Drive", "new_code"]
+    assert rows[1] == [
+        "a.txt",
+        "a.txt",
+        "Envoi vers gone",
+        "Fichier refusé par gone",
+        "nope",
+    ]
 
 
-def test_get_failed_files_csv_lists_download_errors_before_drive_rejections():
+def test_get_failed_files_csv_attributes_legacy_entries_to_drive():
+    """Entries recorded before the destination was stored came from Drive."""
+    workspace = Workspace(
+        download_errors=[],
+        upload_errors=[
+            {"path": "a.exe", "item_id": "i", "error": "file_type_not_allowed"}
+        ],
+    )
+
+    rows = _rows(workspace.get_failed_files_csv("Osmose"))
+
+    assert rows[1][2:4] == ["Envoi vers La Suite Drive", "Type de fichier non autorisé"]
+
+
+def test_get_failed_files_csv_lists_download_errors_before_rejections():
     """Download failures come first, in the order the run met them."""
     workspace = Workspace(
         download_errors=[
@@ -128,7 +168,12 @@ def test_get_failed_files_csv_lists_download_errors_before_drive_rejections():
             {"id": "2", "name": "a.pdf", "path": "a.pdf", "error": "boom"},
         ],
         upload_errors=[
-            {"path": "c.exe", "item_id": "i", "error": "file_type_not_allowed"}
+            {
+                "destination": "drive",
+                "path": "c.exe",
+                "item_id": "i",
+                "error": "file_type_not_allowed",
+            }
         ],
     )
 

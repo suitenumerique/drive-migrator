@@ -37,6 +37,17 @@ _UPLOAD_STATE_READY = "ready"
 # Set by Drive when the analyzer rejects the size (413): still downloadable.
 _UPLOAD_STATE_TOO_LARGE_TO_ANALYZE = "file_too_large_to_analyze"
 
+# pylint: disable-next=fixme
+# TODO: French only until the backend ships translations (.po), then switch
+# these texts to English msgids wrapped in gettext.
+_REJECTION_REASONS = {
+    FileRejection.EXTENSION_NOT_ALLOWED: "Extension de fichier non autorisée",
+    FileRejection.TYPE_NOT_ALLOWED: "Type de fichier non autorisé",
+    FileRejection.SIZE_EXCEEDED: "Fichier trop volumineux",
+    FileRejection.SIZE_MISMATCH: "Fichier corrompu pendant le transfert",
+    FileRejection.BLOCKED_UPSTREAM: "Fichier bloqué en amont de Drive (ex. pare-feu)",
+}
+
 
 @dataclass
 class _UploadLog:
@@ -70,6 +81,9 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         # Backends are cached singletons (DestinationRegistry): the log is tagged
         # with its workspace and reset by every export().
         self._upload_log = None
+
+    def describe_rejection(self, code: str) -> str:
+        return _REJECTION_REASONS.get(code) or super().describe_rejection(code)
 
     def _make_backend(self, user):
         auth_mode = getattr(settings, "DRIVE_AUTH_MODE", "service_account")
