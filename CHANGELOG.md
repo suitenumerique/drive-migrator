@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Zip the files a destination refused and link it in the e-mail #257
+
 ### Fixed
 
 - Skip files blocked in front of Drive instead of failing the run

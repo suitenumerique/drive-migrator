@@ -1,0 +1,12 @@
+.page-download-rejected-files {
+  &__content {
+    max-width: 32rem;
+    text-align: center;
+  }
+
+  &__note {
+    font-size: 0.875rem;
+    font-style: italic;
+    color: var(--c--contextuals--content--semantic--neutral--secondary);
+  }
+}

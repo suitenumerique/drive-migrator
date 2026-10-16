@@ -1,3 +1,5 @@
+from urllib.parse import urlencode
+
 from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core import mail
@@ -7,10 +9,20 @@ from django.utils.translation import gettext_lazy as _
 
 from celery.utils.log import get_task_logger
 
+from core.backends.destination import DestinationRegistry
 from core.backends.source import SourceManager
 from core.models import Workspace
+from core.processing.rejected_files import REJECTED_FILES_S3_KEY
 
 logger = get_task_logger(__name__)
+
+
+def _destination_label(name: str) -> str:
+    """Label of a destination, its slug once it is no longer configured."""
+    try:
+        return DestinationRegistry.get(name).label
+    except ValueError:
+        return name
 
 
 class MailsManager:
@@ -40,6 +52,7 @@ class MailsManager:
             "source_label": source_label,
             "failed_files_count": len(workspace.download_errors)
             + len(workspace.upload_errors),
+            "rejected_files_links": self._rejected_files_links(workspace),
             **context,
         }
         msg_html = render_to_string(f"mail/html/{template_name}.html", template_vars)
@@ -53,11 +66,27 @@ class MailsManager:
         message.attach_alternative(msg_html, "text/html")
         if failed_files_csv := workspace.get_failed_files_csv(source_label):
             message.attach(
+                # pylint: disable-next=fixme
+                # TODO: French only until the backend ships translations (.po).
                 f"fichiers-non-migres-{slugify(workspace.title)}.csv",
                 failed_files_csv,
                 "text/csv",
             )
         message.send(fail_silently=False)
+
+    @staticmethod
+    def _rejected_files_links(workspace: Workspace) -> list[dict]:
+        """Link the frontend page downloading each destination's zip of refused
+        files: it fetches a short-lived S3 URL once the user is authenticated."""
+        return [
+            {
+                "label": _destination_label(name),
+                "url": f"{settings.LOGIN_REDIRECT_URL}/download-rejected-files/?"
+                + urlencode({"workspaceId": workspace.id, "destination": name}),
+            }
+            for name, metadata in workspace.destination_metadata.items()
+            if metadata.get(REJECTED_FILES_S3_KEY)
+        ]
 
     def send_fail_mail(self, user, workspace: Workspace):
         title = _(f"Migration ou export l'espace {workspace.title} échoué")
