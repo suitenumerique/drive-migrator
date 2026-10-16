@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.backends.destination import RejectedFile
 from core.destinations.drive.backend import DriveDestinationBackend
 from core.models import Workspace
 
@@ -15,6 +16,13 @@ from core.models import Workspace
 def _patch_mails_manager():
     """Prevent real MailsManager calls (DB access) across all tests in this module."""
     with patch("core.destinations.drive.backend.MailsManager"):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _patch_rejected_files_archive():
+    """Prevent the rejected files archive from reaching the DB and S3."""
+    with patch("core.destinations.drive.backend.RejectedFilesArchive"):
         yield
 
 
@@ -223,7 +231,7 @@ def test_file_rejected_by_drive_carries_the_drive_error(tmp_path, mock_backend):
     workspace = _make_workspace()
     destination.export(workspace, MagicMock(), str(tmp_path))
     destination._upload_log.rejected.append(  # pylint: disable=protected-access
-        {"path": "page.txt", "item_id": "id-page.txt", "error": "file_type_not_allowed"}
+        RejectedFile("page.txt", "file_type_not_allowed", "id-page.txt")
     )
 
     result = destination.check_integrity(workspace, str(tmp_path), True)
@@ -407,7 +415,7 @@ def test_listing_failure_keeps_the_drive_error_of_rejected_files(
     workspace = _make_workspace()
     destination.export(workspace, MagicMock(), str(tmp_path))
     destination._upload_log.rejected.append(  # pylint: disable=protected-access
-        {"path": "page.txt", "item_id": "id-page.txt", "error": "file_type_not_allowed"}
+        RejectedFile("page.txt", "file_type_not_allowed", "id-page.txt")
     )
 
     result = destination.check_integrity(workspace, str(tmp_path), True)
