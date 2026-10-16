@@ -1,3 +1,7 @@
 <mj-raw>{% if failed_files_count %}</mj-raw>
 <mj-text>{% blocktrans count counter=failed_files_count %}{{ counter }} fichier n'a pas pu être migré. Vous en trouverez le détail dans le fichier joint à ce mail.{% plural %}{{ counter }} fichiers n'ont pas pu être migrés. Vous en trouverez la liste dans le fichier joint à ce mail.{% endblocktrans %}</mj-text>
+<mj-raw>{% comment %}url is built server side (settings, UUID, urlencode); |safe keeps its "&" unescaped in the text version.{% endcomment %}</mj-raw>
+<mj-raw>{% for link in rejected_files_links %}</mj-raw>
+<mj-text>{% blocktrans with label=link.label %}Les fichiers refusés par {{ label }} sont réunis dans une archive :{% endblocktrans %} <a href="{{ link.url|safe }}">{% trans "télécharger les fichiers refusés" %}</a></mj-text>
+<mj-raw>{% endfor %}</mj-raw>
 <mj-raw>{% endif %}</mj-raw>
