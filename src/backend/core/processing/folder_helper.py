@@ -91,6 +91,9 @@ class ArchiveManager:
         if not s3_key:
             raise ValueError("Workspace does not have an archive path")
 
+        return self.get_presigned_url(s3_key)
+
+    def get_presigned_url(self, s3_key: str) -> str:
         s3 = self.get_s3_resource()
         url = s3.meta.client.generate_presigned_url(
             "get_object",
@@ -101,11 +104,11 @@ class ArchiveManager:
             ExpiresIn=self.download_url_expires_in,
         )
 
-        logger.info("ArchiveManager.upload_archive")
+        logger.info("ArchiveManager.get_presigned_url")
 
         if not settings.AWS_S3_DOWNLOAD_URL:
             logger.info(
-                "ArchiveManager.upload_archive returning url without replacing netloc"
+                "ArchiveManager.get_presigned_url returning url without replacing netloc"
             )
             return url
 
@@ -115,7 +118,9 @@ class ArchiveManager:
         url_parsed = urllib.parse.urlparse(url)
         download_url_parsed = urllib.parse.urlparse(settings.AWS_S3_DOWNLOAD_URL)
         replaced = url_parsed._replace(netloc=download_url_parsed.netloc)
-        logger.info("ArchiveManager.upload_archive returning url with replaced netloc")
+        logger.info(
+            "ArchiveManager.get_presigned_url returning url with replaced netloc"
+        )
 
         return replaced.geturl()
 
@@ -123,12 +128,21 @@ class ArchiveManager:
         folder_creator = FolderCreator()
         path = folder_creator.get_workspace_path(workspace) + "." + self.archive_format
 
-        s3 = self.get_s3_resource()
-        bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
         destination = os.path.basename(path)
-        bucket.upload_file(path, destination, Callback=ProgressPercentage(path))
+        self.upload_file(path, destination)
 
         workspace.set_destination_metadata("archive", {"s3_key": destination})
         workspace.save()
 
         return self.get_download_url(workspace)
+
+    def upload_file(self, path: str, s3_key: str) -> None:
+        s3 = self.get_s3_resource()
+        bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
+        bucket.upload_file(path, s3_key, Callback=ProgressPercentage(path))
+
+    def delete_file(self, s3_key: str) -> None:
+        s3 = self.get_s3_resource()
+        s3.meta.client.delete_object(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=s3_key
+        )
