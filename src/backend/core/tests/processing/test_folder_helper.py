@@ -303,3 +303,48 @@ def test_upload_archive_uploads_file_and_returns_url(tmp_path, settings):
     )
     workspace.save.assert_called_once()
     assert url == expected_url
+
+
+def test_upload_file_sends_the_file_under_the_given_key(tmp_path, settings):
+    """upload_file() uploads a local file to the bucket under the given key."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+    path = tmp_path / "rejected.zip"
+    path.write_bytes(b"zip")
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        ArchiveManager().upload_file(str(path), "some-key.zip")
+
+    mock_s3 = mock_boto3.resource.return_value
+    mock_s3.Bucket.assert_called_once_with("my-bucket")
+    args, _ = mock_s3.Bucket.return_value.upload_file.call_args
+    assert args == (str(path), "some-key.zip")
+
+
+def test_get_presigned_url_signs_the_given_key(settings):
+    """get_presigned_url() signs any key with the short expiry."""
+    settings.AWS_S3_DOWNLOAD_URL = ""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        mock_client = mock_boto3.resource.return_value.meta.client
+        mock_client.generate_presigned_url.return_value = "http://minio/k?sig=1"
+        url = ArchiveManager().get_presigned_url("other-key.zip")
+
+    assert url == "http://minio/k?sig=1"
+    mock_client.generate_presigned_url.assert_called_once_with(
+        "get_object",
+        Params={"Bucket": "my-bucket", "Key": "other-key.zip"},
+        ExpiresIn=ArchiveManager.download_url_expires_in,
+    )
+
+
+def test_delete_file_removes_the_given_key(settings):
+    """delete_file() deletes the object stored under the given key."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        ArchiveManager().delete_file("some-key.zip")
+
+    mock_boto3.resource.return_value.meta.client.delete_object.assert_called_once_with(
+        Bucket="my-bucket", Key="some-key.zip"
+    )
