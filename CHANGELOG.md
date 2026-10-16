@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Zip the files a destination refused and link it in the e-mail #257
+
 ## [v0.9.0] - 2026-10-14
 
 ### Added

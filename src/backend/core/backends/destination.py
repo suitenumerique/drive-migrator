@@ -1,6 +1,7 @@
 """Abstract destination backend interface and destination registry."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from django.conf import settings
 from django.utils.module_loading import import_string
@@ -8,6 +9,18 @@ from django.utils.module_loading import import_string
 # Members listing written by the archive and Drive exports. Named so that it
 # hardly collides with a source file, which it would overwrite then delete.
 MEMBERS_CSV_FILENAME = "users_list_by_migrator.csv"
+
+
+@dataclass(frozen=True)
+class RejectedFile:
+    """A file a destination refused during an export, which skipped it."""
+
+    # Relative to the workspace root.
+    path: str
+    # Destination error code, explained to the user by describe_rejection().
+    code: str
+    # Id of the item on the destination, when it has one, to look it up there.
+    item_id: str | None = None
 
 
 class AbstractDestinationBackend(ABC):
@@ -44,6 +57,12 @@ class AbstractDestinationBackend(ABC):
         For async destinations (e.g. Resana job), set status to PENDING.
         For sync destinations (e.g. archive), set status to SUCCESS or FAILURE.
         """
+
+    def describe_rejection(self, code: str) -> str:  # pylint: disable=unused-argument
+        """Human-readable reason for a RejectedFile code, shown to the user."""
+        # pylint: disable-next=fixme
+        # TODO: French only until the backend ships translations (.po).
+        return f"Fichier refusé par {self.label}"
 
     # --- Optional hooks (default: raise NotImplementedError) ---
 

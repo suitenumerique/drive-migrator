@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from django.conf import settings
 from django.core import mail
 from django.template.loader import render_to_string
+from django.test import override_settings
 
 import pytest
 
@@ -191,3 +192,68 @@ def test_send_migration_mail_has_no_attachment_without_failed_files(template_nam
     assert sent.attachments == []
     for body in (sent.body, sent.alternatives[0][0]):
         assert "fichier joint" not in body
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("template_name", ALL_TEMPLATES)
+@override_settings(LOGIN_REDIRECT_URL="http://localhost:3010")
+def test_send_migration_mail_links_the_rejected_files_archive(template_name):
+    """A destination that kept its refused files in a zip gets a link to the
+    frontend page that downloads it, never the raw S3 URL."""
+    workspace = _workspace_with_errors()
+    workspace.destination_metadata = {
+        "drive": {"workspace_id": "root", "rejected_files_s3_key": "ws.zip"},
+        "archive": {"s3_key": "workspace.zip"},
+    }
+    user = MagicMock()
+    user.email = "user@example.com"
+
+    MailsManager().send_migration_mail(
+        user, workspace, template_name, {"title": "Some Title"}
+    )
+
+    url = (
+        f"http://localhost:3010/download-rejected-files/?workspaceId={workspace.id}"
+        "&destination=drive"
+    )
+    sent = mail.outbox[0]
+    for body in (sent.body, sent.alternatives[0][0]):
+        assert url in body
+        assert "refusés par La Suite Drive" in body
+        assert "ws.zip" not in body
+        assert body.count("download-rejected-files") == 1
+
+
+@pytest.mark.django_db
+@override_settings(LOGIN_REDIRECT_URL="http://localhost:3010")
+def test_send_migration_mail_links_the_zip_of_an_unregistered_destination():
+    """A destination no longer configured is named after its slug instead of
+    preventing the mail from being sent."""
+    workspace = _workspace_with_errors()
+    workspace.destination_metadata = {"gone": {"rejected_files_s3_key": "ws.zip"}}
+    user = MagicMock()
+    user.email = "user@example.com"
+
+    MailsManager().send_migration_mail(
+        user, workspace, ALL_TEMPLATES[0], {"title": "Some Title"}
+    )
+
+    assert "refusés par gone" in mail.outbox[0].body
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("template_name", ALL_TEMPLATES)
+def test_send_migration_mail_has_no_archive_link_without_zip(template_name):
+    """No link when no destination kept a zip of refused files."""
+    workspace = _workspace_with_errors()
+    workspace.destination_metadata = {"drive": {"workspace_id": "root"}}
+    user = MagicMock()
+    user.email = "user@example.com"
+
+    MailsManager().send_migration_mail(
+        user, workspace, template_name, {"title": "Some Title"}
+    )
+
+    sent = mail.outbox[0]
+    for body in (sent.body, sent.alternatives[0][0]):
+        assert "download-rejected-files" not in body

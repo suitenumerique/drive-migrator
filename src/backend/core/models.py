@@ -18,19 +18,17 @@ from django.utils.translation import gettext_lazy as _
 from django_celery_results.models import TaskResult
 from timezone_field import TimeZoneField
 
+from core.backends.destination import DestinationRegistry
+
 logger = getLogger(__name__)
 
 
+# pylint: disable-next=fixme
+# TODO: French only until the backend ships translations (.po), then switch
+# these texts to English msgids wrapped in gettext.
 FAILED_FILES_CSV_HEADER = ["Chemin", "Nom du fichier", "Étape", "Motif", "Code"]
 
 DOWNLOAD_FAILED_CODE = "download_failed"
-
-DRIVE_REJECTION_REASONS = {
-    "item_create_file_extension_not_allowed": "Extension de fichier non autorisée",
-    "file_type_not_allowed": "Type de fichier non autorisé",
-    "file_size_exceeded": "Fichier trop volumineux",
-    "file_size_mismatch": "Fichier corrompu pendant le transfert",
-}
 
 
 class BaseModel(models.Model):
@@ -171,16 +169,7 @@ class Workspace(BaseModel):
                 DOWNLOAD_FAILED_CODE,
             ]
             for error in self.download_errors
-        ] + [
-            [
-                error["path"],
-                posixpath.basename(error["path"]),
-                "Envoi vers Drive",
-                DRIVE_REJECTION_REASONS.get(error["error"], "Fichier refusé par Drive"),
-                error["error"],
-            ]
-            for error in self.upload_errors
-        ]
+        ] + [self._upload_error_row(error) for error in self.upload_errors]
         if not rows:
             return None
 
@@ -191,6 +180,27 @@ class Workspace(BaseModel):
         writer.writerow(FAILED_FILES_CSV_HEADER)
         writer.writerows(rows)
         return output.getvalue()
+
+    @staticmethod
+    def _upload_error_row(error: dict) -> list[str]:
+        # Entries recorded before the destination was stored all came from Drive.
+        name = error.get("destination", "drive")
+        try:
+            destination = DestinationRegistry.get(name)
+        except ValueError:
+            # No longer configured: named after its slug rather than failing the
+            # CSV, and with it the mail it is attached to.
+            label, reason = name, f"Fichier refusé par {name}"
+        else:
+            label = destination.label
+            reason = destination.describe_rejection(error["error"])
+        return [
+            error["path"],
+            posixpath.basename(error["path"]),
+            f"Envoi vers {label}",
+            reason,
+            error["error"],
+        ]
 
     def sync_status(self):
         self.status = self.compute_status()

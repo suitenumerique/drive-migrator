@@ -16,6 +16,7 @@ from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.processing.integrity import IntegrityTracker, Stage
+from core.processing.rejected_files import RejectedFilesArchive
 from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app
@@ -118,6 +119,7 @@ def export(self, data):  # pylint: disable=unused-argument
     user = User.objects.get(id=data["user"]["id"])
 
     workspace.reset_migration_errors()
+    RejectedFilesArchive.clear(workspace)
 
     source_backend = SourceManager().get_backend()
     list_work_dir()

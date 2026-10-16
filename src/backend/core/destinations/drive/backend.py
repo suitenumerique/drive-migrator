@@ -15,6 +15,7 @@ from requests.exceptions import HTTPError
 from core.backends.destination import (
     MEMBERS_CSV_FILENAME,
     AbstractDestinationBackend,
+    RejectedFile,
 )
 from core.destinations.drive.drive_backend import (
     DriveBackend,
@@ -25,6 +26,7 @@ from core.destinations.drive.drive_backend import (
 from core.mails_manager import MailsManager
 from core.models import Workspace
 from core.processing.integrity import Stage
+from core.processing.rejected_files import RejectedFilesArchive
 
 logger = get_task_logger(__name__)
 
@@ -33,6 +35,16 @@ _UPLOAD_STATE_ANALYZING = "analyzing"
 _UPLOAD_STATE_READY = "ready"
 # Set by Drive when the analyzer rejects the size (413): still downloadable.
 _UPLOAD_STATE_TOO_LARGE_TO_ANALYZE = "file_too_large_to_analyze"
+
+# pylint: disable-next=fixme
+# TODO: French only until the backend ships translations (.po), then switch
+# these texts to English msgids wrapped in gettext.
+_REJECTION_REASONS = {
+    "item_create_file_extension_not_allowed": "Extension de fichier non autorisée",
+    "file_type_not_allowed": "Type de fichier non autorisé",
+    "file_size_exceeded": "Fichier trop volumineux",
+    "file_size_mismatch": "Fichier corrompu pendant le transfert",
+}
 
 
 @dataclass
@@ -44,8 +56,8 @@ class _UploadLog:
     root_id: str | None = None
     # Local path relative to the workspace root -> Drive item id.
     items: dict[str, str] = field(default_factory=dict)
-    # Files Drive refused, in the Workspace.upload_errors format.
-    rejected: list[dict] = field(default_factory=list)
+    # Files Drive refused.
+    rejected: list[RejectedFile] = field(default_factory=list)
 
 
 class DriveDestinationBackend(AbstractDestinationBackend):
@@ -68,6 +80,9 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         # with its workspace and reset by every export().
         self._upload_log = None
 
+    def describe_rejection(self, code: str) -> str:
+        return _REJECTION_REASONS.get(code) or super().describe_rejection(code)
+
     def _make_backend(self, user):
         auth_mode = getattr(settings, "DRIVE_AUTH_MODE", "service_account")
         if auth_mode == "user_token":
@@ -89,21 +104,22 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         finally:
             if csv_path:
                 os.remove(csv_path)
-            workspace.upload_errors = self._upload_log.rejected
-            workspace.save(update_fields=["upload_errors"])
+            RejectedFilesArchive(workspace, self).build(
+                local_folder_path, self._upload_log.rejected
+            )
             # One event per run, without paths: file names may be personal data.
             if self._upload_log.rejected:
                 logger.error(
                     "%s file(s) rejected by Drive: %s",
                     len(self._upload_log.rejected),
                     [
-                        (rejected["item_id"], rejected["error"])
+                        (rejected.item_id, rejected.code)
                         for rejected in self._upload_log.rejected
                     ],
                 )
 
         source_paths = set(self._upload_log.items) - {MEMBERS_CSV_FILENAME}
-        rejected_paths = {rejected["path"] for rejected in self._upload_log.rejected}
+        rejected_paths = {rejected.path for rejected in self._upload_log.rejected}
         if source_paths and source_paths <= rejected_paths:
             raise RuntimeError(
                 f"All {len(source_paths)} file(s) were rejected by Drive for "
@@ -204,11 +220,9 @@ class DriveDestinationBackend(AbstractDestinationBackend):
                     if code is None:
                         raise
                     self._upload_log.rejected.append(
-                        {
-                            "path": relative_path,
-                            "item_id": self._upload_log.items[relative_path],
-                            "error": code,
-                        }
+                        RejectedFile(
+                            relative_path, code, self._upload_log.items[relative_path]
+                        )
                     )
 
     def check_integrity(
@@ -218,7 +232,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         if log is None or log.workspace_id != workspace.id or log.root_id is None:
             return {"files": {}, "extra": []}
 
-        rejections = {rejected["path"]: rejected["error"] for rejected in log.rejected}
+        rejections = {rejected.path: rejected.code for rejected in log.rejected}
         try:
             drive_files = self._list_drive_files(log.backend, log.root_id)
             # The listing hides pending items: look up the missing ones directly.
