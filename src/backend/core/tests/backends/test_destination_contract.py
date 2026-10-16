@@ -56,3 +56,19 @@ def test_subclass_without_label_raises():
 
             def export(self, workspace, user, local_folder_path):
                 pass
+
+
+def test_describe_rejection_defaults_to_a_generic_reason():
+    """Without a mapping of its codes, a destination names itself as the refuser."""
+
+    class MinimalDest(AbstractDestinationBackend):
+        name = "minimal"
+        label = "Minimal Destination"
+
+        def export(self, workspace, user, local_folder_path):
+            pass
+
+    assert (
+        MinimalDest().describe_rejection("any_code")
+        == "Fichier refusé par Minimal Destination"
+    )

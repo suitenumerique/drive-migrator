@@ -796,3 +796,20 @@ def test_export_sends_drive_ready_mail(
     assert str(args[3]["title"])
     assert kwargs == {}
 
+
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [
+        (
+            "item_create_file_extension_not_allowed",
+            "Extension de fichier non autorisée",
+        ),
+        ("file_type_not_allowed", "Type de fichier non autorisé"),
+        ("file_size_exceeded", "Fichier trop volumineux"),
+        ("file_size_mismatch", "Fichier corrompu pendant le transfert"),
+        ("new_code", "Fichier refusé par La Suite Drive"),
+    ],
+)
+def test_describe_rejection_explains_each_drive_code(code, reason):
+    """Each known Drive code gets its own reason, an unknown one the default."""
+    assert DriveDestinationBackend().describe_rejection(code) == reason
