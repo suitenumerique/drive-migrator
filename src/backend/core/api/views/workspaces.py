@@ -4,13 +4,17 @@ from django.db.models.functions import Lower
 from django.forms.fields import UUIDField
 
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
+from ...backends.destination import DestinationRegistry
 from ...destinations.resana.resana_backend import ResanaBackend
 from ...models import ExtraTaskInfo, Workspace
 from ...processing.folder_helper import ArchiveManager
+from ...processing.rejected_files import RejectedFilesArchive
 from ...sources.osmose.serializers import WorkspaceSerializer
 from ..filters import MultipleValueFilter
 from ..permissions import IsAuthenticated
@@ -64,6 +68,30 @@ class WorkspacesViewset(viewsets.ReadOnlyModelViewSet):  # pylint: disable=too-m
         helper = ArchiveManager()
         workspace = self.get_object()
         return Response({"url": helper.get_download_url(workspace)})
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "destination",
+                str,
+                required=True,
+                description="Name of the destination whose refused files are wanted.",
+            )
+        ]
+    )
+    @action(detail=True)
+    def download_rejected_files(self, request, *args, **kwargs):
+        workspace = self.get_object()
+        try:
+            destination = DestinationRegistry.get(
+                request.query_params.get("destination", "")
+            )
+        except ValueError as error:
+            raise ValidationError({"destination": str(error)}) from error
+        url = RejectedFilesArchive(workspace, destination).get_download_url()
+        if url is None:
+            raise NotFound("This destination refused no file in the last migration.")
+        return Response({"url": url})
 
     @action(detail=True)
     def resana_error_details(self, request, *args, **kwargs):

@@ -59,6 +59,87 @@ def test_download_archive_authenticated_owner():
 
 
 # ---------------------------------------------------------------------------
+# download_rejected_files
+# ---------------------------------------------------------------------------
+
+
+def _rejected_files_url(workspace, destination="drive"):
+    return (
+        f"/api/v1.0/workspaces/{workspace.id}/download_rejected_files/"
+        f"?destination={destination}"
+    )
+
+
+def _owner_client(workspace):
+    user = factories.UserFactory()
+    user.workspaces.add(workspace)
+    client = APIClient()
+    client.force_login(user)
+    return client
+
+
+def test_download_rejected_files_anonymous():
+    """Anonymous users must not be able to request a download URL."""
+    workspace = factories.WorkspaceFactory()
+
+    response = APIClient().get(_rejected_files_url(workspace))
+
+    assert response.status_code == 401
+
+
+def test_download_rejected_files_other_user_workspace_not_found():
+    """A workspace not owned by the requesting user must not be accessible."""
+    user = factories.UserFactory()
+    other_workspace = factories.WorkspaceFactory(
+        destination_metadata={"drive": {"rejected_files_s3_key": "ws.zip"}}
+    )
+    client = APIClient()
+    client.force_login(user)
+
+    response = client.get(_rejected_files_url(other_workspace))
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("query", ["", "?destination=", "?destination=unknown"])
+def test_download_rejected_files_requires_a_known_destination(query):
+    """The destination whose refused files are wanted must be registered."""
+    workspace = factories.WorkspaceFactory()
+
+    response = _owner_client(workspace).get(
+        f"/api/v1.0/workspaces/{workspace.id}/download_rejected_files/{query}"
+    )
+
+    assert response.status_code == 400
+
+
+def test_download_rejected_files_not_found_without_zip():
+    """No URL when the destination refused nothing in the last run."""
+    workspace = factories.WorkspaceFactory(destination_metadata={"drive": {}})
+
+    response = _owner_client(workspace).get(_rejected_files_url(workspace))
+
+    assert response.status_code == 404
+
+
+def test_download_rejected_files_authenticated_owner():
+    """The owner gets a presigned URL of the destination's zip."""
+    workspace = factories.WorkspaceFactory(
+        destination_metadata={"drive": {"rejected_files_s3_key": "ws.zip"}}
+    )
+
+    with patch(
+        "core.processing.rejected_files.ArchiveManager.get_presigned_url",
+        return_value="http://s3.example.com/ws.zip?token=abc",
+    ) as get_presigned_url:
+        response = _owner_client(workspace).get(_rejected_files_url(workspace))
+
+    assert response.status_code == 200
+    assert response.json() == {"url": "http://s3.example.com/ws.zip?token=abc"}
+    get_presigned_url.assert_called_once_with("ws.zip")
+
+
+# ---------------------------------------------------------------------------
 # integrity field
 # ---------------------------------------------------------------------------
 
