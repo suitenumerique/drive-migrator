@@ -1,6 +1,7 @@
 """Abstract destination backend interface and destination registry."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from django.conf import settings
 from django.utils.module_loading import import_string
@@ -8,6 +9,18 @@ from django.utils.module_loading import import_string
 # Members listing written by the archive and Drive exports. Named so that it
 # hardly collides with a source file, which it would overwrite then delete.
 MEMBERS_CSV_FILENAME = "users_list_by_migrator.csv"
+
+
+@dataclass(frozen=True)
+class RejectedFile:
+    """A file a destination refused during an export, which skipped it."""
+
+    # Relative to the workspace root.
+    path: str
+    # Destination error code.
+    code: str
+    # Id of the item on the destination, when it has one, to look it up there.
+    item_id: str | None = None
 
 
 class AbstractDestinationBackend(ABC):

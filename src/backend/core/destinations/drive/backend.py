@@ -15,6 +15,7 @@ from requests.exceptions import HTTPError, RequestException
 from core.backends.destination import (
     MEMBERS_CSV_FILENAME,
     AbstractDestinationBackend,
+    RejectedFile,
 )
 from core.destinations.drive.drive_backend import (
     DriveBackend,
@@ -26,6 +27,7 @@ from core.destinations.drive.drive_backend import (
 from core.mails_manager import MailsManager
 from core.models import Workspace
 from core.processing.integrity import Stage
+from core.processing.rejected_files import RejectedFilesArchive
 
 logger = get_task_logger(__name__)
 
@@ -45,8 +47,8 @@ class _UploadLog:
     root_id: str | None = None
     # Local path relative to the workspace root -> Drive item id.
     items: dict[str, str] = field(default_factory=dict)
-    # Files refused on upload, in the Workspace.upload_errors format.
-    rejected: list[dict] = field(default_factory=list)
+    # Files refused on upload.
+    rejected: list[RejectedFile] = field(default_factory=list)
 
 
 class DriveDestinationBackend(AbstractDestinationBackend):
@@ -90,21 +92,22 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         finally:
             if csv_path:
                 os.remove(csv_path)
-            workspace.upload_errors = self._upload_log.rejected
-            workspace.save(update_fields=["upload_errors"])
+            RejectedFilesArchive(workspace, self).build(
+                local_folder_path, self._upload_log.rejected
+            )
             # One event per run, without paths: file names may be personal data.
             if self._upload_log.rejected:
                 logger.error(
                     "%s file(s) rejected on upload: %s",
                     len(self._upload_log.rejected),
                     [
-                        (rejected["item_id"], rejected["error"])
+                        (rejected.item_id, rejected.code)
                         for rejected in self._upload_log.rejected
                     ],
                 )
 
         source_paths = set(self._upload_log.items) - {MEMBERS_CSV_FILENAME}
-        rejected_paths = {rejected["path"] for rejected in self._upload_log.rejected}
+        rejected_paths = {rejected.path for rejected in self._upload_log.rejected}
         if source_paths and source_paths <= rejected_paths:
             raise RuntimeError(
                 f"All {len(source_paths)} file(s) were rejected on upload for "
@@ -219,11 +222,9 @@ class DriveDestinationBackend(AbstractDestinationBackend):
     def _reject(self, relative_path: str, rejection: FileRejection) -> None:
         """Record a file skipped because it was refused."""
         self._upload_log.rejected.append(
-            {
-                "path": relative_path,
-                "item_id": self._upload_log.items[relative_path],
-                "error": rejection.value,
-            }
+            RejectedFile(
+                relative_path, rejection.value, self._upload_log.items[relative_path]
+            )
         )
 
     @staticmethod
@@ -243,7 +244,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         if log is None or log.workspace_id != workspace.id or log.root_id is None:
             return {"files": {}, "extra": []}
 
-        rejections = {rejected["path"]: rejected["error"] for rejected in log.rejected}
+        rejections = {rejected.path: rejected.code for rejected in log.rejected}
         try:
             drive_files = self._list_drive_files(log.backend, log.root_id)
             # The listing hides pending items: look up the missing ones directly.
