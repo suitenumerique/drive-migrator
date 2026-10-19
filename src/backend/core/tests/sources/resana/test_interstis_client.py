@@ -1,10 +1,12 @@
 """Tests for InterstisClient — Interstis GED API HTTP client."""
 
 import logging
+import ssl
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests as req_lib
+import urllib3
 
 from core.sources.resana import interstis_client
 from core.sources.resana.interstis_client import InterstisClient
@@ -33,7 +35,7 @@ def _http_error(status_code):
 def test_client_sets_bearer_token_header(settings):
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
 
-    with patch("core.sources.resana.interstis_client.requests.Session") as mock_session:
+    with patch("core.sources.resana.interstis_client.RetryingSession") as mock_session:
         client = InterstisClient("my-token")
 
     mock_session.return_value.headers.__setitem__.assert_called_once_with(
@@ -42,13 +44,14 @@ def test_client_sets_bearer_token_header(settings):
     assert client.token == "my-token"
 
 
-def test_client_creates_session_on_init(settings):
+def test_client_creates_retrying_session_on_init(settings):
+    """The session retries transient failures using the RESANA_RETRY_* settings."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
 
-    with patch("core.sources.resana.interstis_client.requests.Session") as mock_session:
+    with patch("core.sources.resana.interstis_client.RetryingSession") as mock_session:
         InterstisClient("tok")
 
-    mock_session.assert_called_once()
+    mock_session.assert_called_once_with("RESANA", interstis_client.logger)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +183,7 @@ def test_download_file_writes_binary_content_to_path(settings, tmp_path):
         "https://resana.example.com/api/api/targets/file-uuid-123/download",
         stream=True,
         timeout=60,
+        idempotent=False,
     )
     with open(destination, "rb") as f:
         assert f.read() == file_content
@@ -351,3 +355,111 @@ def test_download_file_logs_error_on_final_failure(settings):
         client.download_file("file-uuid", "/tmp/x.pdf")
 
     mock_error.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Group 5 — Retry on transient errors, through the real RetryingSession
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(name="base_request")
+def fixture_base_request():
+    """Mock the requests.Session.request wrapped by RetryingSession."""
+    with patch.object(req_lib.Session, "request") as mock_request:
+        yield mock_request
+
+
+def _json_response(payload, status_code=200):
+    response = MagicMock()
+    response.status_code = status_code
+    response.json.return_value = payload
+    return response
+
+
+def test_explore_is_retried_on_timeout(settings, base_request):
+    """A timed out explore page is replayed instead of aborting the whole export."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    page = {"hydra:member": [{"uuid": "root-uuid"}], "hydra:totalItems": 1}
+    base_request.side_effect = [req_lib.Timeout("read timed out"), _json_response(page)]
+
+    result = InterstisClient("tok").explore("root-uuid")
+
+    assert base_request.call_count == 2
+    assert result == [{"uuid": "root-uuid"}]
+
+
+def test_get_workspaces_retries_only_the_failing_page(settings, base_request):
+    """A 5xx on the second page replays that page, not the whole pagination."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    page_1 = {
+        "hydra:member": [{"uuid": f"ws-{i}"} for i in range(500)],
+        "hydra:totalItems": 501,
+    }
+    page_2 = {"hydra:member": [{"uuid": "ws-500"}], "hydra:totalItems": 501}
+    base_request.side_effect = [
+        _json_response(page_1),
+        _json_response({}, status_code=504),
+        _json_response(page_2),
+    ]
+
+    result = InterstisClient("tok").get_workspaces()
+
+    assert base_request.call_count == 3
+    assert len(result) == 501
+    pages = [call.kwargs["params"]["page"] for call in base_request.call_args_list]
+    assert pages == [1, 2, 2]
+
+
+def test_download_file_is_not_retried_twice_over(settings, base_request):
+    """download_file already retries the whole download, so the session must not
+    retry it again: attempts stay at RESANA_RETRY_MAX_ATTEMPTS, not its square."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 3
+    base_request.side_effect = req_lib.Timeout("read timed out")
+
+    with pytest.raises(req_lib.Timeout):
+        InterstisClient("tok").download_file("file-uuid", "/tmp/x.pdf")
+
+    assert base_request.call_count == 3
+
+
+def test_download_file_is_retried_when_the_body_is_cut_short(settings, tmp_path):
+    """A connection dropped mid-stream raises ChunkedEncodingError from
+    iter_content, outside the session: the download decorator retries it."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    cut_short = _success_response()
+    cut_short.iter_content.side_effect = req_lib.exceptions.ChunkedEncodingError(
+        "IncompleteRead"
+    )
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.side_effect = [cut_short, _success_response()]
+
+    client.download_file("file-uuid", str(tmp_path / "output.pdf"))
+
+    assert client.session.get.call_count == 2
+
+
+def _certificate_error():
+    """Build the SSLError requests raises when the certificate can't be verified."""
+    reason = urllib3.exceptions.SSLError(
+        ssl.SSLCertVerificationError("certificate verify failed")
+    )
+    return req_lib.exceptions.SSLError(
+        urllib3.exceptions.MaxRetryError(None, "/x", reason=reason)
+    )
+
+
+def test_download_file_is_not_retried_on_certificate_error(settings):
+    """A certificate that can't be verified fails every attempt: raised at once."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+
+    client = InterstisClient("tok")
+    client.session = MagicMock()
+    client.session.get.side_effect = _certificate_error()
+
+    with pytest.raises(req_lib.exceptions.SSLError):
+        client.download_file("file-uuid", "/tmp/x.pdf")
+
+    assert client.session.get.call_count == 1

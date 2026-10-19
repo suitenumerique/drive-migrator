@@ -12,7 +12,11 @@ The PHPSESSID and CSRF token both come from the resana-migrator bridge response
 import html
 import re
 
-import requests
+from celery.utils.log import get_task_logger
+
+from core.retrying_session import RetryingSession
+
+logger = get_task_logger(__name__)
 
 _REQUEST_TIMEOUT = 30
 GESTIONNAIRE_CODE = "GESTIONNAIRE"
@@ -34,7 +38,7 @@ class ResanaMembersClient:
         base_url: str,
     ):
         self.base_url = base_url
-        self.session = requests.Session()
+        self.session = RetryingSession("RESANA", logger)
         self.session.cookies.set("interstis_access", access_token)
         self.session.cookies.set("PHPSESSID", session_id)
         self.session.headers["X-Requested-With"] = "XMLHttpRequest"
@@ -43,7 +47,9 @@ class ResanaMembersClient:
     def get_workspaces(self) -> list[dict]:
         """Return all unlocked workspaces accessible to the current user as {slug, name, uuid} dicts."""
         resp = self.session.post(
-            f"{self.base_url}/public/perimetre/getOngletTrie", timeout=_REQUEST_TIMEOUT
+            f"{self.base_url}/public/perimetre/getOngletTrie",
+            timeout=_REQUEST_TIMEOUT,
+            idempotent=True,
         )
         resp.raise_for_status()
         return self._parse_workspaces(resp.json())
@@ -59,6 +65,7 @@ class ResanaMembersClient:
             f"{self.base_url}/public/perimetre/listerMesEspaces",
             data={"archiveUnique": "1"},
             timeout=_REQUEST_TIMEOUT,
+            idempotent=True,
         )
         resp.raise_for_status()
         return self._parse_workspaces(resp.json())
@@ -132,6 +139,7 @@ class ResanaMembersClient:
             f"{self.base_url}/public/utilisateur/listerUtilisateurByPerimetreAndGroupe",
             data={"id_perimetre": slug, "chargerAllUtilisateurs": "1"},
             timeout=_REQUEST_TIMEOUT,
+            idempotent=True,
         )
         resp.raise_for_status()
         return resp.json()

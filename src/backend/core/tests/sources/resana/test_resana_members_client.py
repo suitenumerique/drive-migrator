@@ -51,8 +51,8 @@ _LISTER_MES_ESPACES_LOCKED_RESPONSE = {
 
 
 def _make_client():
-    """Build a ResanaMembersClient with a mocked underlying requests.Session."""
-    with patch("core.sources.resana.resana_members_client.requests.Session"):
+    """Build a ResanaMembersClient with a mocked underlying RetryingSession."""
+    with patch("core.sources.resana.resana_members_client.RetryingSession"):
         client = ResanaMembersClient(
             access_token=ACCESS_TOKEN,
             session_id=PHP_SESSION_ID,
@@ -72,7 +72,7 @@ def _make_client():
 def test_init_sets_access_token_cookie():
     """Constructor sets the interstis_access cookie with the provided token."""
     with patch(
-        "core.sources.resana.resana_members_client.requests.Session"
+        "core.sources.resana.resana_members_client.RetryingSession"
     ) as mock_session:
         ResanaMembersClient(
             access_token=ACCESS_TOKEN,
@@ -89,7 +89,7 @@ def test_init_sets_access_token_cookie():
 def test_init_sets_php_session_id_cookie_from_argument():
     """Constructor sets PHPSESSID from the session_id argument, not a decoded JWT."""
     with patch(
-        "core.sources.resana.resana_members_client.requests.Session"
+        "core.sources.resana.resana_members_client.RetryingSession"
     ) as mock_session:
         ResanaMembersClient(
             access_token=ACCESS_TOKEN,
@@ -104,7 +104,7 @@ def test_init_sets_php_session_id_cookie_from_argument():
 def test_init_sets_xhr_header():
     """Constructor adds the X-Requested-With: XMLHttpRequest header."""
     with patch(
-        "core.sources.resana.resana_members_client.requests.Session"
+        "core.sources.resana.resana_members_client.RetryingSession"
     ) as mock_session:
         ResanaMembersClient(
             access_token=ACCESS_TOKEN,
@@ -121,7 +121,7 @@ def test_init_sets_xhr_header():
 def test_init_sets_csrf_header_from_argument():
     """Constructor sets X-CSRF-TOKEN from the csrf_token argument, no HTML scraping involved."""
     with patch(
-        "core.sources.resana.resana_members_client.requests.Session"
+        "core.sources.resana.resana_members_client.RetryingSession"
     ) as mock_session:
         ResanaMembersClient(
             access_token=ACCESS_TOKEN,
@@ -135,9 +135,25 @@ def test_init_sets_csrf_header_from_argument():
     )
 
 
+def test_init_uses_a_retrying_session_with_resana_settings():
+    """Constructor builds a RetryingSession driven by the RESANA_RETRY_* settings."""
+    with patch(
+        "core.sources.resana.resana_members_client.RetryingSession"
+    ) as mock_session:
+        ResanaMembersClient(
+            access_token=ACCESS_TOKEN,
+            session_id=PHP_SESSION_ID,
+            csrf_token=CSRF_TOKEN,
+            base_url=BASE_URL,
+        )
+
+    mock_session.assert_called_once()
+    assert mock_session.call_args[0][0] == "RESANA"
+
+
 def test_init_requires_keyword_arguments():
     """Positional args are rejected: four same-typed strings are too easy to transpose."""
-    with patch("core.sources.resana.resana_members_client.requests.Session"):
+    with patch("core.sources.resana.resana_members_client.RetryingSession"):
         with pytest.raises(TypeError):
             ResanaMembersClient(  # pylint: disable=missing-kwoa,too-many-function-args
                 ACCESS_TOKEN, PHP_SESSION_ID, CSRF_TOKEN, BASE_URL
@@ -158,7 +174,7 @@ def test_get_workspaces_posts_to_get_onglet_trie_without_a_prior_get():
 
     client.session.get.assert_not_called()
     client.session.post.assert_called_once_with(
-        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30
+        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30, idempotent=True
     )
 
 
@@ -206,6 +222,7 @@ def test_get_locked_workspaces_posts_to_lister_mes_espaces_with_archive_unique()
         f"{BASE_URL}/public/perimetre/listerMesEspaces",
         data={"archiveUnique": "1"},
         timeout=30,
+        idempotent=True,
     )
 
 
@@ -267,6 +284,7 @@ def test_is_workspace_locked_posts_to_lister_mes_espaces():
         f"{BASE_URL}/public/perimetre/listerMesEspaces",
         data={"archiveUnique": "1"},
         timeout=30,
+        idempotent=True,
     )
 
 
@@ -331,7 +349,7 @@ def test_find_slug_by_workspace_uuid_does_not_check_locked_workspaces_when_found
     client.find_slug_by_workspace_uuid("02-01-uuid-test")
 
     client.session.post.assert_called_once_with(
-        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30
+        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30, idempotent=True
     )
 
 
@@ -382,6 +400,7 @@ def test_list_workspace_members_posts_id_perimetre_and_charger_all():
         f"{BASE_URL}/public/utilisateur/listerUtilisateurByPerimetreAndGroupe",
         data={"id_perimetre": SLUG, "chargerAllUtilisateurs": "1"},
         timeout=30,
+        idempotent=True,
     )
 
 
@@ -588,3 +607,59 @@ def test_get_own_role_label_returns_none_on_redirect():
     )
 
     assert client.get_own_role_label(SLUG) is None
+
+
+# ---------------------------------------------------------------------------
+# Retry on transient errors, through the real RetryingSession
+# ---------------------------------------------------------------------------
+
+
+def _real_client():
+    return ResanaMembersClient(
+        access_token=ACCESS_TOKEN,
+        session_id=PHP_SESSION_ID,
+        csrf_token=CSRF_TOKEN,
+        base_url=BASE_URL,
+    )
+
+
+def _ok_json_response(payload):
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = payload
+    return response
+
+
+@pytest.fixture(name="base_request")
+def fixture_base_request():
+    """Mock the requests.Session.request wrapped by RetryingSession, without sleeping."""
+    with (
+        patch("tenacity.nap.time.sleep"),
+        patch.object(requests.Session, "request") as mock_request,
+    ):
+        yield mock_request
+
+
+def test_get_workspaces_read_only_post_is_retried_on_timeout(base_request):
+    """getOngletTrie only reads, so a timed out POST is replayed."""
+    base_request.side_effect = [
+        requests.Timeout("read timed out"),
+        _ok_json_response(_ONGLET_TRIE_RESPONSE),
+    ]
+
+    workspaces = _real_client().get_workspaces()
+
+    assert base_request.call_count == 2
+    assert len(workspaces) == 3
+
+
+def test_list_workspace_members_is_retried_on_server_error(base_request):
+    """A 5xx on the members listing is replayed instead of failing the export."""
+    base_request.side_effect = [
+        _ok_json_response({}),
+        MagicMock(status_code=502),
+        _ok_json_response([]),
+    ]
+
+    assert not _real_client().list_workspace_members(SLUG)
+    assert base_request.call_count == 3
