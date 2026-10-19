@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [v0.11.0] - 2026-10-19
+
+## [v0.10.0] - 2026-10-19
+
 ### Added
 
 - Zip the files a destination refused and link it in the e-mail #257
@@ -130,6 +134,8 @@ and this project adheres to
 
 - delete unused var in Makefile
 
-[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.9.0...main
+[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.11.0...main
+[v0.11.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.11.0
+[v0.10.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.10.0
 [v0.9.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.9.0
 [v0.8.10]: https://github.com/suitenumerique/drive-migrator/releases/v0.8.10
