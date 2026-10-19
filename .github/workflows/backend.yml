@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' # Makes sense only for pull requests
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0 
@@ -31,9 +31,9 @@ jobs:
           GIT_REF: ${{ github.event.pull_request.base.ref }}
 
       - name: Install Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14.6"
+          python-version: "3.15.0"
 
       - name: Install gitlint
         run: pip install --user requests gitlint
@@ -54,7 +54,7 @@ jobs:
       github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 50
           persist-credentials: false
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -86,7 +86,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -98,9 +98,9 @@ jobs:
           key: mail-templates-${{ hashFiles('src/mail/mjml/**', 'src/mail/bin/**', 'src/mail/package.json', 'src/mail/yarn.lock', 'src/mail/html-to-text.config.json') }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22.x"
+          node-version: "24.x"
 
       - name: Enable corepack
         run: corepack enable
@@ -137,9 +137,9 @@ jobs:
           python-version-file: "./src/backend/.python-version"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.11.31"
+          version: "0.13.0"
           enable-cache: true
 
       - name: Install the project
@@ -159,7 +159,7 @@ jobs:
         working-directory: src/backend
     services:
       postgres:
-        image: postgres:16
+        image: postgres:18
         env:
           POSTGRES_DB: main
           POSTGRES_USER: dinum
@@ -233,9 +233,9 @@ jobs:
           python-version-file: "./src/backend/.python-version"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.11.31"
+          version: "0.13.0"
           enable-cache: true
 
       - name: Install the dependencies
