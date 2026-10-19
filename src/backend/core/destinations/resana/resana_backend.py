@@ -11,7 +11,14 @@ from core.destinations.resana.s3_resana_manager import S3ResanaManager
 from core.mails_manager import MailsManager
 from core.models import ResanaEmailMapping, User, Workspace
 from core.processing.folder_creator import FolderCreator
+from core.retrying_session import RetryingSession
 from core.utils import truncate_folder_and_file_names
+
+_REQUEST_TIMEOUT = 30
+# Creation POSTs are not retried: timing out while Resana still completes one
+# would leave a workspace or job nothing records, so they wait up to 5 minutes
+# for the answer instead of the 30s given to reads.
+_POST_TIMEOUT = (10, 300)
 
 
 def get_logger():
@@ -253,6 +260,11 @@ class ResanaBackend:
         if base_url := kwargs.pop("base_url", None):
             full_url = base_url + url
 
+        # GETs are retried by the session; POSTs are not, since replaying a
+        # workspace, job or member creation would duplicate it.
+        kwargs.setdefault(
+            "timeout", _REQUEST_TIMEOUT if method == "get" else _POST_TIMEOUT
+        )
         response = func(full_url, **kwargs)
         try:
             response.raise_for_status()
@@ -267,7 +279,7 @@ class ResanaBackend:
         return response
 
     def create_jwt(self):
-        self.session = requests.Session()
+        self.session = RetryingSession("RESANA", get_logger())
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         response = self.session.post(
             settings.RESANA_AUTH_ENDPOINT,
@@ -284,6 +296,9 @@ class ResanaBackend:
             },
             headers=headers,
             allow_redirects=False,
+            timeout=_REQUEST_TIMEOUT,
+            # Logging in again only opens another session.
+            idempotent=True,
         )
         response.raise_for_status()
 

@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Retry transient API errors (timeouts, connection errors, 5xx) in the Osmose,
+  Resana and Drive API clients #264
+
 ## [v0.10.1] - 2026-10-22
 
 ### Added

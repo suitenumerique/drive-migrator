@@ -7,7 +7,11 @@ freeze it against edits, and grant the migration account access to every folder 
 the migration doesn't miss files it lacked rights to.
 """
 
-import requests
+from celery.utils.log import get_task_logger
+
+from core.retrying_session import RetryingSession
+
+logger = get_task_logger(__name__)
 
 _REQUEST_TIMEOUT = 30
 
@@ -43,7 +47,12 @@ class ResanaLockClient:
         base_url: str,
     ):
         self.base_url = base_url
-        self.session = requests.Session()
+        # Every call is retried, POSTs included: the reads have no side effect, and
+        # figer/defiger/saveDroit/deverouilleDossier set a state, so replaying one
+        # that already went through leaves the workspace as intended. Observed on
+        # Resana: a second saveDroit keeps the rights saved by the first one, which
+        # deverouilleDossier restores.
+        self.session = RetryingSession("RESANA", logger)
         self.session.cookies.set("interstis_access", access_token)
         self.session.cookies.set("PHPSESSID", session_id)
         self.session.headers["X-Requested-With"] = "XMLHttpRequest"
@@ -70,6 +79,7 @@ class ResanaLockClient:
             params={"slug": slug},
             data={"allFolders": "true"},
             timeout=_REQUEST_TIMEOUT,
+            idempotent=True,
         )
         resp.raise_for_status()
         folders = resp.json().get("folders", [])
@@ -87,6 +97,7 @@ class ResanaLockClient:
                 "id_socket": (None, "undefined"),
             },
             timeout=_REQUEST_TIMEOUT,
+            idempotent=True,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -105,6 +116,7 @@ class ResanaLockClient:
             params={"slug": slug, "socket": "undefined", "peri": slug},
             timeout=_REQUEST_TIMEOUT,
             allow_redirects=False,
+            idempotent=True,
         )
         resp.raise_for_status()
 
@@ -115,6 +127,7 @@ class ResanaLockClient:
             params={"slug": slug, "socket": "undefined", "peri": slug},
             timeout=_REQUEST_TIMEOUT,
             allow_redirects=False,
+            idempotent=True,
         )
         resp.raise_for_status()
 
@@ -135,6 +148,7 @@ class ResanaLockClient:
                 "id_socket": (None, "undefined"),
             },
             timeout=_REQUEST_TIMEOUT,
+            idempotent=True,
         )
         _raise_unless_success(resp)
 
@@ -148,5 +162,6 @@ class ResanaLockClient:
                 "id_socket": (None, "undefined"),
             },
             timeout=_REQUEST_TIMEOUT,
+            idempotent=True,
         )
         _raise_unless_success(resp)

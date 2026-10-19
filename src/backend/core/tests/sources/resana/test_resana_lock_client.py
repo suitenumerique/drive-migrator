@@ -38,8 +38,8 @@ _GET_FOLDERS_RESPONSE = {
 
 
 def _make_client():
-    """Build a ResanaLockClient with a mocked underlying requests.Session."""
-    with patch("core.sources.resana.resana_lock_client.requests.Session"):
+    """Build a ResanaLockClient with a mocked underlying RetryingSession."""
+    with patch("core.sources.resana.resana_lock_client.RetryingSession"):
         client = ResanaLockClient(
             access_token=ACCESS_TOKEN,
             session_id=PHP_SESSION_ID,
@@ -58,7 +58,7 @@ def _make_client():
 def test_init_sets_access_token_cookie():
     """Constructor sets the interstis_access cookie with the provided token."""
     with patch(
-        "core.sources.resana.resana_lock_client.requests.Session"
+        "core.sources.resana.resana_lock_client.RetryingSession"
     ) as mock_session:
         ResanaLockClient(
             access_token=ACCESS_TOKEN,
@@ -75,7 +75,7 @@ def test_init_sets_access_token_cookie():
 def test_init_sets_php_session_id_cookie():
     """Constructor sets PHPSESSID from the session_id argument."""
     with patch(
-        "core.sources.resana.resana_lock_client.requests.Session"
+        "core.sources.resana.resana_lock_client.RetryingSession"
     ) as mock_session:
         ResanaLockClient(
             access_token=ACCESS_TOKEN,
@@ -90,7 +90,7 @@ def test_init_sets_php_session_id_cookie():
 def test_init_sets_csrf_header():
     """Constructor sets X-CSRF-TOKEN from the csrf_token argument."""
     with patch(
-        "core.sources.resana.resana_lock_client.requests.Session"
+        "core.sources.resana.resana_lock_client.RetryingSession"
     ) as mock_session:
         ResanaLockClient(
             access_token=ACCESS_TOKEN,
@@ -102,6 +102,22 @@ def test_init_sets_csrf_header():
     mock_session.return_value.headers.__setitem__.assert_any_call(
         "X-CSRF-TOKEN", CSRF_TOKEN
     )
+
+
+def test_init_uses_a_retrying_session_with_resana_settings():
+    """Constructor builds a RetryingSession driven by the RESANA_RETRY_* settings."""
+    with patch(
+        "core.sources.resana.resana_lock_client.RetryingSession"
+    ) as mock_session:
+        ResanaLockClient(
+            access_token=ACCESS_TOKEN,
+            session_id=PHP_SESSION_ID,
+            csrf_token=CSRF_TOKEN,
+            base_url=BASE_URL,
+        )
+
+    mock_session.assert_called_once()
+    assert mock_session.call_args[0][0] == "RESANA"
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +137,7 @@ def test_get_top_level_folder_ids_calls_get_folders():
         params={"slug": SLUG},
         data={"allFolders": "true"},
         timeout=30,
+        idempotent=True,
     )
 
 
@@ -166,6 +183,7 @@ def test_get_folder_access_owner_posts_to_get_all_dossier_droit():
             "id_socket": (None, "undefined"),
         },
         timeout=30,
+        idempotent=True,
     )
 
 
@@ -214,6 +232,7 @@ def test_lock_workspace_calls_figer():
         params={"slug": SLUG, "socket": "undefined", "peri": SLUG},
         timeout=30,
         allow_redirects=False,
+        idempotent=True,
     )
 
 
@@ -227,6 +246,7 @@ def test_unlock_workspace_calls_defiger():
         params={"slug": SLUG, "socket": "undefined", "peri": SLUG},
         timeout=30,
         allow_redirects=False,
+        idempotent=True,
     )
 
 
@@ -253,6 +273,7 @@ def test_grant_folder_access_calls_save_droit():
             "id_socket": (None, "undefined"),
         },
         timeout=30,
+        idempotent=True,
     )
 
 
@@ -271,6 +292,7 @@ def test_release_folder_access_calls_deverouille_dossier():
             "id_socket": (None, "undefined"),
         },
         timeout=30,
+        idempotent=True,
     )
 
 
@@ -337,3 +359,81 @@ def test_get_connected_user_id_returns_a_string():
     }
 
     assert client.get_connected_user_id() == "2040942"
+
+
+# ---------------------------------------------------------------------------
+# Retry on transient errors, through the real RetryingSession
+# ---------------------------------------------------------------------------
+
+
+def _real_client():
+    return ResanaLockClient(
+        access_token=ACCESS_TOKEN,
+        session_id=PHP_SESSION_ID,
+        csrf_token=CSRF_TOKEN,
+        base_url=BASE_URL,
+    )
+
+
+def _status_response(status_code, payload=None):
+    response = MagicMock()
+    response.status_code = status_code
+    response.json.return_value = payload
+    return response
+
+
+@pytest.fixture(name="base_request")
+def fixture_base_request():
+    """Mock the requests.Session.request wrapped by RetryingSession, without sleeping."""
+    with (
+        patch("tenacity.nap.time.sleep"),
+        patch.object(requests.Session, "request") as mock_request,
+    ):
+        yield mock_request
+
+
+def test_get_top_level_folder_ids_is_retried_on_timeout(base_request):
+    """getFolders only reads, so a timed out POST is replayed."""
+    base_request.side_effect = [
+        requests.Timeout("read timed out"),
+        _status_response(200, {"folders": []}),
+    ]
+
+    assert not _real_client().get_top_level_folder_ids(SLUG)
+    assert base_request.call_count == 2
+
+
+def test_lock_workspace_is_retried_on_timeout(base_request):
+    """figer sets a state the caller checks afterwards: safe to replay."""
+    base_request.side_effect = [
+        requests.Timeout("read timed out"),
+        _status_response(302),
+    ]
+
+    _real_client().lock_workspace(SLUG)
+
+    assert base_request.call_count == 2
+
+
+def test_grant_folder_access_is_retried_on_server_error(base_request):
+    """A second saveDroit keeps the saved original rights: safe to replay."""
+    base_request.side_effect = [
+        _status_response(502),
+        _status_response(200, {"success": True}),
+    ]
+
+    _real_client().grant_folder_access(SLUG, "folder-id", "user-id")
+
+    assert base_request.call_count == 2
+
+
+def test_release_folder_access_is_retried_on_timeout(base_request):
+    """deverouilleDossier restores the saved rights: safe to replay."""
+    base_request.side_effect = [
+        requests.Timeout("read timed out"),
+        _status_response(200, {"success": True}),
+    ]
+
+    _real_client().release_folder_access(SLUG, "folder-id")
+
+    assert base_request.call_count == 2
