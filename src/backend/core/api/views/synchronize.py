@@ -7,6 +7,7 @@ from core.api import APIException
 from core.api.permissions import IsAuthenticated
 from core.backends.source import SourceManager
 from core.models import FeatureFlag
+from core.retrying_session import limited_retries
 from core.sources.resana.token_manager import ResanaTokenExpired
 from core.utils import is_feature
 
@@ -22,7 +23,10 @@ class SynchronizeAPIView(APIView):
             return Response({"message": "Read only mode is enabled."})
         manager = SourceManager()
         try:
-            manager.synchronize(request.user)
+            # Runs inside the web request: retrying a hanging source would
+            # outlast the server's timeout, so each API call is tried once.
+            with limited_retries(max_attempts=1):
+                manager.synchronize(request.user)
         except ResanaTokenExpired as exc:
             raise APIException("ResanaTokenRequired") from exc
         posthog_capture(
