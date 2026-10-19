@@ -21,6 +21,7 @@ from tenacity import (
 
 from core.models import Workspace
 from core.retry_utils import log_final_failure_and_reraise
+from core.retrying_session import RetryingSession
 from core.sources.osmose.osmose_backend import (
     OsmoseBackend,
     OsmoseFile,
@@ -112,6 +113,7 @@ class OsmoseRealBackend(OsmoseBackend):
     def __init__(self):
         self.jwt = None
         self.cookies = {}
+        self.session = RetryingSession("OSMOSE", get_logger())
 
     def create_jwt(self, user):  # pylint: disable=unused-argument
         private_key = serialization.load_pem_private_key(
@@ -200,7 +202,7 @@ class OsmoseRealBackend(OsmoseBackend):
 
     def fetch(self, url, params=None):
         self.init_jwt()
-        response = requests.get(
+        response = self.session.get(
             settings.OSMOSE_API_ENDPOINT + url,
             params=params,
             headers={
