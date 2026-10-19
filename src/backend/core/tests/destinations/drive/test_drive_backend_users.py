@@ -11,6 +11,7 @@ import pytest
 from requests.exceptions import Timeout
 
 from core.destinations.drive.drive_backend import DriveServiceAccountBackend
+from core.tests.destinations.drive.drive_http_mock import patch_drive_http
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +29,7 @@ def test_service_account_find_user_by_email_paginated(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.return_value.json.return_value = {
             "results": [{"id": "user-uuid", "email": "alice@example.com"}]
         }
@@ -58,7 +59,7 @@ def test_service_account_find_user_by_email_retries_on_timeout_then_succeeds(set
         "results": [{"id": "user-uuid", "email": "alice@example.com"}]
     }
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.side_effect = [Timeout("timed out"), success_response]
         result = backend.find_user_by_email("alice@example.com")
 
@@ -74,7 +75,7 @@ def test_service_account_find_user_by_email_flat_list(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.return_value.json.return_value = [
             {"id": "user-uuid", "email": "alice@example.com"}
         ]
@@ -92,7 +93,7 @@ def test_service_account_find_user_by_email_not_found(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.return_value.json.return_value = {"results": []}
         mock_requests.get.return_value.raise_for_status = MagicMock()
         result = backend.find_user_by_email("unknown@example.com")
@@ -107,7 +108,7 @@ def _find_user(settings, email, results):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.return_value.json.return_value = {"results": results}
         return backend.find_user_by_email(email)
 

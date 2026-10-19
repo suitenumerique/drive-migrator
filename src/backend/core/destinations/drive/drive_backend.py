@@ -9,20 +9,19 @@ from enum import StrEnum
 from django.conf import settings
 from django.utils import timezone
 
-import requests
 from celery.utils.log import get_task_logger
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import HTTPError, RequestException, Timeout
+from requests.auth import AuthBase
+from requests.exceptions import HTTPError, RequestException
 from tenacity import (
     before_sleep_log,
     retry,
     retry_if_exception,
-    retry_if_exception_type,
     wait_exponential,
 )
 
 from core.encryption import decrypt_token, encrypt_token
 from core.retry_utils import log_final_failure_and_reraise
+from core.retrying_session import RetryingSession, is_transient_error
 from core.utils import (
     describe_access_expiry,
     describe_oauth_error,
@@ -62,10 +61,11 @@ def _is_server_error(error: BaseException) -> bool:
     )
 
 
-# Retries on a transient network error or a Drive-side 5xx.
+# Retries item creation on a transient network error or a Drive-side 5xx. Other
+# calls are retried by the backend's RetryingSession; creation can't be, since it
+# must check whether an ambiguously-failed POST created the item before replaying.
 _retry_on_transient_error = retry(
-    retry=retry_if_exception_type((Timeout, RequestsConnectionError))
-    | retry_if_exception(_is_server_error),
+    retry=retry_if_exception(is_transient_error) | retry_if_exception(_is_server_error),
     stop=_stop_after_configured_attempts,
     wait=_wait_configured_backoff,
     before_sleep=before_sleep_log(logger, logging.INFO),
@@ -194,6 +194,18 @@ def describe_drive_tokens(user) -> str:
     return f"Drive (ProConnect) tokens for user {user.id}: {access}; {refresh}"
 
 
+class _BearerTokenAuth(AuthBase):
+    """Set the bearer token when each attempt is prepared, so a retry after a
+    long timeout sends a refreshed token instead of one that expired meanwhile."""
+
+    def __init__(self, get_token):
+        self._get_token = get_token
+
+    def __call__(self, request):
+        request.headers["Authorization"] = f"Bearer {self._get_token()}"
+        return request
+
+
 class DriveBackend:
     """Base HTTP client for La Suite Drive API.
 
@@ -205,6 +217,9 @@ class DriveBackend:
     def __init__(self):
         self._access_token = None
         self._token_expires_at = None
+        self.session = RetryingSession("DRIVE", logger)
+        # Per call, not on the session: the S3 upload must not receive the token.
+        self._auth = _BearerTokenAuth(self._get_token)
 
     @property
     def api_root_url(self) -> str:
@@ -224,9 +239,6 @@ class DriveBackend:
 
     def _refresh(self):
         raise NotImplementedError
-
-    def _headers(self) -> dict:
-        return {"Authorization": f"Bearer {self._get_token()}"}
 
     # --- Folder operations ---
 
@@ -273,11 +285,12 @@ class DriveBackend:
         self._delete_item(existing_item["id"])
         return self._create_item(url, payload)
 
-    @_retry_on_transient_error
     def _delete_item(self, item_id: str) -> None:
         """DELETE /items/{id}/ (soft delete)."""
         url = f"{self.api_root_url}/items/{item_id}/"
-        response = requests.delete(url, headers=self._headers(), timeout=30)
+        response = self.session.delete(
+            url, auth=self._auth, timeout=30, idempotent=True
+        )
         response.raise_for_status()
 
     def _create_item(self, url: str, payload: dict, item_id: str | None = None) -> dict:
@@ -292,8 +305,8 @@ class DriveBackend:
         @_retry_on_transient_error
         def do_create_item():
             try:
-                response = requests.post(
-                    url, json=payload, headers=self._headers(), timeout=30
+                response = self.session.post(
+                    url, json=payload, auth=self._auth, timeout=30
                 )
                 response.raise_for_status()
                 return response.json()
@@ -313,7 +326,9 @@ class DriveBackend:
                 if existing_item is not None:
                     return existing_item
                 raise
-            except (Timeout, RequestsConnectionError):
+            except RequestException as network_error:
+                if not is_transient_error(network_error):
+                    raise
                 existing_item = self._get_item_if_exists_or_none(item_id)
                 if existing_item is not None:
                     return existing_item
@@ -321,12 +336,10 @@ class DriveBackend:
 
         return do_create_item()
 
-    @_retry_on_transient_error
     def get_item(self, item_id: str) -> dict | None:
         """Return the item, or None if Drive answers 404."""
         return self._get_item_if_exists(item_id)
 
-    @_retry_on_transient_error
     def list_children(self, item_id: str) -> list[dict]:
         """Return all children of a folder, following pagination. Drive hides
         items still in PENDING upload state from this listing."""
@@ -334,9 +347,7 @@ class DriveBackend:
         params = {"page_size": _LIST_PAGE_SIZE}
         children = []
         while url:
-            response = requests.get(
-                url, params=params, headers=self._headers(), timeout=30
-            )
+            response = self.session.get(url, params=params, auth=self._auth, timeout=30)
             response.raise_for_status()
             data = response.json()
             children.extend(data.get("results", []))
@@ -345,10 +356,14 @@ class DriveBackend:
             params = None
         return children
 
-    def _get_item_if_exists(self, item_id: str) -> dict | None:
+    def _get_item_if_exists(
+        self, item_id: str, idempotent: bool | None = None
+    ) -> dict | None:
         """GET /items/{id}/, treating a 404 as 'not created yet' rather than an error."""
         url = f"{self.api_root_url}/items/{item_id}/"
-        response = requests.get(url, headers=self._headers(), timeout=30)
+        response = self.session.get(
+            url, auth=self._auth, timeout=30, idempotent=idempotent
+        )
         if response.status_code == 404:
             return None
         response.raise_for_status()
@@ -357,9 +372,10 @@ class DriveBackend:
     def _get_item_if_exists_or_none(self, item_id: str) -> dict | None:
         """Like _get_item_if_exists(), but only swallows a transient failure (5xx,
         network) of the check itself, so the caller retries the POST. A permanent
-        failure (401/403) is re-raised instead of masked."""
+        failure (401/403) is re-raised instead of masked. Not retried by the
+        session: the create loop calling it already retries."""
         try:
-            return self._get_item_if_exists(item_id)
+            return self._get_item_if_exists(item_id, idempotent=False)
         except HTTPError as http_error:
             if not _is_server_error(http_error):
                 raise
@@ -369,7 +385,9 @@ class DriveBackend:
                 http_error,
             )
             return None
-        except (Timeout, RequestsConnectionError) as network_error:
+        except RequestException as network_error:
+            if not is_transient_error(network_error):
+                raise
             logger.info(
                 "existence check for item %s failed (%s), will retry",
                 item_id,
@@ -377,11 +395,12 @@ class DriveBackend:
             )
             return None
 
-    @_retry_on_transient_error
     def upload_to_s3(self, policy_url: str, file_path: str) -> None:
         """Step 2: Upload file content directly to the S3 presigned URL (no Drive token)."""
         with open(file_path, "rb") as f:
-            response = requests.put(policy_url, data=f.read(), timeout=300)
+            response = self.session.put(
+                policy_url, data=f.read(), timeout=300, idempotent=True
+            )
         if not response.ok:
             logger.error(
                 "S3 upload failed (%s) for %s: %s",
@@ -400,7 +419,7 @@ class DriveBackend:
         for attempt in range(1, max_attempts + 1):
             retryable_error = None
             try:
-                response = requests.post(url, headers=self._headers(), timeout=30)
+                response = self.session.post(url, auth=self._auth, timeout=30)
                 response.raise_for_status()
                 return
             except HTTPError as http_error:
@@ -409,7 +428,9 @@ class DriveBackend:
                 if not _is_server_error(http_error):
                     raise
                 retryable_error = http_error
-            except (Timeout, RequestsConnectionError) as network_error:
+            except RequestException as network_error:
+                if not is_transient_error(network_error):
+                    raise
                 retryable_error = network_error
 
             if attempt == max_attempts:
@@ -432,13 +453,12 @@ class DriveBackend:
 
     # --- Sharing ---
 
-    @_retry_on_transient_error
     def find_user_by_email(self, email: str) -> dict | None:
         """Resolve an email to a Drive user dict. Returns None if not found."""
-        response = requests.get(
+        response = self.session.get(
             f"{self.api_root_url}/users/",
             params={"q": email},
-            headers=self._headers(),
+            auth=self._auth,
             timeout=30,
         )
         response.raise_for_status()
@@ -454,27 +474,27 @@ class DriveBackend:
             None,
         )
 
-    @_retry_on_transient_error
     def share_with_user(self, item_id: str, user_id: str) -> None:
         """Grant owner access. Retried on 5xx: worst case is a duplicate grant,
         cheaper than the user silently ending up with no access."""
-        response = requests.post(
+        response = self.session.post(
             f"{self.api_root_url}/items/{item_id}/accesses/",
             json={"user_id": user_id, "role": "owner"},
-            headers=self._headers(),
+            auth=self._auth,
             timeout=30,
+            idempotent=True,
         )
         response.raise_for_status()
 
-    @_retry_on_transient_error
     def invite_by_email(self, item_id: str, email: str) -> None:
         """Invite as owner. Retried on 5xx: worst case is a duplicate email,
         cheaper than the user never being invited."""
-        response = requests.post(
+        response = self.session.post(
             f"{self.api_root_url}/items/{item_id}/invitations/",
             json={"email": email, "role": "owner"},
-            headers=self._headers(),
+            auth=self._auth,
             timeout=30,
+            idempotent=True,
         )
         response.raise_for_status()
 
@@ -482,9 +502,8 @@ class DriveBackend:
 class DriveServiceAccountBackend(DriveBackend):
     """Uses OAuth2 client_credentials grant. Targets /external_api/v1.0/."""
 
-    @_retry_on_transient_error
     def _refresh(self):
-        response = requests.post(
+        response = self.session.post(
             settings.DRIVE_OIDC_TOKEN_ENDPOINT,
             data={
                 "grant_type": "client_credentials",
@@ -493,6 +512,7 @@ class DriveServiceAccountBackend(DriveBackend):
                 "scope": "openid email",
             },
             timeout=30,
+            idempotent=True,
         )
         response.raise_for_status()
         data = response.json()
@@ -517,7 +537,6 @@ class DriveUserTokenBackend(DriveBackend):
         self._access_token = decrypt_token(user.oidc_access_token) or None
         self._token_expires_at = user.oidc_token_expires_at
 
-    @_retry_on_transient_error
     def _refresh(self):
         logger.info(
             "Drive (ProConnect) token refresh for user %s: %s, "
@@ -535,7 +554,7 @@ class DriveUserTokenBackend(DriveBackend):
                 "Cannot refresh the ProConnect token for Drive migration."
             )
         try:
-            response = requests.post(
+            response = self.session.post(
                 settings.OIDC_OP_TOKEN_ENDPOINT,
                 data={
                     "grant_type": "refresh_token",
@@ -544,18 +563,12 @@ class DriveUserTokenBackend(DriveBackend):
                     "refresh_token": plaintext_refresh,
                 },
                 timeout=30,
+                idempotent=True,
             )
             response.raise_for_status()
         except HTTPError as error:
             self._log_refresh_failure(
-                f"ProConnect returned {describe_oauth_error(error)}",
-                transient=_is_server_error(error),
-            )
-            raise
-        except (Timeout, RequestsConnectionError) as error:
-            self._log_refresh_failure(
-                f"ProConnect request failed ({describe_request_error(error)})",
-                transient=True,
+                f"ProConnect returned {describe_oauth_error(error)}"
             )
             raise
         except RequestException as error:
@@ -599,16 +612,8 @@ class DriveUserTokenBackend(DriveBackend):
             else "unchanged",
         )
 
-    def _log_refresh_failure(self, reason: str, transient: bool = False) -> None:
-        """A transient failure is retried by tenacity: it only fails an attempt."""
-        if transient:
-            logger.warning(
-                "Drive (ProConnect) token refresh attempt failed for user %s: %s "
-                "(transient error, may be retried)",
-                self._user.id,
-                reason,
-            )
-            return
+    def _log_refresh_failure(self, reason: str) -> None:
+        """Transient failures are retried, and logged, by the session."""
         logger.warning(
             "Drive (ProConnect) token refresh failed for user %s: %s",
             self._user.id,

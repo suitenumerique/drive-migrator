@@ -18,6 +18,7 @@ from core.destinations.drive.drive_backend import (
     describe_drive_tokens,
 )
 from core.encryption import encrypt_token
+from core.tests.destinations.drive.drive_http_mock import patch_drive_http
 
 TEST_KEY = Fernet.generate_key().decode()
 
@@ -112,9 +113,9 @@ def test_user_token_refresh_logs_the_expired_token_and_the_new_lifetime(
 
     with (
         patch("core.destinations.drive.drive_backend.logger") as mock_logger,
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as http,
     ):
-        mock_requests.post.return_value.json.return_value = payload
+        http.post.return_value.json.return_value = payload
         DriveUserTokenBackend(user)._get_token()
 
     assert _rendered(mock_logger.info) == [
@@ -139,9 +140,9 @@ def test_user_token_refresh_logs_the_proconnect_error():
 
     with (
         patch("core.destinations.drive.drive_backend.logger") as mock_logger,
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as http,
     ):
-        mock_requests.post.return_value.raise_for_status.side_effect = HTTPError(
+        http.post.return_value.raise_for_status.side_effect = HTTPError(
             "400 Bad Request", response=response
         )
         with pytest.raises(HTTPError):
@@ -188,30 +189,46 @@ def _server_error_response():
 
 @pytest.mark.usefixtures("proconnect_settings", "no_retry_delay")
 @pytest.mark.parametrize(
-    "first_outcome,reason",
-    [
-        (_server_error_response(), "ProConnect returned 503 without OAuth error"),
-        (Timeout("timed out"), "ProConnect request failed (Timeout)"),
-    ],
+    "first_outcome",
+    [_server_error_response(), Timeout("timed out")],
+    ids=["503", "timeout"],
 )
-def test_user_token_refresh_logs_a_retried_attempt_as_transient(first_outcome, reason):
-    """A failure tenacity retries is logged as a failed attempt, not a failed refresh."""
+def test_user_token_refresh_retried_by_the_session_logs_no_failure(first_outcome):
+    """A transient failure the session retries away doesn't log a failed refresh."""
     user = _make_user(expires_at=timezone.now() - timedelta(seconds=1))
     success = MagicMock()
     success.json.return_value = {"access_token": "new-tok", "expires_in": 60}
 
     with (
         patch("core.destinations.drive.drive_backend.logger") as mock_logger,
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as http,
     ):
-        mock_requests.post.side_effect = [first_outcome, success]
+        http.post.side_effect = [first_outcome, success]
         DriveUserTokenBackend(user)._get_token()
 
-    assert _rendered(mock_logger.warning) == [
-        "Drive (ProConnect) token refresh attempt failed for user user-1: "
-        f"{reason} (transient error, may be retried)"
-    ]
+    mock_logger.warning.assert_not_called()
     assert "succeeded" in _rendered(mock_logger.info)[-1]
+
+
+@pytest.mark.usefixtures("proconnect_settings", "no_retry_delay")
+def test_user_token_refresh_logs_a_failure_once_retries_are_exhausted(settings):
+    """Once the session gives up on a 5xx, the refresh failure is logged once."""
+    settings.DRIVE_RETRY_MAX_ATTEMPTS = 2
+    user = _make_user(expires_at=timezone.now() - timedelta(seconds=1))
+
+    with (
+        patch("core.destinations.drive.drive_backend.logger") as mock_logger,
+        patch_drive_http() as http,
+    ):
+        http.post.side_effect = [_server_error_response(), _server_error_response()]
+        with pytest.raises(HTTPError):
+            DriveUserTokenBackend(user)._get_token()
+
+    assert http.post.call_count == 2
+    assert _rendered(mock_logger.warning) == [
+        "Drive (ProConnect) token refresh failed for user user-1: "
+        "ProConnect returned 503 without OAuth error"
+    ]
 
 
 def test_describe_drive_tokens_access_token_without_expiry_will_be_refreshed():
@@ -230,9 +247,9 @@ def test_user_token_refresh_logs_a_missing_access_token():
 
     with (
         patch("core.destinations.drive.drive_backend.logger") as mock_logger,
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as http,
     ):
-        mock_requests.post.return_value.json.return_value = {
+        http.post.return_value.json.return_value = {
             "access_token": "new-tok",
             "expires_in": 60,
         }
@@ -251,9 +268,9 @@ def test_user_token_refresh_logs_a_new_access_token_without_expiry():
 
     with (
         patch("core.destinations.drive.drive_backend.logger") as mock_logger,
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as http,
     ):
-        mock_requests.post.return_value.json.return_value = {"access_token": "new-tok"}
+        http.post.return_value.json.return_value = {"access_token": "new-tok"}
         DriveUserTokenBackend(user)._get_token()
 
     assert _rendered(mock_logger.info)[-1] == (
@@ -275,9 +292,9 @@ def test_user_token_refresh_logs_a_response_without_access_token(
 
     with (
         patch("core.destinations.drive.drive_backend.logger") as mock_logger,
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as http,
     ):
-        mock_requests.post.return_value.json.side_effect = [json_outcome]
+        http.post.return_value.json.side_effect = [json_outcome]
         with pytest.raises(expected_error):
             DriveUserTokenBackend(user)._get_token()
 
@@ -289,14 +306,14 @@ def test_user_token_refresh_logs_a_response_without_access_token(
 
 @pytest.mark.usefixtures("proconnect_settings")
 def test_user_token_refresh_logs_another_request_error():
-    """A request error tenacity doesn't retry is logged as a failed refresh."""
+    """A request error the session doesn't retry is logged as a failed refresh."""
     user = _make_user(expires_at=timezone.now() - timedelta(seconds=1))
 
     with (
         patch("core.destinations.drive.drive_backend.logger") as mock_logger,
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as http,
     ):
-        mock_requests.post.side_effect = TooManyRedirects("too many")
+        http.post.side_effect = TooManyRedirects("too many")
         with pytest.raises(TooManyRedirects):
             DriveUserTokenBackend(user)._get_token()
 

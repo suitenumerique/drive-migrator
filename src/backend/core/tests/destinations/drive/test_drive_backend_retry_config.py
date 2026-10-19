@@ -3,7 +3,6 @@
 Split out of test_drive_backend.py to stay under pylint's max-module-lines.
 """
 
-import logging
 import uuid
 from datetime import timedelta
 from unittest.mock import MagicMock, mock_open, patch
@@ -17,6 +16,7 @@ from requests.exceptions import HTTPError, Timeout
 
 from core.destinations.drive import drive_backend
 from core.destinations.drive.drive_backend import DriveServiceAccountBackend
+from core.tests.destinations.drive.drive_http_mock import patch_drive_http
 
 TEST_KEY = Fernet.generate_key().decode()
 
@@ -101,7 +101,7 @@ def test_service_account_upload_to_s3_retries_configured_max_attempts(settings):
     policy_url = "https://s3.example.com/file.pdf?sig=x"
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch("builtins.open", mock_open(read_data=b"binary content")),
         pytest.raises(RequestsConnectionError),
     ):
@@ -121,7 +121,7 @@ def test_service_account_upload_to_s3_wait_uses_configured_timing(settings):
     success_response.raise_for_status = MagicMock()
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch("builtins.open", mock_open(read_data=b"binary content")),
         patch("tenacity.nap.time.sleep") as mock_sleep,
     ):
@@ -143,9 +143,9 @@ def test_service_account_upload_to_s3_logs_before_sleeping_on_retry():
     success_response.raise_for_status = MagicMock()
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch("builtins.open", mock_open(read_data=b"binary content")),
-        patch.object(drive_backend.logger, "log") as mock_log,
+        patch.object(drive_backend.logger, "info") as mock_info,
     ):
         mock_requests.put.side_effect = [
             RequestsConnectionError("connection reset"),
@@ -153,8 +153,8 @@ def test_service_account_upload_to_s3_logs_before_sleeping_on_retry():
         ]
         DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
 
-    mock_log.assert_called_once()
-    assert mock_log.call_args[0][0] == logging.INFO
+    mock_info.assert_called_once()
+    assert mock_info.call_args[0][1] == "PUT"
 
 
 def test_service_account_upload_to_s3_logs_error_on_final_failure(settings):
@@ -163,7 +163,7 @@ def test_service_account_upload_to_s3_logs_error_on_final_failure(settings):
     policy_url = "https://s3.example.com/file.pdf?sig=x"
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch("builtins.open", mock_open(read_data=b"binary content")),
         patch.object(drive_backend.logger, "error") as mock_error,
         pytest.raises(RequestsConnectionError),
@@ -191,7 +191,7 @@ def test_service_account_create_subfolder_retries_on_server_error_then_succeeds(
     success_response.raise_for_status = MagicMock()
     success_response.json.return_value = {"id": FAKE_ITEM_ID}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [error_response, success_response]
         mock_requests.get.return_value = _not_found_response()
         result = backend.create_subfolder("docs", parent_id="parent-uuid")
@@ -215,7 +215,7 @@ def test_service_account_create_subfolder_checks_existence_before_retrying(setti
     success_response.raise_for_status = MagicMock()
     success_response.json.return_value = {"id": FAKE_ITEM_ID}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [error_response, success_response]
         mock_requests.get.return_value = _not_found_response()
         backend.create_subfolder("docs", parent_id="parent-uuid")
@@ -241,7 +241,7 @@ def test_service_account_create_subfolder_does_not_retry_on_client_error(setting
     error_response.raise_for_status.side_effect = error
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch.object(drive_backend.logger, "warning") as mock_warning,
         pytest.raises(HTTPError),
     ):
@@ -272,7 +272,7 @@ def test_service_account_create_subfolder_returns_existing_item_after_server_err
 
     existing_item = {"id": FAKE_ITEM_ID, "title": "docs"}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value = error_response
         mock_requests.get.return_value = _found_response(existing_item)
         result = backend.create_subfolder("docs", parent_id="parent-uuid")
@@ -296,7 +296,7 @@ def test_service_account_create_subfolder_recovers_on_duplicate_id_conflict(sett
 
     existing_item = {"id": FAKE_ITEM_ID, "title": "docs"}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value = error_response
         mock_requests.get.return_value = _found_response(existing_item)
         result = backend.create_subfolder("docs", parent_id="parent-uuid")
@@ -321,7 +321,7 @@ def test_service_account_create_subfolder_duplicate_id_conflict_not_found_raises
     error_response.raise_for_status.side_effect = _duplicate_id_error()
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         pytest.raises(HTTPError),
     ):
         mock_requests.post.return_value = error_response
@@ -351,7 +351,7 @@ def test_service_account_create_subfolder_wait_uses_configured_timing(settings):
     success_response.json.return_value = {"id": FAKE_ITEM_ID}
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch("tenacity.nap.time.sleep") as mock_sleep,
     ):
         mock_requests.post.side_effect = [error_response, success_response]
@@ -381,7 +381,7 @@ def test_service_account_create_subfolder_propagates_permanent_existence_check_e
     check_error_response.raise_for_status.side_effect = _server_error(401)
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         pytest.raises(HTTPError),
     ):
         mock_requests.post.return_value = create_error_response
@@ -404,7 +404,7 @@ def test_service_account_create_subfolder_server_error_exhausts_attempts(setting
     error_response.raise_for_status.side_effect = _server_error()
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         pytest.raises(HTTPError),
     ):
         mock_requests.post.return_value = error_response
@@ -442,7 +442,7 @@ def test_service_account_create_subfolder_retries_when_existence_check_itself_fa
     success_response.raise_for_status = MagicMock()
     success_response.json.return_value = {"id": FAKE_ITEM_ID}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [create_error_response, success_response]
         mock_requests.get.return_value = check_error_response
         result = backend.create_subfolder("docs", parent_id="parent-uuid")
@@ -466,7 +466,7 @@ def test_service_account_create_folder_retries_on_server_error_then_succeeds(set
     success_response.raise_for_status = MagicMock()
     success_response.json.return_value = {"id": FAKE_ITEM_ID}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [error_response, success_response]
         mock_requests.get.return_value = _not_found_response()
         result = backend.create_folder("My Workspace")
@@ -492,7 +492,7 @@ def test_service_account_create_file_item_retries_on_server_error_then_succeeds(
     success_response.raise_for_status = MagicMock()
     success_response.json.return_value = {"id": FAKE_ITEM_ID, "policy": "https://s3.x"}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [error_response, success_response]
         mock_requests.get.return_value = _not_found_response()
         result = backend.create_file_item("doc.pdf", parent_id="folder-uuid", size=7)
@@ -530,7 +530,7 @@ def test_service_account_create_file_item_replaces_recovered_pending_file(settin
     delete_response.raise_for_status = MagicMock()
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch(
             "core.destinations.drive.drive_backend.uuid.uuid4",
             side_effect=[uuid.UUID(FAKE_ITEM_ID), uuid.UUID(fresh_item_id)],
@@ -569,7 +569,7 @@ def test_service_account_create_file_item_refuses_to_replace_non_pending_recover
     recovered_item = {"id": FAKE_ITEM_ID, "upload_state": "ready"}
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         pytest.raises(RuntimeError, match="not pending upload"),
     ):
         mock_requests.post.return_value = error_response
@@ -590,7 +590,7 @@ def test_service_account_get_item_if_exists_returns_item_when_found(settings):
 
     item = {"id": FAKE_ITEM_ID, "title": "docs"}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.return_value = _found_response(item)
         result = backend._get_item_if_exists(FAKE_ITEM_ID)  # pylint: disable=protected-access
 
@@ -605,7 +605,7 @@ def test_service_account_get_item_if_exists_returns_none_on_404(settings):
     backend._access_token = "tok"  # pylint: disable=protected-access
     backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.return_value = _not_found_response()
         result = backend._get_item_if_exists(FAKE_ITEM_ID)  # pylint: disable=protected-access
 
@@ -625,7 +625,7 @@ def test_service_account_get_item_if_exists_raises_on_other_error(settings):
     error_response.raise_for_status.side_effect = _server_error()
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         pytest.raises(HTTPError),
     ):
         mock_requests.get.return_value = error_response
@@ -642,7 +642,7 @@ def test_service_account_get_item_if_exists_or_none_returns_item_when_found(sett
 
     item = {"id": FAKE_ITEM_ID, "title": "docs"}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.return_value = _found_response(item)
         result = backend._get_item_if_exists_or_none(FAKE_ITEM_ID)  # pylint: disable=protected-access
 
@@ -662,7 +662,7 @@ def test_service_account_get_item_if_exists_or_none_swallows_check_errors(settin
     error_response.status_code = 500
     error_response.raise_for_status.side_effect = _server_error()
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.return_value = error_response
         result = backend._get_item_if_exists_or_none(FAKE_ITEM_ID)  # pylint: disable=protected-access
 
@@ -683,7 +683,7 @@ def test_service_account_get_item_if_exists_or_none_reraises_permanent_error(set
     error_response.raise_for_status.side_effect = _server_error(401)
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         pytest.raises(HTTPError),
     ):
         mock_requests.get.return_value = error_response
@@ -700,7 +700,7 @@ def test_service_account_notify_upload_ended_retries_configured_max_attempts(set
     backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         pytest.raises(Timeout),
     ):
         mock_requests.post.side_effect = Timeout("timed out")
@@ -725,7 +725,7 @@ def test_service_account_notify_upload_ended_retries_on_server_error_then_succee
     success_response = MagicMock()
     success_response.raise_for_status = MagicMock()
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [error_response, success_response]
         backend.notify_upload_ended("file-uuid")  # must not raise
 
@@ -745,7 +745,7 @@ def test_service_account_notify_upload_ended_server_error_exhausts_attempts(sett
     error_response.raise_for_status.side_effect = _server_error()
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         pytest.raises(HTTPError),
     ):
         mock_requests.post.return_value = error_response
@@ -766,7 +766,7 @@ def test_service_account_notify_upload_ended_logs_before_retrying(settings):
     success_response.raise_for_status = MagicMock()
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch.object(drive_backend.logger, "info") as mock_info,
     ):
         mock_requests.post.side_effect = [Timeout("timed out"), success_response]
@@ -785,7 +785,7 @@ def test_service_account_notify_upload_ended_logs_error_on_final_failure(setting
     backend._token_expires_at = timezone.now() + timedelta(hours=1)  # pylint: disable=protected-access
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch.object(drive_backend.logger, "error") as mock_error,
         pytest.raises(Timeout),
     ):

@@ -19,6 +19,7 @@ from core.destinations.drive.drive_backend import (
     user_has_usable_drive_token,
 )
 from core.encryption import decrypt_token, encrypt_token
+from core.tests.destinations.drive.drive_http_mock import patch_drive_http
 
 TEST_KEY = Fernet.generate_key().decode()
 
@@ -95,7 +96,7 @@ def test_service_account_get_token_calls_client_credentials(settings):
     settings.DRIVE_OIDC_CLIENT_ID = "client-id"
     settings.DRIVE_OIDC_CLIENT_SECRET = "client-secret"
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "access_token": "tok-abc",
             "expires_in": 3600,
@@ -128,7 +129,7 @@ def test_service_account_get_token_uses_cache_when_valid(settings):
     backend._access_token = "cached-tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         token = backend._get_token()
 
     mock_requests.post.assert_not_called()
@@ -145,7 +146,7 @@ def test_service_account_get_token_refreshes_when_expired(settings):
     backend._access_token = "old-tok"
     backend._token_expires_at = timezone.now() - timedelta(seconds=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "access_token": "new-tok",
             "expires_in": 3600,
@@ -171,7 +172,7 @@ def test_service_account_refresh_retries_on_timeout_then_succeeds(settings):
     success_response.raise_for_status = MagicMock()
     success_response.json.return_value = {"access_token": "new-tok", "expires_in": 3600}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [Timeout("timed out"), success_response]
         token = backend._get_token()
 
@@ -189,7 +190,7 @@ def test_service_account_get_token_refreshes_within_buffer(settings):
     backend._access_token = "almost-expired-tok"
     backend._token_expires_at = timezone.now() + timedelta(seconds=5)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "access_token": "refreshed-tok",
             "expires_in": 3600,
@@ -213,7 +214,7 @@ def test_service_account_create_folder_uses_external_api(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {"id": "folder-uuid"}
         mock_requests.post.return_value.raise_for_status = MagicMock()
         result = backend.create_folder("My Workspace")
@@ -235,7 +236,7 @@ def test_service_account_create_subfolder(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {"id": "child-uuid"}
         mock_requests.post.return_value.raise_for_status = MagicMock()
         result = backend.create_subfolder("docs", parent_id="parent-uuid")
@@ -262,7 +263,7 @@ def test_service_account_create_file_item(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "id": "file-uuid",
             "policy": "https://s3.example.com/file.pdf?sig=x",
@@ -288,7 +289,7 @@ def test_service_account_delete_item(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.delete.return_value.raise_for_status = MagicMock()
         backend._delete_item("item-uuid")  # pylint: disable=protected-access
 
@@ -305,7 +306,7 @@ def test_service_account_upload_to_s3_puts_file_content():
     policy_url = "https://s3.example.com/file.pdf?sig=x"
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch("builtins.open", mock_open(read_data=file_content)),
     ):
         mock_requests.put.return_value.raise_for_status = MagicMock()
@@ -328,7 +329,7 @@ def test_service_account_upload_to_s3_logs_response_body_on_error():
     error_response.raise_for_status.side_effect = HTTPError(response=error_response)
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch("core.destinations.drive.drive_backend.logger") as mock_logger,
         patch("builtins.open", mock_open(read_data=b"binary content")),
         pytest.raises(HTTPError),
@@ -349,7 +350,7 @@ def test_service_account_upload_to_s3_retries_on_connection_error_then_succeeds(
     success_response.raise_for_status = MagicMock()
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         patch("builtins.open", mock_open(read_data=file_content)),
     ):
         mock_requests.put.side_effect = [
@@ -369,7 +370,7 @@ def test_service_account_notify_upload_ended(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.raise_for_status = MagicMock()
         backend.notify_upload_ended("file-uuid")
 
@@ -391,7 +392,7 @@ def test_service_account_notify_upload_ended_retries_on_timeout_then_succeeds(se
     success_response = MagicMock()
     success_response.raise_for_status = MagicMock()
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [Timeout("timed out"), success_response]
         backend.notify_upload_ended("file-uuid")
 
@@ -412,7 +413,7 @@ def test_service_account_notify_upload_ended_timeout_then_not_pending_is_success
     not_pending_response = MagicMock()
     not_pending_response.raise_for_status.side_effect = _not_pending_error()
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [Timeout("timed out"), not_pending_response]
         backend.notify_upload_ended("file-uuid")  # must not raise
 
@@ -435,7 +436,7 @@ def test_service_account_notify_upload_ended_other_validation_error_is_raised(se
     )
 
     with (
-        patch("core.destinations.drive.drive_backend.requests") as mock_requests,
+        patch_drive_http() as mock_requests,
         pytest.raises(HTTPError),
     ):
         mock_requests.post.return_value = error_response
@@ -457,7 +458,7 @@ def test_service_account_share_with_user(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.raise_for_status = MagicMock()
         backend.share_with_user("item-uuid", "user-uuid")
 
@@ -477,7 +478,7 @@ def test_service_account_invite_by_email(settings):
     backend._access_token = "tok"
     backend._token_expires_at = timezone.now() + timedelta(hours=1)
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.raise_for_status = MagicMock()
         backend.invite_by_email("item-uuid", "new@example.com")
 
@@ -516,7 +517,7 @@ def test_user_token_uses_stored_access_token_when_valid():
         expires_at=timezone.now() + timedelta(hours=1),
     )
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         token = DriveUserTokenBackend(user)._get_token()
 
     mock_requests.post.assert_not_called()
@@ -535,7 +536,7 @@ def test_user_token_refreshes_when_access_token_expired(settings):
         expires_at=timezone.now() - timedelta(seconds=1),
     )
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "access_token": "new-tok",
             "expires_in": 60,
@@ -572,7 +573,7 @@ def test_user_token_refresh_retries_on_timeout_then_succeeds(settings):
     success_response.raise_for_status = MagicMock()
     success_response.json.return_value = {"access_token": "new-tok", "expires_in": 60}
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.side_effect = [Timeout("timed out"), success_response]
         token = DriveUserTokenBackend(user)._get_token()
 
@@ -592,7 +593,7 @@ def test_user_token_refresh_persists_new_tokens_to_user(settings):
         expires_at=timezone.now() - timedelta(seconds=1),
     )
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "access_token": "new-access",
             "refresh_token": "new-refresh",
@@ -626,7 +627,7 @@ def test_user_token_refresh_keeps_old_refresh_token_when_none_returned(settings)
         expires_at=timezone.now() - timedelta(seconds=1),
     )
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "access_token": "new-access",
             "expires_in": 60,
@@ -661,7 +662,7 @@ def test_user_token_create_folder_uses_external_api_v1(settings):
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {"id": "folder-uuid"}
         mock_requests.post.return_value.raise_for_status = MagicMock()
         DriveUserTokenBackend(user).create_folder("My Workspace")
@@ -680,7 +681,7 @@ def test_user_token_create_subfolder_uses_external_api_v1(settings):
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {"id": "child-uuid"}
         mock_requests.post.return_value.raise_for_status = MagicMock()
         DriveUserTokenBackend(user).create_subfolder("docs", parent_id="parent-uuid")
@@ -699,7 +700,7 @@ def test_user_token_create_file_item_uses_external_api_v1(settings):
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "id": "file-uuid",
             "policy": "https://s3.example.com/file.pdf?sig=x",
@@ -724,7 +725,7 @@ def test_user_token_notify_upload_ended_uses_external_api_v1(settings):
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.raise_for_status = MagicMock()
         DriveUserTokenBackend(user).notify_upload_ended("file-uuid")
 
@@ -741,7 +742,7 @@ def test_user_token_share_with_user_uses_external_api_v1(settings):
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.raise_for_status = MagicMock()
         DriveUserTokenBackend(user).share_with_user("item-uuid", "user-uuid")
 
@@ -759,7 +760,7 @@ def test_user_token_invite_by_email_uses_external_api_v1(settings):
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.raise_for_status = MagicMock()
         DriveUserTokenBackend(user).invite_by_email("item-uuid", "new@example.com")
 
@@ -777,7 +778,7 @@ def test_user_token_find_user_by_email_always_uses_external_api_v1(settings):
 
     user = _make_user(expires_at=timezone.now() + timedelta(hours=1))
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.get.return_value.json.return_value = {
             "results": [{"id": "user-uuid"}]
         }
@@ -813,7 +814,7 @@ def test_user_token_get_token_returns_decrypted_plaintext():
         access_token="secret-access",
         expires_at=timezone.now() + timedelta(hours=1),
     )
-    with patch("core.destinations.drive.drive_backend.requests"):
+    with patch_drive_http():
         token = DriveUserTokenBackend(user)._get_token()
     assert token == "secret-access"
 
@@ -830,7 +831,7 @@ def test_user_token_refresh_stores_access_token_encrypted(settings):
         expires_at=timezone.now() - timedelta(seconds=1),
     )
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "access_token": "new-plaintext-access",
             "expires_in": 60,
@@ -854,7 +855,7 @@ def test_user_token_refresh_stores_refresh_token_encrypted(settings):
         expires_at=timezone.now() - timedelta(seconds=1),
     )
 
-    with patch("core.destinations.drive.drive_backend.requests") as mock_requests:
+    with patch_drive_http() as mock_requests:
         mock_requests.post.return_value.json.return_value = {
             "access_token": "new-access",
             "refresh_token": "new-plaintext-refresh",
