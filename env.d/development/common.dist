@@ -7,6 +7,12 @@ DJANGO_SUPERUSER_PASSWORD=admin
 # Python
 PYTHONPATH=/app
 
+# Logging levels of the web process (defaults: INFO for the application,
+# WARNING for libraries). Celery workers log tasks and libraries at their -l
+# level, the other application modules at LOGGING_LEVEL_LOGGERS_APP.
+#LOGGING_LEVEL_LOGGERS_APP=INFO
+#LOGGING_LEVEL_LOGGERS_ROOT=WARNING
+
 # impress settings
 
 # Migration source/destination

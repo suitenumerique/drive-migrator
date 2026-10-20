@@ -11,6 +11,10 @@ and this project adheres to
 ### Added
 
 - Log the Resana and Drive tokens lifetime before each migration and on refresh
+- Send the application INFO logs to the console from the web process too,
+  level set by `LOGGING_LEVEL_LOGGERS_APP` (libraries:
+  `LOGGING_LEVEL_LOGGERS_ROOT`); Celery workers keep their `-l` level for
+  tasks and libraries
 
 ## [v0.10.0] - 2026-10-19
 

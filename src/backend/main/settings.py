@@ -534,6 +534,52 @@ class Base(Configuration):
     CORS_ALLOWED_ORIGINS = values.ListValue([])
     CORS_ALLOWED_ORIGIN_REGEXES = values.ListValue([])
 
+    # Logging: the web process logs to the console through the root handler.
+    # Celery workers replace it with their own (no duplicated lines) and set
+    # the root and task loggers to their -l level.
+    LOGGING = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "simple": {
+                "format": "{asctime} {name} {levelname} {message}",
+                "style": "{",
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "simple",
+            },
+        },
+        "root": {
+            "handlers": ["console"],
+            # Upper-cased: logging rejects "info", which Celery's -l accepts.
+            "level": str(
+                values.Value(
+                    "WARNING",
+                    environ_name="LOGGING_LEVEL_LOGGERS_ROOT",
+                    environ_prefix=None,
+                )
+            ).upper(),
+        },
+        # get_task_logger() parents the application's task loggers to
+        # "celery.task" instead of "core": in the web process, both get the
+        # application level.
+        "loggers": {
+            logger: {
+                "level": str(
+                    values.Value(
+                        "INFO",
+                        environ_name="LOGGING_LEVEL_LOGGERS_APP",
+                        environ_prefix=None,
+                    )
+                ).upper(),
+            }
+            for logger in ("core", "celery.task")
+        },
+    }
+
     # Sentry
     SENTRY_DSN = values.Value(environ_name="SENTRY_DSN", environ_prefix=None)
 
