@@ -12,7 +12,7 @@ from django.utils import timezone
 import requests
 from celery.utils.log import get_task_logger
 from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import HTTPError, Timeout
+from requests.exceptions import HTTPError, RequestException, Timeout
 from tenacity import (
     before_sleep_log,
     retry,
@@ -23,6 +23,11 @@ from tenacity import (
 
 from core.encryption import decrypt_token, encrypt_token
 from core.retry_utils import log_final_failure_and_reraise
+from core.utils import (
+    describe_access_expiry,
+    describe_oauth_error,
+    describe_request_error,
+)
 
 logger = get_task_logger(__name__)
 
@@ -175,6 +180,18 @@ def user_has_usable_drive_token(user) -> bool:
         return True
 
     return has_refresh
+
+
+def describe_drive_tokens(user) -> str:
+    """Describe the stored ProConnect tokens and their lifetime for logs, never
+    their value."""
+    access = "access token missing"
+    if user.oidc_access_token:
+        access = f"access token present, {describe_access_expiry(user.oidc_token_expires_at)}"
+    refresh = (
+        "refresh token present" if user.oidc_refresh_token else "refresh token missing"
+    )
+    return f"Drive (ProConnect) tokens for user {user.id}: {access}; {refresh}"
 
 
 class DriveBackend:
@@ -502,32 +519,67 @@ class DriveUserTokenBackend(DriveBackend):
 
     @_retry_on_transient_error
     def _refresh(self):
+        logger.info(
+            "Drive (ProConnect) token refresh for user %s: %s, "
+            "refreshing with the refresh token",
+            self._user.id,
+            "access token missing"
+            if self._access_token is None
+            else f"access token {describe_access_expiry(self._token_expires_at)}",
+        )
         plaintext_refresh = decrypt_token(self._user.oidc_refresh_token)
         if not plaintext_refresh:
+            self._log_refresh_failure("no refresh token stored")
             raise RuntimeError(
                 f"No refresh token stored for user {self._user.email}. "
                 "Cannot refresh the ProConnect token for Drive migration."
             )
-        response = requests.post(
-            settings.OIDC_OP_TOKEN_ENDPOINT,
-            data={
-                "grant_type": "refresh_token",
-                "client_id": settings.OIDC_RP_CLIENT_ID,
-                "client_secret": settings.OIDC_RP_CLIENT_SECRET,
-                "refresh_token": plaintext_refresh,
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
+        try:
+            response = requests.post(
+                settings.OIDC_OP_TOKEN_ENDPOINT,
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": settings.OIDC_RP_CLIENT_ID,
+                    "client_secret": settings.OIDC_RP_CLIENT_SECRET,
+                    "refresh_token": plaintext_refresh,
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+        except HTTPError as error:
+            self._log_refresh_failure(
+                f"ProConnect returned {describe_oauth_error(error)}",
+                transient=_is_server_error(error),
+            )
+            raise
+        except (Timeout, RequestsConnectionError) as error:
+            self._log_refresh_failure(
+                f"ProConnect request failed ({describe_request_error(error)})",
+                transient=True,
+            )
+            raise
+        except RequestException as error:
+            self._log_refresh_failure(
+                f"ProConnect request failed ({describe_request_error(error)})"
+            )
+            raise
+        try:
+            data = response.json()
+            access_token = data["access_token"]
+        except (ValueError, KeyError, TypeError) as error:
+            self._log_refresh_failure(
+                f"ProConnect returned no access token ({type(error).__name__})"
+            )
+            raise
         expires_in = data.get("expires_in")
-        self._access_token = data["access_token"]
+        self._access_token = access_token
         self._token_expires_at = (
             timezone.now() + timedelta(seconds=expires_in) if expires_in else None
         )
         self._user.oidc_access_token = encrypt_token(self._access_token)
-        if data.get("refresh_token"):
-            self._user.oidc_refresh_token = encrypt_token(data["refresh_token"])
+        new_refresh = data.get("refresh_token")
+        if new_refresh:
+            self._user.oidc_refresh_token = encrypt_token(new_refresh)
         self._user.oidc_token_expires_at = self._token_expires_at
         self._user.save(
             update_fields=[
@@ -536,4 +588,29 @@ class DriveUserTokenBackend(DriveBackend):
                 "oidc_token_expires_at",
                 "updated_at",
             ]
+        )
+        logger.info(
+            "Drive (ProConnect) token refresh succeeded for user %s: "
+            "new access token %s, refresh token %s",
+            self._user.id,
+            describe_access_expiry(self._token_expires_at),
+            "rotated"
+            if new_refresh and new_refresh != plaintext_refresh
+            else "unchanged",
+        )
+
+    def _log_refresh_failure(self, reason: str, transient: bool = False) -> None:
+        """A transient failure is retried by tenacity: it only fails an attempt."""
+        if transient:
+            logger.warning(
+                "Drive (ProConnect) token refresh attempt failed for user %s: %s "
+                "(transient error, may be retried)",
+                self._user.id,
+                reason,
+            )
+            return
+        logger.warning(
+            "Drive (ProConnect) token refresh failed for user %s: %s",
+            self._user.id,
+            reason,
         )

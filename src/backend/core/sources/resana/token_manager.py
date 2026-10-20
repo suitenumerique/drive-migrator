@@ -1,6 +1,7 @@
 """Resana token lifecycle management for per-user authentication."""
 
 import datetime
+import logging
 from datetime import timedelta
 
 from django.conf import settings
@@ -9,6 +10,7 @@ from django.utils import timezone
 
 import jwt
 import requests
+from cryptography.fernet import InvalidToken
 
 from core.encryption import decrypt_token, encrypt_token
 from core.sources.resana.migrator_auth import (
@@ -17,6 +19,14 @@ from core.sources.resana.migrator_auth import (
     create_bridge_session,
     refresh_offline_token,
 )
+from core.utils import (
+    describe_access_expiry,
+    describe_expiry,
+    describe_oauth_error,
+    describe_request_error,
+)
+
+logger = logging.getLogger(__name__)
 
 REFRESH_BUFFER_SECONDS = 60
 # Upper bound on how long one worker may hold the per-user refresh lock: covers
@@ -58,6 +68,41 @@ def migrator_client_from_settings() -> MigratorClient:
 class ResanaTokenManager:
     def __init__(self, user):
         self.user = user
+
+    def describe_tokens(self) -> str:
+        """Describe the stored tokens and their lifetime for logs, never their value."""
+        access = "access token missing"
+        if self.user.resana_access_token:
+            access = f"access token present, {describe_access_expiry(self.user.resana_token_expires_at)}"
+        offline = "offline token missing"
+        if self.user.resana_refresh_token:
+            offline = f"offline token present, {self._describe_offline_expiry()}"
+        return f"Resana tokens for user {self.user.id}: {access}; {offline}"
+
+    def _describe_offline_expiry(self) -> str:
+        """Keycloak decides the offline token's lifetime server side: it usually
+        carries no exp claim, only when the realm caps the offline session."""
+        try:
+            claims = jwt.decode(
+                decrypt_token(self.user.resana_refresh_token),
+                options={"verify_signature": False},
+            )
+            exp = claims.get("exp")
+            expires_at = (
+                datetime.datetime.fromtimestamp(exp, tz=datetime.timezone.utc)
+                if exp
+                else None
+            )
+        except (
+            jwt.PyJWTError,
+            InvalidToken,
+            TypeError,
+            ValueError,
+            OverflowError,
+            OSError,
+        ):
+            return "expiry unreadable"
+        return describe_expiry(expires_at)
 
     def is_connected(self) -> bool:
         """Return True if an access token is stored (regardless of validity)."""
@@ -136,6 +181,12 @@ class ResanaTokenManager:
         Raises ResanaTokenExpired (and clears the stored tokens) if the
         offline token is no longer accepted.
         """
+        logger.info(
+            "Resana token refresh for user %s: access token %s, "
+            "refreshing with the offline token",
+            self.user.id,
+            describe_access_expiry(self.user.resana_token_expires_at),
+        )
         offline_token = decrypt_token(self.user.resana_refresh_token)
         try:
             token_response = refresh_offline_token(
@@ -144,16 +195,23 @@ class ResanaTokenManager:
                 offline_token,
             )
         except requests.HTTPError as exc:
+            self._log_refresh_failure(f"Keycloak returned {describe_oauth_error(exc)}")
             if exc.response is not None and exc.response.status_code in (400, 401):
                 self.clear_tokens()
                 raise ResanaTokenExpired(
                     "Resana offline token is no longer valid."
                 ) from exc
             raise
+        except requests.RequestException as exc:
+            self._log_refresh_failure(
+                f"Keycloak request failed ({describe_request_error(exc)})"
+            )
+            raise
 
         new_access = token_response.get("access_token")
         new_offline = token_response.get("refresh_token") or offline_token
         if not new_access:
+            self._log_refresh_failure("Keycloak returned no access token")
             self.clear_tokens()
             raise ResanaTokenExpired(
                 "Keycloak refresh response did not return an access_token."
@@ -166,14 +224,35 @@ class ResanaTokenManager:
                 existing_session_id=self.get_session_id() or None,
             )
         except (requests.HTTPError, ValueError) as exc:
+            self._log_refresh_failure(
+                "the Resana bridge rejected the new session "
+                f"({describe_request_error(exc)})"
+            )
             self.clear_tokens()
             raise ResanaTokenExpired(
                 "Resana bridge rejected the refreshed session."
             ) from exc
+        except requests.RequestException as exc:
+            self._log_refresh_failure(
+                f"the Resana bridge request failed ({describe_request_error(exc)})"
+            )
+            raise
 
         self.store_tokens(
             offline_token=new_offline,
             access_token=session["interstis_access"],
             session_id=session["plateformeSessionId"],
             csrf_token=session["csrfToken"],
+        )
+        logger.info(
+            "Resana token refresh succeeded for user %s: new access token %s, "
+            "offline token %s",
+            self.user.id,
+            describe_access_expiry(self.user.resana_token_expires_at),
+            "rotated" if new_offline != offline_token else "unchanged",
+        )
+
+    def _log_refresh_failure(self, reason: str) -> None:
+        logger.warning(
+            "Resana token refresh failed for user %s: %s", self.user.id, reason
         )

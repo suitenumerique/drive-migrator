@@ -1,6 +1,7 @@
 """Tests for ResanaTokenManager."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 from unittest.mock import MagicMock, patch
 
 from django.utils import timezone
@@ -9,6 +10,7 @@ import jwt
 import pytest
 import requests
 from cryptography.fernet import Fernet
+from freezegun import freeze_time
 
 from core.encryption import decrypt_token, encrypt_token
 from core.factories import UserFactory
@@ -606,3 +608,286 @@ def test_concurrent_refresh_loser_must_not_clobber_the_winners_tokens(settings):
 def _fernet_key() -> str:
     """Return a valid Fernet key for test settings."""
     return Fernet.generate_key().decode()
+
+
+# ---------------------------------------------------------------------------
+# describe_tokens()
+# ---------------------------------------------------------------------------
+
+
+def _make_offline_jwt(claims):
+    """Build a fake Keycloak offline token carrying the given claims."""
+    return jwt.encode(claims, "test-secret-long-enough-for-hs256", algorithm="HS256")
+
+
+@freeze_time("2026-10-15 15:18:08")
+def test_describe_tokens_with_both_tokens():
+    """Both tokens are described with their expiry, never with their value."""
+    offline = _make_offline_jwt({"typ": "Offline", "exp": 1792681088})
+    user = _make_user(
+        access="secret-access",
+        refresh=offline,
+        expires_at=datetime(2026, 10, 15, 15, 20, 0, tzinfo=dt_timezone.utc),
+    )
+
+    description = ResanaTokenManager(user).describe_tokens()
+
+    assert description == (
+        f"Resana tokens for user {user.id}: "
+        "access token present, expires at 2026-10-15T15:20:00+00:00 (in 112s); "
+        "offline token present, expires at 2026-10-22T14:58:08+00:00 (in 603600s)"
+    )
+    assert "secret-access" not in description
+    assert offline not in description
+
+
+def test_describe_tokens_offline_token_without_exp():
+    """A Keycloak offline token usually carries no exp claim."""
+    user = _make_user(refresh=_make_offline_jwt({"typ": "Offline"}))
+
+    description = ResanaTokenManager(user).describe_tokens()
+
+    assert description.endswith("offline token present, no expiry")
+
+
+def test_describe_tokens_offline_token_not_a_jwt():
+    """An offline token that can't be decoded doesn't break the description."""
+    user = _make_user(refresh="not-a-jwt")
+
+    description = ResanaTokenManager(user).describe_tokens()
+
+    assert description.endswith("offline token present, expiry unreadable")
+
+
+def test_describe_tokens_without_tokens():
+    """A disconnected user has both tokens missing."""
+    user = _make_user()
+
+    assert ResanaTokenManager(user).describe_tokens() == (
+        f"Resana tokens for user {user.id}: "
+        "access token missing; offline token missing"
+    )
+
+
+# ---------------------------------------------------------------------------
+# _refresh() — logs
+# ---------------------------------------------------------------------------
+
+
+def _rendered(log_method):
+    """Return the messages logged through a mocked logger method, formatted."""
+    return [call.args[0] % call.args[1:] for call in log_method.call_args_list]
+
+
+def _refresh_with(
+    user, keycloak_response=None, keycloak_error=None, bridge=None, *, raises=None
+):
+    """Run _refresh() against mocked Keycloak and bridge, checking it raises the
+    expected exception if any, and return the mocked logger."""
+    if bridge is None:
+        bridge = {
+            "plateformeSessionId": "new-sess",
+            "interstis_access": _make_access_jwt(),
+            "csrfToken": "new-csrf",
+        }
+    with (
+        patch("core.sources.resana.token_manager.logger") as mock_logger,
+        patch(
+            "core.sources.resana.token_manager.refresh_offline_token",
+            return_value=keycloak_response,
+            side_effect=keycloak_error,
+        ),
+        patch(
+            "core.sources.resana.token_manager.create_bridge_session",
+            **(
+                {"side_effect": bridge}
+                if isinstance(bridge, Exception)
+                else {"return_value": bridge}
+            ),
+        ),
+    ):
+        if raises is None:
+            ResanaTokenManager(user)._refresh()  # pylint: disable=protected-access
+        else:
+            with pytest.raises(raises):
+                ResanaTokenManager(user)._refresh()  # pylint: disable=protected-access
+    return mock_logger
+
+
+@freeze_time("2026-10-15 15:18:08")
+def test_refresh_logs_the_expired_token_and_the_new_lifetime(settings):
+    """A successful refresh logs the old expiry, then the new one and the rotation."""
+    user = _make_user_with_migrator_tokens(settings)
+
+    mock_logger = _refresh_with(
+        user, keycloak_response={"access_token": "kc", "refresh_token": "new-off"}
+    )
+
+    assert _rendered(mock_logger.info) == [
+        f"Resana token refresh for user {user.id}: access token expired since "
+        "2026-10-15T15:18:07+00:00 (1s ago), refreshing with the offline token",
+        f"Resana token refresh succeeded for user {user.id}: new access token "
+        "expires at 2026-10-15T18:18:08+00:00 (in 10800s), offline token rotated",
+    ]
+    mock_logger.warning.assert_not_called()
+
+
+@freeze_time("2026-10-15 15:18:08")
+def test_refresh_logs_an_offline_token_kept_by_keycloak(settings):
+    """When Keycloak doesn't rotate the offline token, the log says so."""
+    user = _make_user_with_migrator_tokens(settings)
+
+    mock_logger = _refresh_with(user, keycloak_response={"access_token": "kc"})
+
+    assert _rendered(mock_logger.info)[-1].endswith("offline token unchanged")
+
+
+def test_refresh_logs_the_keycloak_error_when_the_offline_token_is_refused(settings):
+    """A refused offline token logs Keycloak's status and OAuth error."""
+    user = _make_user_with_migrator_tokens(settings)
+    http_error = requests.HTTPError("400 Bad Request")
+    http_error.response = MagicMock(status_code=400)
+    http_error.response.json.return_value = {
+        "error": "invalid_grant",
+        "error_description": "Offline session not active",
+    }
+
+    mock_logger = _refresh_with(
+        user, keycloak_error=http_error, raises=ResanaTokenExpired
+    )
+
+    assert _rendered(mock_logger.warning) == [
+        f"Resana token refresh failed for user {user.id}: Keycloak returned 400 "
+        "invalid_grant (Offline session not active)"
+    ]
+
+
+def test_refresh_logs_a_keycloak_error_without_json_body(settings):
+    """A Keycloak error page that isn't JSON still logs its status."""
+    user = _make_user_with_migrator_tokens(settings)
+    http_error = requests.HTTPError("503 Service Unavailable")
+    http_error.response = MagicMock(status_code=503)
+    http_error.response.json.side_effect = ValueError
+
+    mock_logger = _refresh_with(
+        user, keycloak_error=http_error, raises=requests.HTTPError
+    )
+
+    assert _rendered(mock_logger.warning) == [
+        f"Resana token refresh failed for user {user.id}: Keycloak returned 503 "
+        "without OAuth error"
+    ]
+
+
+def test_refresh_logs_a_keycloak_response_without_access_token(settings):
+    """A Keycloak answer without access token is logged as a failed refresh."""
+    user = _make_user_with_migrator_tokens(settings)
+
+    mock_logger = _refresh_with(user, keycloak_response={}, raises=ResanaTokenExpired)
+
+    assert _rendered(mock_logger.warning) == [
+        f"Resana token refresh failed for user {user.id}: Keycloak returned no "
+        "access token"
+    ]
+
+
+def test_refresh_logs_the_bridge_rejecting_the_new_session(settings):
+    """A bridge refusing the refreshed access token is logged with its error."""
+    user = _make_user_with_migrator_tokens(settings)
+
+    mock_logger = _refresh_with(
+        user,
+        keycloak_response={"access_token": "kc"},
+        bridge=requests.HTTPError(
+            "401 Unauthorized", response=MagicMock(status_code=401)
+        ),
+        raises=ResanaTokenExpired,
+    )
+
+    assert _rendered(mock_logger.warning) == [
+        f"Resana token refresh failed for user {user.id}: the Resana bridge "
+        "rejected the new session (HTTPError 401)"
+    ]
+
+
+def test_refresh_still_expires_tokens_when_keycloak_error_body_is_not_an_object(
+    settings,
+):
+    """Logging an odd Keycloak error body never changes the refresh outcome."""
+    user = _make_user_with_migrator_tokens(settings)
+    http_error = requests.HTTPError("400 Bad Request")
+    http_error.response = MagicMock(status_code=400)
+    http_error.response.json.return_value = ["not", "an", "object"]
+
+    with patch(
+        "core.sources.resana.token_manager.refresh_offline_token",
+        side_effect=http_error,
+    ):
+        with pytest.raises(ResanaTokenExpired):
+            ResanaTokenManager(user)._refresh()  # pylint: disable=protected-access
+
+    user.refresh_from_db()
+    assert user.resana_refresh_token == ""
+
+
+@pytest.mark.parametrize("exp", ["soon", 10**20])
+def test_describe_tokens_offline_token_with_invalid_exp(exp):
+    """An exp claim that isn't a usable timestamp doesn't break the description."""
+    user = _make_user(refresh=_make_offline_jwt({"typ": "Offline", "exp": exp}))
+
+    description = ResanaTokenManager(user).describe_tokens()
+
+    assert description.endswith("offline token present, expiry unreadable")
+
+
+def test_refresh_logs_a_failed_keycloak_request(settings):
+    """A network error towards Keycloak is logged before being raised."""
+    user = _make_user_with_migrator_tokens(settings)
+
+    mock_logger = _refresh_with(
+        user, keycloak_error=requests.Timeout("timed out"), raises=requests.Timeout
+    )
+
+    assert _rendered(mock_logger.warning) == [
+        f"Resana token refresh failed for user {user.id}: Keycloak request "
+        "failed (Timeout)"
+    ]
+
+
+def test_refresh_logs_a_failed_bridge_request(settings):
+    """A network error towards the Resana bridge is logged before being raised."""
+    user = _make_user_with_migrator_tokens(settings)
+
+    mock_logger = _refresh_with(
+        user,
+        keycloak_response={"access_token": "kc"},
+        bridge=requests.ConnectionError("refused"),
+        raises=requests.ConnectionError,
+    )
+
+    assert _rendered(mock_logger.warning) == [
+        f"Resana token refresh failed for user {user.id}: the Resana bridge "
+        "request failed (ConnectionError)"
+    ]
+
+
+def test_describe_tokens_access_token_without_expiry_will_be_refreshed():
+    """Without expiry date the access token is refreshed, not trusted."""
+    user = _make_user(access="some-access", expires_at=None)
+
+    description = ResanaTokenManager(user).describe_tokens()
+
+    assert "access token present, expiry unknown (will be refreshed);" in description
+
+
+def test_refresh_logs_an_access_token_without_expiry(settings):
+    """The refresh start log doesn't present a dateless access token as valid."""
+    user = _make_user_with_migrator_tokens(settings)
+    user.resana_token_expires_at = None
+
+    mock_logger = _refresh_with(user, keycloak_response={"access_token": "kc"})
+
+    assert _rendered(mock_logger.info)[0] == (
+        f"Resana token refresh for user {user.id}: access token expiry unknown "
+        "(will be refreshed), refreshing with the offline token"
+    )

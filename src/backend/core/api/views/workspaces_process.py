@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 
 from django_celery_results.models import TaskResult
@@ -11,10 +13,13 @@ from ...destinations.drive.drive_backend import DriveUserTokenBackend
 from ...destinations.resana.resana_backend import ResanaBackend
 from ...models import ExtraTaskInfo, FeatureFlag, Workspace
 from ...processing.tasks import export
+from ...processing.token_status import log_token_status
 from ...sources.resana.token_manager import ResanaTokenManager
 from ...utils import is_feature
 from .. import APIException
 from ..serializers import UserSerializer
+
+logger = logging.getLogger(__name__)
 
 
 def push_workspace_task(workspace, user):
@@ -66,6 +71,14 @@ class WorkspacesProcessAPIView(APIView):
             if workspace.source_type == "resana":
                 check_resana_source_token = True
 
+        log_token_status(
+            logger,
+            "Before migration launch",
+            user,
+            resana=check_resana_source_token,
+            drive=check_drive_token,
+        )
+
         if check_resana_user:
             resana_backend = ResanaBackend()
             resana_user = resana_backend.fetch_user(user)
@@ -77,7 +90,7 @@ class WorkspacesProcessAPIView(APIView):
             and getattr(settings, "DRIVE_AUTH_MODE", "service_account") == "user_token"
         ):
             try:
-                DriveUserTokenBackend(user)._get_token()  # noqa: SLF001
+                DriveUserTokenBackend(user)._get_token()  # noqa: SLF001  # pylint: disable=protected-access
             except Exception as exc:  # noqa: BLE001
                 raise APIException("DriveTokenRequired") from exc
 

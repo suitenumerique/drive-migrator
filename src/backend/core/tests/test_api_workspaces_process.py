@@ -1,6 +1,8 @@
 """Tests for WorkspacesProcessAPIView.validation() — pre-flight checks."""
 
-from unittest.mock import MagicMock, patch
+# pylint: disable=protected-access
+
+from unittest.mock import ANY, MagicMock, patch
 
 from django.test import override_settings
 
@@ -150,3 +152,52 @@ def test_non_resana_source_skips_token_check():
             view.validation(user, data, [workspace])
 
     mock_tm.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Token status logged before the pre-flight checks
+# ---------------------------------------------------------------------------
+
+
+@override_settings(DRIVE_AUTH_MODE="user_token")
+def test_validation_logs_token_status_before_failing_check():
+    """The tokens are logged as found, even when a check then refuses the launch."""
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory(source_type="resana")
+
+    view = _make_view()
+    data = _workspace_data(workspace, "drive")
+
+    with (
+        patch("core.api.views.workspaces_process.log_token_status") as mock_log,
+        patch("core.api.views.workspaces_process.DriveUserTokenBackend"),
+        patch("core.api.views.workspaces_process.ResanaTokenManager") as mock_tm,
+    ):
+        mock_tm.return_value.is_connected.return_value = False
+
+        with pytest.raises(APIException):
+            view.validation(user, data, [workspace])
+
+    mock_log.assert_called_once_with(
+        ANY, "Before migration launch", user, resana=True, drive=True
+    )
+
+
+def test_validation_logs_no_token_for_unused_services():
+    """Neither Resana nor Drive tokens are flagged when the migration doesn't use them."""
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory(source_type="osmose")
+
+    view = _make_view()
+    data = _workspace_data(workspace, "resana")
+
+    with (
+        patch("core.api.views.workspaces_process.log_token_status") as mock_log,
+        patch("core.api.views.workspaces_process.ResanaBackend") as mock_resana,
+    ):
+        mock_resana.return_value.fetch_user.return_value = {"id": "u1"}
+        view.validation(user, data, [workspace])
+
+    mock_log.assert_called_once_with(
+        ANY, "Before migration launch", user, resana=False, drive=False
+    )

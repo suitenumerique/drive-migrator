@@ -17,6 +17,7 @@ from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.processing.integrity import IntegrityTracker, Stage
 from core.processing.rejected_files import RejectedFilesArchive
+from core.processing.token_status import log_token_status
 from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app
@@ -117,6 +118,13 @@ def export(self, data):  # pylint: disable=unused-argument
         workspace.destination_statuses,
     )
     user = User.objects.get(id=data["user"]["id"])
+    log_token_status(
+        logger,
+        f"Before migrating workspace {workspace_id}",
+        user,
+        resana=workspace.source_type == "resana",
+        drive=workspace.get_destination_status("drive") == Workspace.Status.PENDING,
+    )
 
     workspace.reset_migration_errors()
     RejectedFilesArchive.clear(workspace)

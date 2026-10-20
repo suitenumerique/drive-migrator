@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Log the Resana and Drive tokens lifetime before each migration and on refresh
+
 ## [v0.10.0] - 2026-10-19
 
 ### Added

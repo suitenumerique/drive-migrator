@@ -838,3 +838,28 @@ def test_migration_finished_counts_zero_unfinished_analyses_in_a_report():
         task_success_handler(sender=mock_sender)
 
     assert capture.call_args.args[2]["analysis_unfinished_count"] == 0
+
+
+def test_export_logs_token_status_before_migrating(workspace, user):
+    """The tokens of the services the workspace relies on are logged at task start."""
+    workspace.source_type = "resana"
+
+    with patch("core.processing.tasks.log_token_status") as mock_log:
+        _run_export(workspace, user)
+
+    mock_log.assert_called_once_with(
+        ANY, "Before migrating workspace ws-1", user, resana=True, drive=True
+    )
+
+
+def test_export_logs_token_status_only_for_used_services(workspace, user):
+    """No token is flagged for a source or destination the workspace doesn't use."""
+    workspace.source_type = "osmose"
+    workspace.get_destination_status.return_value = Workspace.Status.NONE
+
+    with patch("core.processing.tasks.log_token_status") as mock_log:
+        _run_export(workspace, user)
+
+    mock_log.assert_called_once_with(
+        ANY, "Before migrating workspace ws-1", user, resana=False, drive=False
+    )

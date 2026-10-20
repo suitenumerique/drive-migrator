@@ -2,6 +2,8 @@ import os
 from logging import getLogger
 from pathlib import Path
 
+from django.utils import timezone
+
 from core.models import FeatureFlag
 
 logger = getLogger(__name__)
@@ -24,6 +26,57 @@ def sizeof_fmt(num, suffix="B"):
             return f"{num:3.1f}{unit}{suffix}"
         num /= 1024.0
     return f"{num:.1f}Yi{suffix}"
+
+
+def describe_expiry(expires_at) -> str:
+    """Describe a token expiry date relative to now, for logs."""
+    if expires_at is None:
+        return "no expiry"
+    seconds = int((expires_at - timezone.now()).total_seconds())
+    if seconds >= 0:
+        return f"expires at {expires_at.isoformat()} (in {seconds}s)"
+    return f"expired since {expires_at.isoformat()} ({-seconds}s ago)"
+
+
+def describe_access_expiry(expires_at) -> str:
+    """Describe an access token expiry for logs: without a date, the backends
+    refresh the token rather than trusting it."""
+    if expires_at is None:
+        return "expiry unknown (will be refreshed)"
+    return describe_expiry(expires_at)
+
+
+def describe_oauth_error(error) -> str:
+    """Return the status and OAuth error of a failed token endpoint call, e.g.
+    '400 invalid_grant (Offline session not active)'. Never carries a token."""
+    response = error.response
+    if response is None:
+        return f"{type(error).__name__} without response"
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict) or not payload.get("error"):
+        return f"{response.status_code} without OAuth error"
+    oauth_error = _one_line(payload["error"], 64)
+    description = _one_line(payload.get("error_description") or "", 200)
+    return f"{response.status_code} {oauth_error}" + (
+        f" ({description})" if description else ""
+    )
+
+
+def _one_line(value, limit: int) -> str:
+    """Keep a value sent by a remote server on one bounded line in the logs."""
+    return " ".join(str(value).split())[:limit]
+
+
+def describe_request_error(error) -> str:
+    """Describe a request error by its type and HTTP status for logs: its
+    message could carry request data."""
+    response = getattr(error, "response", None)
+    if response is None:
+        return type(error).__name__
+    return f"{type(error).__name__} {response.status_code}"
 
 
 def is_feature(name: str) -> bool:
