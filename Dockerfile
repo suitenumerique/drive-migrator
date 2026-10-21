@@ -1,5 +1,8 @@
 # Django impress
 
+# ---- uv, the single place where its version is set ----
+FROM ghcr.io/astral-sh/uv:0.13.4 AS uv
+
 # ---- base image to inherit from ----
 FROM python:3.14.6-alpine AS base
 
@@ -19,7 +22,7 @@ ENV UV_LINK_MODE=copy
 ENV UV_PYTHON_DOWNLOADS=0
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 WORKDIR /app
 
@@ -123,7 +126,7 @@ USER root:root
 RUN apk add --no-cache postgresql-client
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 # Install development dependencies and ensure the virtual
 # environment belongs to the DOCKER_USER
