@@ -15,6 +15,7 @@ from requests.exceptions import HTTPError, RequestException
 from core.backends.destination import (
     MEMBERS_CSV_FILENAME,
     AbstractDestinationBackend,
+    AccountPolicy,
     RejectedFile,
 )
 from core.destinations.drive.drive_backend import (
@@ -84,6 +85,29 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
     def describe_rejection(self, code: str) -> str:
         return _REJECTION_REASONS.get(code) or super().describe_rejection(code)
+
+    def get_account_policy(self) -> AccountPolicy:
+        # The service account creates the items itself.
+        if getattr(settings, "DRIVE_AUTH_MODE", "service_account") != "user_token":
+            return AccountPolicy.NONE
+        try:
+            return AccountPolicy(settings.DRIVE_ACCOUNT_POLICY)
+        except ValueError:
+            logger.error(
+                "Invalid DRIVE_ACCOUNT_POLICY %r, falling back to %s",
+                settings.DRIVE_ACCOUNT_POLICY,
+                AccountPolicy.USER_CREATED.value,
+            )
+            return AccountPolicy.USER_CREATED
+
+    def user_account_exists(self, user) -> bool:
+        return DriveUserTokenBackend(user).get_me() is not None
+
+    def get_account_creation_url(self) -> str | None:
+        if self.get_account_policy() != AccountPolicy.USER_CREATED:
+            return None
+        # Logging in to Drive once creates the account.
+        return settings.DRIVE_FRONTEND_URL
 
     def _make_backend(self, user):
         auth_mode = getattr(settings, "DRIVE_AUTH_MODE", "service_account")

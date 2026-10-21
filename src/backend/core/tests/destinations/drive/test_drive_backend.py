@@ -15,6 +15,7 @@ from requests.exceptions import HTTPError, Timeout
 
 from core.destinations.drive.drive_backend import (
     DriveServiceAccountBackend,
+    DriveTokenExpired,
     DriveUserTokenBackend,
     user_has_usable_drive_token,
 )
@@ -647,8 +648,43 @@ def test_user_token_raises_when_no_refresh_token():
         expires_at=timezone.now() - timedelta(seconds=1),
     )
 
-    with pytest.raises(RuntimeError, match="No refresh token stored"):
+    with pytest.raises(DriveTokenExpired, match="No refresh token stored"):
         DriveUserTokenBackend(user)._get_token()
+
+
+def test_user_token_raises_drive_token_expired_when_refresh_is_refused(settings):
+    """A refresh token the provider refuses means the user must log in again."""
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    user = _make_user(
+        access_token="expired-tok", expires_at=timezone.now() - timedelta(seconds=1)
+    )
+
+    with patch_drive_http() as mock_requests:
+        response = mock_requests.post.return_value
+        response.status_code = 400
+        response.json.return_value = {"error": "invalid_grant"}
+        response.raise_for_status.side_effect = HTTPError(response=response)
+        with pytest.raises(DriveTokenExpired):
+            DriveUserTokenBackend(user)._get_token()
+
+
+def test_user_token_refresh_refused_for_the_client_is_not_an_expired_token(settings):
+    """A client the provider refuses is a configuration error: logging in again
+    would not help."""
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    user = _make_user(
+        access_token="expired-tok", expires_at=timezone.now() - timedelta(seconds=1)
+    )
+
+    with patch_drive_http() as mock_requests:
+        response = mock_requests.post.return_value
+        response.status_code = 401
+        response.json.return_value = {"error": "invalid_client"}
+        response.raise_for_status.side_effect = HTTPError(response=response)
+        with pytest.raises(HTTPError) as exc_info:
+            DriveUserTokenBackend(user)._get_token()
+
+    assert not isinstance(exc_info.value, DriveTokenExpired)
 
 
 # ---------------------------------------------------------------------------

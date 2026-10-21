@@ -19,6 +19,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from core.backends.destination import DestinationTokenExpired
 from core.encryption import decrypt_token, encrypt_token
 from core.retry_utils import log_final_failure_and_reraise
 from core.retrying_session import RetryingSession, is_transient_error
@@ -149,6 +150,21 @@ def _is_duplicate_id_conflict(error: HTTPError) -> bool:
     return _has_error_code(error, 400, _EXISTING_ID)
 
 
+class DriveTokenExpired(DestinationTokenExpired, RuntimeError):
+    """The ProConnect token cannot be refreshed: the user must log in again."""
+
+
+def _is_invalid_grant(response) -> bool:
+    """Whether the token endpoint refused the refresh token itself (OAuth2's
+    invalid_grant)."""
+    if response.status_code != 400:
+        return False
+    try:
+        return response.json().get("error") == "invalid_grant"
+    except ValueError:
+        return False
+
+
 def clear_drive_tokens(user) -> None:
     """Remove the stored Drive (ProConnect) tokens, forcing the user to log in again."""
     user.oidc_access_token = ""
@@ -217,6 +233,8 @@ class DriveBackend:
     def __init__(self):
         self._access_token = None
         self._token_expires_at = None
+        # Set by _get_token(), so get_me() does not refresh a fresh token again.
+        self._token_refreshed = False
         self.session = RetryingSession("DRIVE", logger)
         # Per call, not on the session: the S3 upload must not receive the token.
         self._auth = _BearerTokenAuth(self._get_token)
@@ -235,6 +253,7 @@ class DriveBackend:
             or timezone.now() >= self._token_expires_at - buffer
         ):
             self._refresh()
+            self._token_refreshed = True
         return self._access_token
 
     def _refresh(self):
@@ -449,6 +468,41 @@ class DriveBackend:
             )
             time.sleep(wait)
 
+    # --- Users ---
+
+    def get_me(self) -> dict | None:
+        """Return the token holder's Drive user, or None when Drive does not know
+        them. Drive answers 401 for that, but also to a token revoked before it
+        expires: only a 401 to a fresh token means a missing account."""
+        self._token_refreshed = False
+        response = self._get_me_response()
+        if (
+            response.status_code == 401
+            and not self._token_refreshed
+            and self._can_refresh()
+        ):
+            # A refused refresh raises DriveTokenExpired: the token may have been
+            # revoked, and logging in again gives a fresh one.
+            self._refresh()
+            response = self._get_me_response()
+        if response.status_code == 401:
+            if not self._can_refresh():
+                logger.warning(
+                    "Drive refused a token that cannot be refreshed: "
+                    "the Drive account is taken as missing"
+                )
+            return None
+        response.raise_for_status()
+        return response.json()
+
+    def _get_me_response(self):
+        return self.session.get(
+            f"{self.api_root_url}/users/me/", auth=self._auth, timeout=30
+        )
+
+    def _can_refresh(self) -> bool:
+        return True
+
     # --- Sharing ---
 
     def find_user_by_email(self, email: str) -> dict | None:
@@ -535,6 +589,9 @@ class DriveUserTokenBackend(DriveBackend):
         self._access_token = decrypt_token(user.oidc_access_token) or None
         self._token_expires_at = user.oidc_token_expires_at
 
+    def _can_refresh(self) -> bool:
+        return bool(self._user.oidc_refresh_token)
+
     def _refresh(self):
         logger.info(
             "Drive (ProConnect) token refresh for user %s: %s, "
@@ -547,7 +604,7 @@ class DriveUserTokenBackend(DriveBackend):
         plaintext_refresh = decrypt_token(self._user.oidc_refresh_token)
         if not plaintext_refresh:
             self._log_refresh_failure("no refresh token stored")
-            raise RuntimeError(
+            raise DriveTokenExpired(
                 f"No refresh token stored for user {self._user.email}. "
                 "Cannot refresh the ProConnect token for Drive migration."
             )
@@ -568,6 +625,12 @@ class DriveUserTokenBackend(DriveBackend):
             self._log_refresh_failure(
                 f"ProConnect returned {describe_oauth_error(error)}"
             )
+            # The provider refuses an expired or revoked refresh token, and nothing
+            # else: a refused client is a configuration error, not the user's.
+            if _is_invalid_grant(error.response):
+                raise DriveTokenExpired(
+                    f"ProConnect refused to refresh the token of user {self._user.email}."
+                ) from error
             raise
         except RequestException as error:
             self._log_refresh_failure(

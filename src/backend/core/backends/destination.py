@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import StrEnum
 
 from django.conf import settings
 from django.utils.module_loading import import_string
@@ -9,6 +10,22 @@ from django.utils.module_loading import import_string
 # Members listing written by the archive and Drive exports. Named so that it
 # hardly collides with a source file, which it would overwrite then delete.
 MEMBERS_CSV_FILENAME = "users_list_by_migrator.csv"
+
+
+class AccountPolicy(StrEnum):
+    """Whether a destination needs a user account, and who creates it."""
+
+    # No user account involved (e.g. an archive, a service account).
+    NONE = "none"
+    # The destination creates it on the first migration.
+    AUTO_CREATED = "auto_created"
+    # The user must create it before migrating.
+    USER_CREATED = "user_created"
+
+
+class DestinationTokenExpired(Exception):
+    """The user's token for a destination can no longer be used or refreshed:
+    they must log in again."""
 
 
 @dataclass(frozen=True)
@@ -63,6 +80,20 @@ class AbstractDestinationBackend(ABC):
         # pylint: disable-next=fixme
         # TODO: French only until the backend ships translations (.po).
         return f"Fichier refusé par {self.label}"
+
+    def get_account_policy(self) -> AccountPolicy:
+        """Whether migrating to this destination needs a user account."""
+        return AccountPolicy.NONE
+
+    def user_account_exists(self, user) -> bool:  # pylint: disable=unused-argument
+        """Whether user already has an account. Only asked under USER_CREATED.
+        Raises DestinationTokenExpired, or a RequestException when the
+        destination cannot be reached."""
+        return True
+
+    def get_account_creation_url(self) -> str | None:
+        """Where the user creates their account, under USER_CREATED."""
+        return None
 
     # --- Optional hooks (default: raise NotImplementedError) ---
 

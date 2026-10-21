@@ -12,8 +12,20 @@ import requests
 from core import factories
 from core.api import APIException
 from core.api.views.workspaces_process import WorkspacesProcessAPIView
+from core.backends.destination import DestinationTokenExpired
+from core.destinations.drive.backend import DriveDestinationBackend
+from core.retrying_session import _max_attempts_cap
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture(autouse=True, name="drive_account_exists")
+def fixture_drive_account_exists():
+    """Users have a Drive account unless a test says otherwise (no Drive call)."""
+    with patch.object(
+        DriveDestinationBackend, "user_account_exists", return_value=True
+    ) as mock_exists:
+        yield mock_exists
 
 
 def _make_view():
@@ -40,12 +52,29 @@ def test_drive_token_refresh_fails_raises_drive_token_required():
     data = _workspace_data(workspace, "drive")
 
     with patch("core.api.views.workspaces_process.DriveUserTokenBackend") as mock_cls:
-        mock_cls.return_value._get_token.side_effect = requests.HTTPError("400")
+        mock_cls.return_value._get_token.side_effect = DestinationTokenExpired()
 
         with pytest.raises(APIException) as exc_info:
             view.validation(user, data, [workspace])
 
     assert exc_info.value.detail["error_name"] == "DriveTokenRequired"
+
+
+@override_settings(DRIVE_AUTH_MODE="user_token")
+def test_drive_token_refresh_unreachable_raises_destination_unavailable():
+    """A provider that cannot be reached does not send the user back to log in."""
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory()
+
+    with patch("core.api.views.workspaces_process.DriveUserTokenBackend") as mock_cls:
+        mock_cls.return_value._get_token.side_effect = requests.ConnectionError()
+
+        with pytest.raises(APIException) as exc_info:
+            _make_view().validation(
+                user, _workspace_data(workspace, "drive"), [workspace]
+            )
+
+    assert exc_info.value.detail["error_name"] == "DestinationUnavailable"
 
 
 @override_settings(DRIVE_AUTH_MODE="user_token")
@@ -201,3 +230,78 @@ def test_validation_logs_no_token_for_unused_services():
     mock_log.assert_called_once_with(
         ANY, "Before migration launch", user, resana=False, drive=False
     )
+
+
+# ---------------------------------------------------------------------------
+# Destination user account pre-flight
+# ---------------------------------------------------------------------------
+
+
+@override_settings(DRIVE_AUTH_MODE="user_token", DRIVE_ACCOUNT_POLICY="user_created")
+def test_missing_drive_account_raises_account_not_found(drive_account_exists):
+    """A user who never logged in to Drive cannot start a Drive migration."""
+    drive_account_exists.return_value = False
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory(source_type="osmose")
+
+    with patch("core.api.views.workspaces_process.DriveUserTokenBackend"):
+        with pytest.raises(APIException) as exc_info:
+            _make_view().validation(
+                user, _workspace_data(workspace, "drive"), [workspace]
+            )
+
+    assert exc_info.value.detail["error_name"] == "AccountNotFound"
+    drive_account_exists.assert_called_once_with(user)
+
+
+@override_settings(DRIVE_AUTH_MODE="user_token", DRIVE_ACCOUNT_POLICY="auto_created")
+def test_auto_created_drive_account_is_not_checked(drive_account_exists):
+    """Drive creating the account itself, its absence does not block."""
+    drive_account_exists.return_value = False
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory(source_type="osmose")
+
+    with patch("core.api.views.workspaces_process.DriveUserTokenBackend"):
+        _make_view().validation(
+            user, _workspace_data(workspace, "drive"), [workspace]
+        )  # must not raise
+
+    drive_account_exists.assert_not_called()
+
+
+@override_settings(DRIVE_AUTH_MODE="user_token", DRIVE_ACCOUNT_POLICY="user_created")
+@pytest.mark.parametrize(
+    "error, error_name",
+    [
+        (DestinationTokenExpired(), "DriveTokenRequired"),
+        (requests.ConnectionError(), "DestinationUnavailable"),
+    ],
+)
+def test_failed_account_check_raises_a_named_error(
+    drive_account_exists, error, error_name
+):
+    """A check that cannot conclude is reported, not turned into a server error."""
+    drive_account_exists.side_effect = error
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory(source_type="osmose")
+
+    with patch("core.api.views.workspaces_process.DriveUserTokenBackend"):
+        with pytest.raises(APIException) as exc_info:
+            _make_view().validation(
+                user, _workspace_data(workspace, "drive"), [workspace]
+            )
+
+    assert exc_info.value.detail["error_name"] == error_name
+
+
+@override_settings(DRIVE_AUTH_MODE="user_token", DRIVE_ACCOUNT_POLICY="user_created")
+def test_account_check_tries_the_destination_once(drive_account_exists):
+    """Inside the web request, the account check is not retried."""
+    drive_account_exists.side_effect = lambda user: _max_attempts_cap.get() == 1
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory(source_type="osmose")
+
+    with patch("core.api.views.workspaces_process.DriveUserTokenBackend"):
+        _make_view().validation(
+            user, _workspace_data(workspace, "drive"), [workspace]
+        )  # must not raise: the check only passes under the cap

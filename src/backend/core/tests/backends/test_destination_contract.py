@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.backends.destination import AbstractDestinationBackend
+from core.backends.destination import AbstractDestinationBackend, AccountPolicy
 
 
 def test_abstract_destination_cannot_be_instantiated():
@@ -72,3 +72,19 @@ def test_describe_rejection_defaults_to_a_generic_reason():
         MinimalDest().describe_rejection("any_code")
         == "Fichier refusé par Minimal Destination"
     )
+
+
+def test_account_hooks_default_to_no_account_required():
+    """A destination involves no user account unless it says otherwise."""
+
+    class MinimalDest(AbstractDestinationBackend):
+        name = "minimal"
+        label = "Minimal Destination"
+
+        def export(self, workspace, user, local_folder_path):
+            pass
+
+    dest = MinimalDest()
+    assert dest.get_account_policy() is AccountPolicy.NONE
+    assert dest.user_account_exists(user=None) is True
+    assert dest.get_account_creation_url() is None

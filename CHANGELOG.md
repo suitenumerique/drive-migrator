@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Configure per destination whether users must create their account #270
+
 ### Fixed
 
 - Retry transient API errors (timeouts, connection errors, 5xx) in the Osmose,

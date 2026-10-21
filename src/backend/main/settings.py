@@ -301,6 +301,13 @@ class Base(Configuration):
     DRIVE_AUTH_MODE = values.Value(
         "service_account", environ_name="DRIVE_AUTH_MODE", environ_prefix=None
     )
+    # In user_token mode, who creates the user's Drive account:
+    # "user_created": the user must log in to Drive once before migrating.
+    # "auto_created": Drive creates it on the first migration (needs the
+    # resource server to create unknown users, see django-lasuite OIDC_RS_CREATE_USER).
+    DRIVE_ACCOUNT_POLICY = values.Value(
+        "user_created", environ_name="DRIVE_ACCOUNT_POLICY", environ_prefix=None
+    )
     # Set to False to skip sharing migrated files with workspace members.
     # Members will then manage permissions manually in Drive.
     DRIVE_SHARE_MEMBERS = values.BooleanValue(

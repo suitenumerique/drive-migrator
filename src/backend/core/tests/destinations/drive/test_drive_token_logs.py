@@ -14,6 +14,7 @@ from freezegun import freeze_time
 from requests.exceptions import HTTPError, Timeout, TooManyRedirects
 
 from core.destinations.drive.drive_backend import (
+    DriveTokenExpired,
     DriveUserTokenBackend,
     describe_drive_tokens,
 )
@@ -145,7 +146,7 @@ def test_user_token_refresh_logs_the_proconnect_error():
         http.post.return_value.raise_for_status.side_effect = HTTPError(
             "400 Bad Request", response=response
         )
-        with pytest.raises(HTTPError):
+        with pytest.raises(DriveTokenExpired):
             DriveUserTokenBackend(user)._get_token()
 
     assert _rendered(mock_logger.warning) == [
