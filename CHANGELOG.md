@@ -16,6 +16,7 @@ and this project adheres to
 
 - Retry transient API errors (timeouts, connection errors, 5xx) in the Osmose,
   Resana and Drive API clients #264
+- Ask users without a Drive account to log in to Drive before migrating #266
 
 ## [v0.10.1] - 2026-10-22
 

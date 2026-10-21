@@ -4,6 +4,11 @@
       "api_errors.generic_api_error": "An error occurred, please try again later",
       "api_errors.WorkspaceNotFound": "Workspace not found",
       "api_errors.ResanaTokenRequired": "You need to connect to Resana before starting the migration.",
+      "api_errors.AccountNotFound": "You do not have an account on the destination tool yet: log in to it once, then start the migration again.",
+      "api_errors.DestinationUnavailable": "The destination tool cannot be reached for now, please try again in a few moments.",
+      "Fichiers est momentanément indisponible, veuillez réessayer dans quelques instants.": "Fichiers is temporarily unavailable, please try again in a few moments.",
+      "Votre session a expiré, veuillez vous déconnecter puis vous reconnecter.": "Your session has expired, please log out and log in again.",
+      "Le service est momentanément indisponible, veuillez réessayer dans quelques instants.": "The service is temporarily unavailable, please try again in a few moments.",
       "Outil de migration": "Migration tool",
       "Migrez vos données d’un outil vers un autre. D’autres outils seront ajoutés progressivement.": "Migrate your data from one tool to another. More tools will be added over time.",
       "Depuis": "From",
@@ -34,6 +39,11 @@
       "api_errors.ResanaUserNotFound": "Vous semblez ne pas avoir de compte Resana avec cette addresse email, veuillez vous créer un compte au préalable.",
       "api_errors.DriveTokenRequired": "Votre session Drive LaSuite a expiré, veuillez vous reconnecter.",
       "api_errors.ResanaTokenRequired": "Vous devez vous connecter à Resana avant de lancer la migration.",
+      "api_errors.AccountNotFound": "Vous n'avez pas encore de compte sur l'outil de destination : connectez-vous y une première fois, puis relancez la migration.",
+      "api_errors.DestinationUnavailable": "L'outil de destination est momentanément injoignable, veuillez réessayer dans quelques instants.",
+      "Fichiers est momentanément indisponible, veuillez réessayer dans quelques instants.": "Fichiers est momentanément indisponible, veuillez réessayer dans quelques instants.",
+      "Votre session a expiré, veuillez vous déconnecter puis vous reconnecter.": "Votre session a expiré, veuillez vous déconnecter puis vous reconnecter.",
+      "Le service est momentanément indisponible, veuillez réessayer dans quelques instants.": "Le service est momentanément indisponible, veuillez réessayer dans quelques instants.",
       "Votre compte est en attente de validation": "Votre compte est en attente de validation",
       "Votre compte a bien été créé. Un administrateur doit valider votre accès avant que vous puissiez utiliser cet outil.": "Votre compte a bien été créé. Un administrateur doit valider votre accès avant que vous puissiez utiliser cet outil."
     }

@@ -60,6 +60,8 @@ export const useApi = () => {
         // t('api_errors.WorkspaceAlreadyExporting')
         // t('api_errors.DriveTokenRequired')
         // t('api_errors.ResanaTokenRequired')
+        // t('api_errors.AccountNotFound')
+        // t('api_errors.DestinationUnavailable')
         if (errorName === DRIVE_TOKEN_REQUIRED) {
           window.location.replace(new URL('authenticate/', baseApiUrl()).href);
           return;

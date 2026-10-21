@@ -21,9 +21,12 @@ import {
   MIGRATION_TARGET_STORAGE_KEY,
   MigrationTarget,
   getConnectPath,
+  getMigrationDestination,
   isMigrationTarget,
 } from '@/core/migrationTarget';
 import { useApi } from '@/hooks/useApi';
+import { useAvailableDestinations } from '@/hooks/useAvailableDestinations';
+import { useDestinationAccountStatus } from '@/hooks/useDestinationAccountStatus';
 import { useResanaAuthStatus } from '@/hooks/useResanaAuthStatus';
 
 import './page.scss';
@@ -133,6 +136,26 @@ function ConnectPageContent() {
     return isMigrationTarget(fromStorage) ? fromStorage : null;
   }, [searchParams]);
 
+  const destination = target ? getMigrationDestination(target) : 'archive';
+  // /connect is public: the destinations can only be listed once logged in.
+  const {
+    destinations,
+    hasFailed: destinationsFailed,
+    refetch: refetchDestinations,
+  } = useAvailableDestinations(isAuthenticated);
+  const targetDestination = destinations?.find(
+    (dest) => dest.name === destination,
+  );
+  const accountCreationUrl = targetDestination?.account_creation_url;
+  // Only a destination the user must create their account on is asked about it.
+  const accountRequired = targetDestination?.account_policy === 'user_created';
+  const {
+    exists: accountExists,
+    error: accountError,
+    check: checkAccount,
+    reset: resetAccountStatus,
+  } = useDestinationAccountStatus(destination);
+
   useEffect(() => {
     if (!target) {
       router.replace('/');
@@ -150,6 +173,14 @@ function ConnectPageContent() {
   }, [isAuthenticated, pathname, searchParams, checkResana, resetResanaStatus]);
 
   useEffect(() => {
+    if (!isAuthenticated || !accountRequired) {
+      resetAccountStatus();
+      return;
+    }
+    void checkAccount();
+  }, [isAuthenticated, accountRequired, checkAccount, resetAccountStatus]);
+
+  useEffect(() => {
     if (!isAuthenticated || searchParams.get('resana_connected') !== '1') {
       return;
     }
@@ -161,20 +192,50 @@ function ConnectPageContent() {
       return;
     }
 
-    const refreshResanaStatus = () => {
+    // Also catches the account the user just created in another tab.
+    const refreshStatuses = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
       void checkResana();
+      if (destinationsFailed) {
+        void refetchDestinations();
+      }
+      if (accountRequired) {
+        void checkAccount();
+      }
     };
 
-    window.addEventListener('focus', refreshResanaStatus);
-    document.addEventListener('visibilitychange', refreshResanaStatus);
+    window.addEventListener('focus', refreshStatuses);
+    document.addEventListener('visibilitychange', refreshStatuses);
 
     return () => {
-      window.removeEventListener('focus', refreshResanaStatus);
-      document.removeEventListener('visibilitychange', refreshResanaStatus);
+      window.removeEventListener('focus', refreshStatuses);
+      document.removeEventListener('visibilitychange', refreshStatuses);
     };
-  }, [isAuthenticated, checkResana]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetchDestinations is recreated on each render
+  }, [
+    isAuthenticated,
+    accountRequired,
+    destinationsFailed,
+    checkResana,
+    checkAccount,
+  ]);
 
-  const proConnectDone = isAuthenticated;
+  // Unknown until the destinations are listed, then only checked if required.
+  let accountStatus: boolean | null = null;
+  if (destinations) {
+    accountStatus = accountRequired ? accountExists : true;
+  }
+  // Logging in to the destination once creates the account it requires.
+  const accountMissing = isAuthenticated && accountStatus === false;
+  const proConnectDone = isAuthenticated && accountStatus === true;
+  const canLogout = isAuthenticated && !accountMissing;
+  const accountPending =
+    isAuthenticated &&
+    accountStatus === null &&
+    accountError === null &&
+    !destinationsFailed;
   const resanaDone = isAuthenticated && resanaConnected === true;
   const resanaStatusPending = isAuthenticated && resanaConnected === null;
   const resanaError =
@@ -183,7 +244,7 @@ function ConnectPageContent() {
     searchParams.get('resana_error') === '1';
 
   const canContinue =
-    Boolean(target) && isAuthenticated && resanaConnected === true;
+    Boolean(target) && proConnectDone && resanaConnected === true;
 
   const handleProConnectLogin = () => {
     if (!target || isAuthenticated) {
@@ -192,11 +253,28 @@ function ConnectPageContent() {
     login(getConnectPath(target));
   };
 
+  const handleAccountCreation = () => {
+    if (!accountCreationUrl) {
+      return;
+    }
+    window.open(accountCreationUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const handleProConnectLogout = () => {
     if (!isAuthenticated) {
       return;
     }
     logout();
+  };
+
+  const handleAuthToolAction = () => {
+    if (accountMissing) {
+      handleAccountCreation();
+    } else if (isAuthenticated) {
+      handleProConnectLogout();
+    } else {
+      handleProConnectLogin();
+    }
   };
 
   const handleResanaConnect = async () => {
@@ -279,11 +357,12 @@ function ConnectPageContent() {
             <AuthToolLogo className="migration-connect__logo-svg" aria-hidden />
           }
           isDone={proConnectDone}
-          actionLabel={proConnectDone ? t('Se déconnecter') : t('Se connecter')}
-          onAction={
-            proConnectDone ? handleProConnectLogout : handleProConnectLogin
+          actionLabel={canLogout ? t('Se déconnecter') : t('Se connecter')}
+          onAction={handleAuthToolAction}
+          actionDisabled={
+            accountPending || (accountMissing && !accountCreationUrl)
           }
-          actionVariant={proConnectDone ? 'secondary' : 'primary'}
+          actionVariant={canLogout ? 'secondary' : 'primary'}
           showActionWhenDone
         />
 
@@ -304,6 +383,30 @@ function ConnectPageContent() {
           actionVariant="primary"
         />
       </div>
+
+      {destinationsFailed && (
+        <p className="migration-connect__error" role="alert">
+          {t(
+            'Le service est momentanément indisponible, veuillez réessayer dans quelques instants.',
+          )}
+        </p>
+      )}
+
+      {accountError === 'unavailable' && !proConnectDone && (
+        <p className="migration-connect__error" role="alert">
+          {t(
+            'Fichiers est momentanément indisponible, veuillez réessayer dans quelques instants.',
+          )}
+        </p>
+      )}
+
+      {accountError === 'session_expired' && !proConnectDone && (
+        <p className="migration-connect__error" role="alert">
+          {t(
+            'Votre session a expiré, veuillez vous déconnecter puis vous reconnecter.',
+          )}
+        </p>
+      )}
 
       {resanaError && (
         <p className="migration-connect__error" role="alert">
