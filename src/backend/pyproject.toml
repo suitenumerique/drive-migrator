@@ -89,6 +89,12 @@ dev = [
 
 [tool.uv]
 package = false
+constraint-dependencies = [
+    # Pin pillow above the versions vulnerable to the image decoder and
+    # encoder advisories fixed in 13.0.0. Pulled transitively via
+    # WeasyPrint, which has no upper bound on pillow.
+    "pillow>=13.0.0",
+]
 
 [tool.uv.build-backend]
 module-root = ""
