@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [v0.10.1] - 2026-10-22
+
 ### Added
 
 - Log the Resana and Drive tokens lifetime before each migration and on refresh
@@ -144,7 +146,8 @@ and this project adheres to
 
 - delete unused var in Makefile
 
-[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.10.0...main
+[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.10.1...main
+[v0.10.1]: https://github.com/suitenumerique/drive-migrator/releases/v0.10.1
 [v0.10.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.10.0
 [v0.9.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.9.0
 [v0.8.10]: https://github.com/suitenumerique/drive-migrator/releases/v0.8.10
