@@ -4,7 +4,7 @@
 
 import uuid
 from datetime import timedelta
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import ANY, MagicMock, mock_open, patch
 
 from django.utils import timezone
 
@@ -221,7 +221,7 @@ def test_service_account_create_folder_uses_external_api(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/",
         json={"id": FAKE_ITEM_ID, "type": "folder", "title": "My Workspace"},
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
     assert result["id"] == "folder-uuid"
@@ -243,7 +243,7 @@ def test_service_account_create_subfolder(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/parent-uuid/children/",
         json={"id": FAKE_ITEM_ID, "type": "folder", "title": "docs"},
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
     assert result["id"] == "child-uuid"
@@ -273,7 +273,7 @@ def test_service_account_create_file_item(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/folder-uuid/children/",
         json={"id": FAKE_ITEM_ID, "type": "file", "filename": "doc.pdf", "size": 7},
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
     assert result["id"] == "file-uuid"
@@ -294,7 +294,7 @@ def test_service_account_delete_item(settings):
 
     mock_requests.delete.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/item-uuid/",
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -375,7 +375,7 @@ def test_service_account_notify_upload_ended(settings):
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/file-uuid/upload-ended/",
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -464,7 +464,7 @@ def test_service_account_share_with_user(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/item-uuid/accesses/",
         json={"user_id": "user-uuid", "role": "owner"},
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -484,7 +484,7 @@ def test_service_account_invite_by_email(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/item-uuid/invitations/",
         json={"email": "new@example.com", "role": "owner"},
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -669,7 +669,7 @@ def test_user_token_create_folder_uses_external_api_v1(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/",
         json={"id": FAKE_ITEM_ID, "type": "folder", "title": "My Workspace"},
-        headers={"Authorization": "Bearer initial-tok"},
+        headers={"Authorization": "Bearer initial-tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -688,7 +688,7 @@ def test_user_token_create_subfolder_uses_external_api_v1(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/parent-uuid/children/",
         json={"id": FAKE_ITEM_ID, "type": "folder", "title": "docs"},
-        headers={"Authorization": "Bearer initial-tok"},
+        headers={"Authorization": "Bearer initial-tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -712,7 +712,7 @@ def test_user_token_create_file_item_uses_external_api_v1(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/folder-uuid/children/",
         json={"id": FAKE_ITEM_ID, "type": "file", "filename": "doc.pdf", "size": 7},
-        headers={"Authorization": "Bearer initial-tok"},
+        headers={"Authorization": "Bearer initial-tok", "X-Request-ID": ANY},
         timeout=30,
     )
     assert result["policy"] == "https://s3.example.com/file.pdf?sig=x"
@@ -730,7 +730,7 @@ def test_user_token_notify_upload_ended_uses_external_api_v1(settings):
 
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/file-uuid/upload-ended/",
-        headers={"Authorization": "Bearer initial-tok"},
+        headers={"Authorization": "Bearer initial-tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -748,7 +748,7 @@ def test_user_token_share_with_user_uses_external_api_v1(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/item-uuid/accesses/",
         json={"user_id": "user-uuid", "role": "owner"},
-        headers={"Authorization": "Bearer initial-tok"},
+        headers={"Authorization": "Bearer initial-tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -766,7 +766,7 @@ def test_user_token_invite_by_email_uses_external_api_v1(settings):
     mock_requests.post.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/item-uuid/invitations/",
         json={"email": "new@example.com", "role": "owner"},
-        headers={"Authorization": "Bearer initial-tok"},
+        headers={"Authorization": "Bearer initial-tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -787,7 +787,7 @@ def test_user_token_find_user_by_email_always_uses_external_api_v1(settings):
     mock_requests.get.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/users/",
         params={"q": "alice@example.com"},
-        headers={"Authorization": "Bearer initial-tok"},
+        headers={"Authorization": "Bearer initial-tok", "X-Request-ID": ANY},
         timeout=30,
     )
 

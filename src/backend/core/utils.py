@@ -79,6 +79,38 @@ def describe_request_error(error) -> str:
     return f"{type(error).__name__} {response.status_code}"
 
 
+def _api_error_codes(response) -> list[str]:
+    """Return the codes of a drf-standardized-errors payload, never its details."""
+    try:
+        errors = response.json().get("errors")
+    except (AttributeError, ValueError):
+        return []
+    if not isinstance(errors, list):
+        return []
+    return [
+        _one_line(error.get("code"), 64) for error in errors if isinstance(error, dict)
+    ]
+
+
+def describe_http_error(error) -> str:
+    """Describe a failed HTTP call for logs by its request, X-Request-ID and API
+    error codes, e.g. 'HTTPError 400 on POST https://drive/items/
+    X-Request-ID=1a2b codes=file_size_exceeded'. Never carries the query string
+    nor the response body."""
+    request = getattr(error, "request", None)
+    if request is None:
+        return describe_request_error(error)
+    description = (
+        f"{describe_request_error(error)} on {request.method} "
+        f"{request.url.split('?')[0]}"
+    )
+    if request_id := request.headers.get("X-Request-ID"):
+        description += f" X-Request-ID={request_id}"
+    if codes := _api_error_codes(getattr(error, "response", None)):
+        description += f" codes={','.join(codes)}"
+    return description
+
+
 def is_feature(name: str) -> bool:
     flag = FeatureFlag.objects.filter(name=name).first()
     if flag is None:

@@ -2,12 +2,14 @@
 
 # pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
 
+import logging
 from datetime import timedelta
 from unittest.mock import ANY, MagicMock, patch
 
 from django.utils import timezone
 
 import pytest
+import requests
 from django_celery_results.models import TaskResult
 
 from core.backends.source import SourceFolder
@@ -705,6 +707,37 @@ def test_task_failure_handler_sends_fail_mail():
     mock_mails_cls.return_value.send_fail_mail.assert_called_once_with(
         mock_extra_task.user, mock_workspace
     )
+
+
+def test_task_failure_handler_logs_the_failed_request(caplog):
+    """task_failure() logs the failed request with its X-Request-ID."""
+    mock_sender = MagicMock()
+    mock_sender.request.id = "task-id-4"
+
+    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
+    mock_extra_task.workspace = MagicMock(spec=Workspace, id=12)
+    mock_extra_task.workspace.destination_statuses = {}
+    error = requests.Timeout(
+        request=requests.Request(
+            "POST", "https://drive.test/items/", headers={"X-Request-ID": "rid-1"}
+        ).prepare()
+    )
+
+    with (
+        patch("core.processing.tasks.TaskResult"),
+        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.MailsManager"),
+        caplog.at_level(logging.ERROR, logger="core.processing.tasks"),
+    ):
+        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
+
+        task_failure_handler(sender=mock_sender, exception=error)
+
+    assert (
+        "Migration of workspace 12 failed (task task-id-4): Timeout on POST "
+        "https://drive.test/items/ X-Request-ID=rid-1"
+    ) in caplog.messages
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 """DriveBackend — HTTP client for La Suite Drive API."""
 
 import logging
+import secrets
 import time
 import uuid
 from datetime import timedelta
@@ -25,6 +26,7 @@ from core.encryption import decrypt_token, encrypt_token
 from core.retry_utils import log_final_failure_and_reraise
 from core.utils import (
     describe_access_expiry,
+    describe_http_error,
     describe_oauth_error,
     describe_request_error,
 )
@@ -226,7 +228,11 @@ class DriveBackend:
         raise NotImplementedError
 
     def _headers(self) -> dict:
-        return {"Authorization": f"Bearer {self._get_token()}"}
+        # One id per attempt, logged by Drive too: it matches both sides' logs.
+        return {
+            "Authorization": f"Bearer {self._get_token()}",
+            "X-Request-ID": secrets.token_hex(16),
+        }
 
     # --- Folder operations ---
 
@@ -303,9 +309,8 @@ class DriveBackend:
                     or _is_duplicate_id_conflict(http_error)
                 ):
                     logger.warning(
-                        "item creation failed (%s) for %s: %s",
-                        http_error.response.status_code,
-                        url,
+                        "item creation failed (%s): %s",
+                        describe_http_error(http_error),
                         http_error.response.text[:2000],
                     )
                     raise

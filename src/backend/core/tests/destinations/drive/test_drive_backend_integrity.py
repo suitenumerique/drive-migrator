@@ -3,7 +3,7 @@
 # pylint: disable=protected-access
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from django.utils import timezone
 
@@ -74,7 +74,7 @@ def test_get_item_returns_item(settings):
 
     mock_requests.get.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/items/item-uuid/",
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
     assert result == {"id": "item-uuid", "upload_state": "pending"}

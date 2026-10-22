@@ -6,7 +6,7 @@ Split out of test_drive_backend.py to stay under pylint's max-module-lines.
 import logging
 import uuid
 from datetime import timedelta
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import ANY, MagicMock, mock_open, patch
 
 from django.utils import timezone
 
@@ -222,7 +222,7 @@ def test_service_account_create_subfolder_checks_existence_before_retrying(setti
 
     mock_requests.get.assert_called_once_with(
         f"https://drive.example.com/external_api/v1.0/items/{FAKE_ITEM_ID}/",
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
 
@@ -543,7 +543,7 @@ def test_service_account_create_file_item_replaces_recovered_pending_file(settin
 
     mock_requests.delete.assert_called_once_with(
         f"https://drive.example.com/external_api/v1.0/items/{FAKE_ITEM_ID}/",
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
     # The fresh item reserves the same size.

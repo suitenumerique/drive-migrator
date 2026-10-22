@@ -17,6 +17,8 @@ and this project adheres to
   level set by `LOGGING_LEVEL_LOGGERS_APP` (libraries:
   `LOGGING_LEVEL_LOGGERS_ROOT`); Celery workers keep their `-l` level for
   tasks and libraries
+- Send an X-Request-ID with every Drive call and log it, with the Drive error
+  codes, when a migration fails
 
 ### Changed
 

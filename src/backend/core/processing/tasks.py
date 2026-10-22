@@ -18,7 +18,7 @@ from core.processing.folder_helper import ArchiveManager
 from core.processing.integrity import IntegrityTracker, Stage
 from core.processing.rejected_files import RejectedFilesArchive
 from core.processing.token_status import log_token_status
-from core.utils import get_dir_size, sizeof_fmt
+from core.utils import describe_http_error, get_dir_size, sizeof_fmt
 
 from main.celery_app import app
 
@@ -251,6 +251,12 @@ def task_failure(sender=None, **kwargs):
     if extra_task is None:
         return
     workspace = extra_task.workspace
+    logger.error(
+        "Migration of workspace %s failed (task %s): %s",
+        workspace.id,
+        sender.request.id,
+        describe_http_error(kwargs.get("exception")),
+    )
 
     for dest_name, status in workspace.destination_statuses.items():
         if status == Workspace.Status.PENDING:

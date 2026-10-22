@@ -3,7 +3,7 @@
 # pylint: disable=protected-access
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from django.utils import timezone
 
@@ -38,7 +38,7 @@ def test_service_account_find_user_by_email_paginated(settings):
     mock_requests.get.assert_called_once_with(
         "https://drive.example.com/external_api/v1.0/users/",
         params={"q": "alice@example.com"},
-        headers={"Authorization": "Bearer tok"},
+        headers={"Authorization": "Bearer tok", "X-Request-ID": ANY},
         timeout=30,
     )
     assert result == {"id": "user-uuid", "email": "alice@example.com"}

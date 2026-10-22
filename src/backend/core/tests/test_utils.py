@@ -12,6 +12,7 @@ from freezegun import freeze_time
 from core.utils import (
     describe_access_expiry,
     describe_expiry,
+    describe_http_error,
     describe_oauth_error,
     describe_request_error,
     ensure_inside_directory,
@@ -163,3 +164,47 @@ def test_describe_access_expiry(expires_at, expected):
 def test_describe_request_error(error, expected):
     """A request error is described by its type and status, never its message."""
     assert describe_request_error(error) == expected
+
+
+def _drive_response(status_code, content):
+    """Build a Drive response to a POST carrying an X-Request-ID."""
+    response = requests.Response()
+    response.status_code = status_code
+    response._content = content  # pylint: disable=protected-access
+    response.request = requests.Request(
+        "POST",
+        "https://drive.test/items/?token=secret",
+        headers={"X-Request-ID": "rid-1"},
+    ).prepare()
+    return response
+
+
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        (
+            requests.HTTPError(
+                response=_drive_response(
+                    400,
+                    b'{"errors": [{"code": "file_size_exceeded", "detail": "a.pdf"}]}',
+                )
+            ),
+            "HTTPError 400 on POST https://drive.test/items/ X-Request-ID=rid-1 "
+            "codes=file_size_exceeded",
+        ),
+        (
+            requests.HTTPError(response=_drive_response(502, b"<html>Bad Gateway")),
+            "HTTPError 502 on POST https://drive.test/items/ X-Request-ID=rid-1",
+        ),
+        (
+            requests.Timeout(request=_drive_response(200, b"").request),
+            "Timeout on POST https://drive.test/items/ X-Request-ID=rid-1",
+        ),
+        (ValueError("Bridge response missing fields"), "ValueError"),
+        (None, "NoneType"),
+    ],
+)
+def test_describe_http_error(error, expected):
+    """A failed call is described by its request id and error codes, never by
+    its query string nor its response details."""
+    assert describe_http_error(error) == expected
