@@ -59,3 +59,11 @@ OIDC_AUTH_REQUEST_EXTRA_PARAMS={"acr_values": "eidas1"}
 # Fernet key for OIDC token encryption at rest
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 OIDC_TOKENS_ENCRYPTION_KEY=
+
+# Menshen token exchange server (DRIVE_AUTH_MODE=menshen): exchanges the
+# user's ProConnect token for a Drive-scoped token (RFC 8693).
+#MENSHEN_SERVER_ROOT_URL=
+#MENSHEN_CLIENT_ID=
+#MENSHEN_CLIENT_SECRET=
+#MENSHEN_AUDIENCE=
+#MENSHEN_SCOPE=

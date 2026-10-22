@@ -20,10 +20,13 @@ from core.backends.destination import (
 )
 from core.destinations.drive.drive_backend import (
     DriveBackend,
+    DriveMenshenTokenBackend,
     DriveServiceAccountBackend,
     DriveUserTokenBackend,
     FileRejection,
     get_file_rejection,
+    is_user_token_auth_mode,
+    make_user_drive_backend,
 )
 from core.mails_manager import MailsManager
 from core.models import Workspace
@@ -73,6 +76,10 @@ class DriveDestinationBackend(AbstractDestinationBackend):
     - "user_token": uses the authenticated user's ProConnect token and /external_api/v1.0/.
       Drive automatically assigns ownership to the token holder, so the migration
       user is excluded from the sharing step.
+    - "menshen": exchanges the user's ProConnect token for a Drive-scoped token
+      (RFC 8693) via Menshen, then uses the exchanged token on /external_api/v1.0/.
+      The exchanged token's subject stays the user, so ownership behaves as in
+      "user_token" mode.
     """
 
     name = "drive"
@@ -88,7 +95,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
     def get_account_policy(self) -> AccountPolicy:
         # The service account creates the items itself.
-        if getattr(settings, "DRIVE_AUTH_MODE", "service_account") != "user_token":
+        if not is_user_token_auth_mode():
             return AccountPolicy.NONE
         try:
             return AccountPolicy(settings.DRIVE_ACCOUNT_POLICY)
@@ -101,7 +108,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             return AccountPolicy.USER_CREATED
 
     def user_account_exists(self, user) -> bool:
-        return DriveUserTokenBackend(user).get_me() is not None
+        return make_user_drive_backend(user).get_me() is not None
 
     def get_account_creation_url(self) -> str | None:
         if self.get_account_policy() != AccountPolicy.USER_CREATED:
@@ -113,6 +120,8 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         auth_mode = getattr(settings, "DRIVE_AUTH_MODE", "service_account")
         if auth_mode == "user_token":
             return DriveUserTokenBackend(user)
+        if auth_mode == "menshen":
+            return DriveMenshenTokenBackend(user)
         return DriveServiceAccountBackend()
 
     def export(self, workspace, user, local_folder_path: str) -> None:
@@ -180,7 +189,6 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
     def _share_members(self, backend, workspace, root_id: str) -> None:
         """Share root_id with all relevant emails, respecting the auth mode."""
-        auth_mode = getattr(settings, "DRIVE_AUTH_MODE", "service_account")
         migration_email = (
             workspace.migration_user.email
             if workspace.migration_user and workspace.migration_user.email
@@ -188,9 +196,10 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         )
 
         # Collect all emails to share, deduplicating across migration_user + members.
-        # In user_token mode the token holder is already owner — skip their email.
+        # In user-token modes (user_token, menshen) the token holder is already
+        # owner — skip their email.
         emails_to_skip = set()
-        if auth_mode == "user_token" and migration_email:
+        if is_user_token_auth_mode() and migration_email:
             emails_to_skip.add(migration_email)
 
         emails_to_share = set()

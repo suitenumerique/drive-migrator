@@ -51,8 +51,10 @@ def test_drive_token_refresh_fails_raises_drive_token_required():
     view = _make_view()
     data = _workspace_data(workspace, "drive")
 
-    with patch("core.api.views.workspaces_process.DriveUserTokenBackend") as mock_cls:
-        mock_cls.return_value._get_token.side_effect = DestinationTokenExpired()
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
+        mock_factory.return_value._get_token.side_effect = DestinationTokenExpired()
 
         with pytest.raises(APIException) as exc_info:
             view.validation(user, data, [workspace])
@@ -61,20 +63,22 @@ def test_drive_token_refresh_fails_raises_drive_token_required():
 
 
 @override_settings(DRIVE_AUTH_MODE="user_token")
-def test_drive_token_refresh_unreachable_raises_destination_unavailable():
-    """A provider that cannot be reached does not send the user back to log in."""
+def test_drive_token_unreachable_raises_drive_token_required():
+    """Even a provider that cannot be reached is reported as a token problem."""
     user = factories.UserFactory()
     workspace = factories.WorkspaceFactory()
 
-    with patch("core.api.views.workspaces_process.DriveUserTokenBackend") as mock_cls:
-        mock_cls.return_value._get_token.side_effect = requests.ConnectionError()
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
+        mock_factory.return_value._get_token.side_effect = requests.ConnectionError()
 
         with pytest.raises(APIException) as exc_info:
             _make_view().validation(
                 user, _workspace_data(workspace, "drive"), [workspace]
             )
 
-    assert exc_info.value.detail["error_name"] == "DestinationUnavailable"
+    assert exc_info.value.detail["error_name"] == "DriveTokenRequired"
 
 
 @override_settings(DRIVE_AUTH_MODE="user_token")
@@ -86,30 +90,34 @@ def test_drive_token_refresh_succeeds_no_exception():
     view = _make_view()
     data = _workspace_data(workspace, "drive")
 
-    with patch("core.api.views.workspaces_process.DriveUserTokenBackend") as mock_cls:
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
         mock_instance = MagicMock()
         mock_instance._get_token.return_value = "fresh-access-token"
-        mock_cls.return_value = mock_instance
+        mock_factory.return_value = mock_instance
 
         view.validation(user, data, [workspace])  # must not raise
 
-    mock_cls.assert_called_once_with(user)
+    mock_factory.assert_called_once_with(user)
     mock_instance._get_token.assert_called_once()
 
 
 @override_settings(DRIVE_AUTH_MODE="service_account")
 def test_drive_service_account_mode_skips_token_check():
-    """DRIVE_AUTH_MODE=service_account → DriveUserTokenBackend never instantiated."""
+    """DRIVE_AUTH_MODE=service_account → no user-token backend instantiated."""
     user = factories.UserFactory(oidc_access_token="", oidc_refresh_token="")
     workspace = factories.WorkspaceFactory()
 
     view = _make_view()
     data = _workspace_data(workspace, "drive")
 
-    with patch("core.api.views.workspaces_process.DriveUserTokenBackend") as mock_cls:
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
         view.validation(user, data, [workspace])  # must not raise
 
-    mock_cls.assert_not_called()
+    mock_factory.assert_not_called()
 
 
 @override_settings(DRIVE_AUTH_MODE="user_token")
@@ -121,12 +129,61 @@ def test_no_drive_destination_skips_token_check():
     view = _make_view()
     data = _workspace_data(workspace, "resana")
 
-    with patch("core.api.views.workspaces_process.DriveUserTokenBackend") as mock_cls:
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
         with patch("core.api.views.workspaces_process.ResanaBackend") as mock_resana:
             mock_resana.return_value.fetch_user.return_value = {"id": "u1"}
             view.validation(user, data, [workspace])  # must not raise
 
-    mock_cls.assert_not_called()
+    mock_factory.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Drive token pre-flight — menshen mode
+# ---------------------------------------------------------------------------
+
+
+@override_settings(DRIVE_AUTH_MODE="menshen")
+def test_menshen_mode_exchange_fails_raises_drive_token_required():
+    """In menshen mode, a failed exchange must surface as DriveTokenRequired."""
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory()
+
+    view = _make_view()
+    data = _workspace_data(workspace, "drive")
+
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
+        mock_factory.return_value._get_token.side_effect = requests.HTTPError("400")
+
+        with pytest.raises(APIException) as exc_info:
+            view.validation(user, data, [workspace])
+
+    assert exc_info.value.detail["error_name"] == "DriveTokenRequired"
+
+
+@override_settings(DRIVE_AUTH_MODE="menshen")
+def test_menshen_mode_exchange_succeeds_no_exception():
+    """In menshen mode, a valid (or refreshable) token must not raise."""
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory()
+
+    view = _make_view()
+    data = _workspace_data(workspace, "drive")
+
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
+        mock_instance = MagicMock()
+        mock_instance._get_token.return_value = "fresh-exchanged-token"
+        mock_factory.return_value = mock_instance
+
+        view.validation(user, data, [workspace])  # must not raise
+
+    mock_factory.assert_called_once_with(user)
+    mock_instance._get_token.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +234,7 @@ def test_non_resana_source_skips_token_check():
     data = _workspace_data(workspace, "drive")
 
     with patch("core.api.views.workspaces_process.ResanaTokenManager") as mock_tm:
-        with patch("core.api.views.workspaces_process.DriveUserTokenBackend"):
+        with patch("core.api.views.workspaces_process.make_user_drive_backend"):
             view.validation(user, data, [workspace])
 
     mock_tm.assert_not_called()
@@ -199,7 +256,7 @@ def test_validation_logs_token_status_before_failing_check():
 
     with (
         patch("core.api.views.workspaces_process.log_token_status") as mock_log,
-        patch("core.api.views.workspaces_process.DriveUserTokenBackend"),
+        patch("core.api.views.workspaces_process.make_user_drive_backend"),
         patch("core.api.views.workspaces_process.ResanaTokenManager") as mock_tm,
     ):
         mock_tm.return_value.is_connected.return_value = False
@@ -244,7 +301,10 @@ def test_missing_drive_account_raises_account_not_found(drive_account_exists):
     user = factories.UserFactory()
     workspace = factories.WorkspaceFactory(source_type="osmose")
 
-    with patch("core.api.views.workspaces_process.DriveUserTokenBackend"):
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
+        mock_factory.return_value._get_token.return_value = "fresh-token"
         with pytest.raises(APIException) as exc_info:
             _make_view().validation(
                 user, _workspace_data(workspace, "drive"), [workspace]
@@ -261,7 +321,10 @@ def test_auto_created_drive_account_is_not_checked(drive_account_exists):
     user = factories.UserFactory()
     workspace = factories.WorkspaceFactory(source_type="osmose")
 
-    with patch("core.api.views.workspaces_process.DriveUserTokenBackend"):
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
+        mock_factory.return_value._get_token.return_value = "fresh-token"
         _make_view().validation(
             user, _workspace_data(workspace, "drive"), [workspace]
         )  # must not raise
@@ -285,7 +348,10 @@ def test_failed_account_check_raises_a_named_error(
     user = factories.UserFactory()
     workspace = factories.WorkspaceFactory(source_type="osmose")
 
-    with patch("core.api.views.workspaces_process.DriveUserTokenBackend"):
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
+        mock_factory.return_value._get_token.return_value = "fresh-token"
         with pytest.raises(APIException) as exc_info:
             _make_view().validation(
                 user, _workspace_data(workspace, "drive"), [workspace]
@@ -301,7 +367,30 @@ def test_account_check_tries_the_destination_once(drive_account_exists):
     user = factories.UserFactory()
     workspace = factories.WorkspaceFactory(source_type="osmose")
 
-    with patch("core.api.views.workspaces_process.DriveUserTokenBackend"):
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
+        mock_factory.return_value._get_token.return_value = "fresh-token"
         _make_view().validation(
             user, _workspace_data(workspace, "drive"), [workspace]
         )  # must not raise: the check only passes under the cap
+
+
+@override_settings(DRIVE_AUTH_MODE="menshen", DRIVE_ACCOUNT_POLICY="user_created")
+def test_menshen_missing_drive_account_raises_account_not_found(drive_account_exists):
+    """In menshen mode, the account policy is respected like in user_token mode."""
+    drive_account_exists.return_value = False
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory(source_type="osmose")
+
+    with patch(
+        "core.api.views.workspaces_process.make_user_drive_backend"
+    ) as mock_factory:
+        mock_factory.return_value._get_token.return_value = "fresh-exchanged-token"
+        with pytest.raises(APIException) as exc_info:
+            _make_view().validation(
+                user, _workspace_data(workspace, "drive"), [workspace]
+            )
+
+    assert exc_info.value.detail["error_name"] == "AccountNotFound"
+    drive_account_exists.assert_called_once_with(user)

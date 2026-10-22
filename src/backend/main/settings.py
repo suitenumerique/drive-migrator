@@ -298,6 +298,8 @@ class Base(Configuration):
     )
     # "service_account": client_credentials grant via /external_api/v1.0/ (default)
     # "user_token": authenticated user's ProConnect token via /external_api/v1.0/
+    # "menshen": RFC 8693 token exchange of the user's ProConnect token via
+    #   Menshen, then the exchanged token via /external_api/v1.0/
     DRIVE_AUTH_MODE = values.Value(
         "service_account", environ_name="DRIVE_AUTH_MODE", environ_prefix=None
     )
@@ -308,6 +310,24 @@ class Base(Configuration):
     DRIVE_ACCOUNT_POLICY = values.Value(
         "user_created", environ_name="DRIVE_ACCOUNT_POLICY", environ_prefix=None
     )
+    # Menshen token exchange server (DRIVE_AUTH_MODE="menshen"): converts the
+    # user's IP access token into a Drive-scoped exchanged token.
+    MENSHEN_SERVER_ROOT_URL = values.Value(
+        "", environ_name="MENSHEN_SERVER_ROOT_URL", environ_prefix=None
+    )
+    # Credentials of the service registered on Menshen, sent as Basic auth.
+    MENSHEN_CLIENT_ID = values.Value(
+        "", environ_name="MENSHEN_CLIENT_ID", environ_prefix=None
+    )
+    MENSHEN_CLIENT_SECRET = values.Value(
+        "", environ_name="MENSHEN_CLIENT_SECRET", environ_prefix=None
+    )
+    # Drive resource server audience the exchanged token is scoped to.
+    MENSHEN_AUDIENCE = values.Value(
+        "", environ_name="MENSHEN_AUDIENCE", environ_prefix=None
+    )
+    # Scope requested for the exchanged token.
+    MENSHEN_SCOPE = values.Value("", environ_name="MENSHEN_SCOPE", environ_prefix=None)
     # Set to False to skip sharing migrated files with workspace members.
     # Members will then manage permissions manually in Drive.
     DRIVE_SHARE_MEMBERS = values.BooleanValue(

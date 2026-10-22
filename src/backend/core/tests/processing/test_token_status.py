@@ -58,6 +58,22 @@ def test_log_token_status_logs_nothing_when_no_service_is_involved():
     logger.info.assert_not_called()
 
 
+@override_settings(DRIVE_AUTH_MODE="menshen")
+def test_log_token_status_logs_drive_tokens_in_menshen_mode():
+    """Menshen mode still authenticates with the user's ProConnect tokens: log them."""
+    user = factories.UserFactory()
+    logger = MagicMock()
+
+    log_token_status(logger, "Before migration launch", user, resana=False, drive=True)
+
+    logger.info.assert_called_once_with(
+        "%s: %s",
+        "Before migration launch",
+        f"Drive (ProConnect) tokens for user {user.id}: "
+        "access token missing; refresh token missing",
+    )
+
+
 @override_settings(DRIVE_AUTH_MODE="user_token")
 def test_log_token_status_never_raises():
     """A token that can't be described is reported, and the next service still logged."""

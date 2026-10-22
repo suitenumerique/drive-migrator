@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Add a `menshen` Drive auth mode (`DRIVE_AUTH_MODE=menshen`): the user's
+  ProConnect token is exchanged for a Drive-scoped token (RFC 8693) via
+  Menshen (`MENSHEN_*` settings), then used on the Drive external API
+
 ### Changed
 
 - Show the linked workspace and migration user in the Celery task result

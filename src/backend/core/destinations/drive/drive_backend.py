@@ -9,9 +9,11 @@ from enum import StrEnum
 from django.conf import settings
 from django.utils import timezone
 
+import menshen_client
 from celery.utils.log import get_task_logger
 from requests.auth import AuthBase
-from requests.exceptions import HTTPError, RequestException
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError, RequestException, Timeout
 from tenacity import (
     before_sleep_log,
     retry,
@@ -163,6 +165,17 @@ def _is_invalid_grant(response) -> bool:
         return response.json().get("error") == "invalid_grant"
     except ValueError:
         return False
+
+
+def is_user_token_auth_mode() -> bool:
+    """True for the auth modes where Drive authenticates with the user's own
+    identity: the plain ProConnect token ("user_token") and the Menshen-exchanged
+    token ("menshen"), whose subject stays the user. In both cases Drive assigns
+    ownership to the token holder."""
+    return getattr(settings, "DRIVE_AUTH_MODE", "service_account") in (
+        "user_token",
+        "menshen",
+    )
 
 
 def clear_drive_tokens(user) -> None:
@@ -680,3 +693,112 @@ class DriveUserTokenBackend(DriveBackend):
             self._user.id,
             reason,
         )
+
+
+class DriveMenshenTokenBackend(DriveUserTokenBackend):
+    """Exchanges the user's ProConnect token for a Drive-scoped token (RFC 8693)
+    via Menshen, then targets /external_api/v1.0/ with the exchanged token.
+
+    The ProConnect token is seeded from user.oidc_access_token and refreshed via
+    user.oidc_refresh_token when it expires (inherited), so the subject token is
+    never sent to Drive. The exchanged token is short-lived and scoped: it is
+    kept in memory only and re-exchanged when near expiry.
+    """
+
+    def __init__(self, user):
+        super().__init__(user)
+        self._exchanged_token = None
+        self._exchanged_token_expires_at = None
+
+    @property
+    def _exchange_client(self):
+        """Build the Menshen client from the current settings, so it stays
+        overridable per-test/per-environment like every other setting here."""
+        return menshen_client.TokenExchangeClient(
+            config=menshen_client.Configuration(
+                client_id=settings.MENSHEN_CLIENT_ID,
+                client_secret=settings.MENSHEN_CLIENT_SECRET,
+                server_root_url=settings.MENSHEN_SERVER_ROOT_URL,
+            )
+        )
+
+    def _get_token(self) -> str:
+        """Return a valid exchanged token, refreshing the subject token and
+        re-exchanging proactively if near expiry."""
+        buffer = timedelta(seconds=10)
+        if (
+            self._exchanged_token is None
+            or self._exchanged_token_expires_at is None
+            or timezone.now() >= self._exchanged_token_expires_at - buffer
+        ):
+            # Ensure the subject token is valid before exchanging it.
+            super()._get_token()
+            self._exchange()
+        return self._exchanged_token
+
+    @_retry_on_transient_error
+    def _exchange(self):
+        """Exchange the user's ProConnect access token for a Drive-scoped
+        token. Retried on transient network errors and Menshen-side 5xx."""
+        logger.info(
+            "Drive (Menshen) token exchange for user %s: exchanging the "
+            "ProConnect access token for a token scoped to %s",
+            self._user.id,
+            settings.MENSHEN_AUDIENCE,
+        )
+        try:
+            response = self._exchange_client.exchange(
+                menshen_client.TokenExchangeRequest(
+                    subject_token=self._access_token,
+                    subject_token_type=menshen_client.TokenType.ACCESS_TOKEN,
+                    audience=settings.MENSHEN_AUDIENCE,
+                    scope=settings.MENSHEN_SCOPE or None,
+                )
+            )
+        except HTTPError as error:
+            logger.warning(
+                "Drive (Menshen) token exchange failed for user %s: %s",
+                self._user.id,
+                describe_oauth_error(error),
+            )
+            raise
+        except (Timeout, RequestsConnectionError) as error:
+            logger.warning(
+                "Drive (Menshen) token exchange attempt failed for user %s: %s "
+                "(transient error, may be retried)",
+                self._user.id,
+                describe_request_error(error),
+            )
+            raise
+        except menshen_client.exceptions.ResponseParsingError as error:
+            logger.warning(
+                "Drive (Menshen) token exchange failed for user %s: "
+                "unparsable response (%s)",
+                self._user.id,
+                type(error).__name__,
+            )
+            raise
+        self._exchanged_token = response.access_token
+        self._exchanged_token_expires_at = (
+            timezone.now() + timedelta(seconds=response.expires_in)
+            if response.expires_in
+            else None
+        )
+        logger.info(
+            "Drive (Menshen) token exchange succeeded for user %s: "
+            "exchanged token %s, scope %s",
+            self._user.id,
+            describe_access_expiry(self._exchanged_token_expires_at),
+            response.scope or "unset",
+        )
+
+
+def make_user_drive_backend(user):
+    """Return the Drive backend authenticating with the user's tokens for the
+    configured DRIVE_AUTH_MODE, None in service_account mode."""
+    auth_mode = getattr(settings, "DRIVE_AUTH_MODE", "service_account")
+    if auth_mode == "user_token":
+        return DriveUserTokenBackend(user)
+    if auth_mode == "menshen":
+        return DriveMenshenTokenBackend(user)
+    return None

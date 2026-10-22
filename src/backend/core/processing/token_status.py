@@ -1,8 +1,9 @@
 """Log the tokens a migration relies on, to diagnose expired sessions."""
 
-from django.conf import settings
-
-from core.destinations.drive.drive_backend import describe_drive_tokens
+from core.destinations.drive.drive_backend import (
+    describe_drive_tokens,
+    is_user_token_auth_mode,
+)
 from core.sources.resana.token_manager import ResanaTokenManager
 
 
@@ -13,10 +14,7 @@ def log_token_status(logger, context: str, user, *, resana: bool, drive: bool):
     services = []
     if resana:
         services.append(("Resana", lambda: ResanaTokenManager(user).describe_tokens()))
-    if (
-        drive
-        and getattr(settings, "DRIVE_AUTH_MODE", "service_account") == "user_token"
-    ):
+    if drive and is_user_token_auth_mode():
         services.append(("Drive (ProConnect)", lambda: describe_drive_tokens(user)))
     for service, describe in services:
         try:
