@@ -88,9 +88,7 @@ class InterstisClient:
     @_retry_on_transient_error
     def download_file(self, uuid: str, destination_path: str) -> None:
         url = f"{settings.RESANA_API_ENDPOINT}/api/targets/{uuid}/download"
-        with self.session.get(
-            url, stream=True, timeout=60, idempotent=False
-        ) as response:
+        with self.session.get(url, stream=True, timeout=60, retry=False) as response:
             response.raise_for_status()
             with open(destination_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=CHUNK_SIZE):

@@ -183,7 +183,7 @@ def test_download_file_writes_binary_content_to_path(settings, tmp_path):
         "https://resana.example.com/api/api/targets/file-uuid-123/download",
         stream=True,
         timeout=60,
-        idempotent=False,
+        retry=False,
     )
     with open(destination, "rb") as f:
         assert f.read() == file_content

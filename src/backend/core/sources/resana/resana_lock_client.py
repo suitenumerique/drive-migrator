@@ -79,7 +79,7 @@ class ResanaLockClient:
             params={"slug": slug},
             data={"allFolders": "true"},
             timeout=_REQUEST_TIMEOUT,
-            idempotent=True,
+            retry=True,
         )
         resp.raise_for_status()
         folders = resp.json().get("folders", [])
@@ -97,7 +97,7 @@ class ResanaLockClient:
                 "id_socket": (None, "undefined"),
             },
             timeout=_REQUEST_TIMEOUT,
-            idempotent=True,
+            retry=True,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -116,7 +116,7 @@ class ResanaLockClient:
             params={"slug": slug, "socket": "undefined", "peri": slug},
             timeout=_REQUEST_TIMEOUT,
             allow_redirects=False,
-            idempotent=True,
+            retry=True,
         )
         resp.raise_for_status()
 
@@ -127,7 +127,7 @@ class ResanaLockClient:
             params={"slug": slug, "socket": "undefined", "peri": slug},
             timeout=_REQUEST_TIMEOUT,
             allow_redirects=False,
-            idempotent=True,
+            retry=True,
         )
         resp.raise_for_status()
 
@@ -148,7 +148,7 @@ class ResanaLockClient:
                 "id_socket": (None, "undefined"),
             },
             timeout=_REQUEST_TIMEOUT,
-            idempotent=True,
+            retry=True,
         )
         _raise_unless_success(resp)
 
@@ -162,6 +162,6 @@ class ResanaLockClient:
                 "id_socket": (None, "undefined"),
             },
             timeout=_REQUEST_TIMEOUT,
-            idempotent=True,
+            retry=True,
         )
         _raise_unless_success(resp)

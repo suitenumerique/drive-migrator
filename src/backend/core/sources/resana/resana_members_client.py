@@ -49,7 +49,7 @@ class ResanaMembersClient:
         resp = self.session.post(
             f"{self.base_url}/public/perimetre/getOngletTrie",
             timeout=_REQUEST_TIMEOUT,
-            idempotent=True,
+            retry=True,
         )
         resp.raise_for_status()
         return self._parse_workspaces(resp.json())
@@ -65,7 +65,7 @@ class ResanaMembersClient:
             f"{self.base_url}/public/perimetre/listerMesEspaces",
             data={"archiveUnique": "1"},
             timeout=_REQUEST_TIMEOUT,
-            idempotent=True,
+            retry=True,
         )
         resp.raise_for_status()
         return self._parse_workspaces(resp.json())
@@ -139,7 +139,7 @@ class ResanaMembersClient:
             f"{self.base_url}/public/utilisateur/listerUtilisateurByPerimetreAndGroupe",
             data={"id_perimetre": slug, "chargerAllUtilisateurs": "1"},
             timeout=_REQUEST_TIMEOUT,
-            idempotent=True,
+            retry=True,
         )
         resp.raise_for_status()
         return resp.json()

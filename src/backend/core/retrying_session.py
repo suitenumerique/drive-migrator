@@ -1,4 +1,4 @@
-"""requests.Session that retries transient failures of idempotent requests."""
+"""requests.Session that retries transient failures of requests."""
 
 import re
 import ssl
@@ -95,7 +95,7 @@ class RetryingSession(requests.Session):
 
     Only safe methods (GET, HEAD, OPTIONS) are retried by default, since
     replaying them can't produce a duplicate side effect. A call opts in or out
-    with `idempotent=True/False`, e.g. a read-only POST. Attempts and backoff
+    with `retry=True/False`, e.g. a read-only POST. Attempts and backoff
     come from the `<settings_prefix>_RETRY_*` settings, read at call time.
     Once attempts are exhausted the last exception is reraised, or the last 5xx
     response returned so the caller's raise_for_status() behaves as before.
@@ -120,10 +120,10 @@ class RetryingSession(requests.Session):
         return configured if cap is None else min(configured, cap)
 
     # pylint: disable-next=arguments-differ
-    def request(self, method, url, *args, idempotent=None, **kwargs):
-        if idempotent is None:
-            idempotent = method.upper() in self.SAFE_METHODS
-        if not idempotent:
+    def request(self, method, url, *args, retry=None, **kwargs):
+        if retry is None:
+            retry = method.upper() in self.SAFE_METHODS
+        if not retry:
             return super().request(method, url, *args, **kwargs)
 
         retrying = Retrying(

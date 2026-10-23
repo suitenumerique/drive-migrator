@@ -119,33 +119,33 @@ def test_post_is_not_retried_by_default(base_request):
     base_request.assert_called_once()
 
 
-def test_post_flagged_idempotent_is_retried(base_request):
-    """A read-only POST can opt in to retries with idempotent=True."""
+def test_post_opted_in_to_retry_is_retried(base_request):
+    """A read-only POST can opt in to retries with retry=True."""
     ok = _response(200)
     base_request.side_effect = [Timeout("read timed out"), ok]
 
-    assert _session().post(URL, json={}, idempotent=True) is ok
+    assert _session().post(URL, json={}, retry=True) is ok
     assert base_request.call_count == 2
 
 
-def test_get_flagged_not_idempotent_is_not_retried(base_request):
+def test_get_opted_out_of_retry_is_not_retried(base_request):
     """A GET can opt out of retries, e.g. when its caller already retries."""
     base_request.side_effect = Timeout("read timed out")
 
     with pytest.raises(Timeout):
-        _session().get(URL, idempotent=False)
+        _session().get(URL, retry=False)
 
     base_request.assert_called_once()
 
 
-def test_idempotent_flag_is_not_forwarded_to_requests(base_request):
-    """requests.Session.request does not know the idempotent keyword."""
+def test_retry_flag_is_not_forwarded_to_requests(base_request):
+    """requests.Session.request does not know the retry keyword."""
     base_request.return_value = _response(200)
 
-    _session().post(URL, json={"a": 1}, idempotent=True)
+    _session().post(URL, json={"a": 1}, retry=True)
 
     _, kwargs = base_request.call_args
-    assert "idempotent" not in kwargs
+    assert "retry" not in kwargs
     assert kwargs["json"] == {"a": 1}
 
 
@@ -210,7 +210,7 @@ def test_query_string_is_not_logged(base_request, caplog):
 
     with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
         with pytest.raises(RequestsConnectionError):
-            _session().put(f"{URL}?X-Amz-Signature=secret", data=b"x", idempotent=True)
+            _session().put(f"{URL}?X-Amz-Signature=secret", data=b"x", retry=True)
 
     assert caplog.records
     for record in caplog.records:
@@ -326,7 +326,7 @@ def test_query_is_not_logged_on_a_real_connection_error(caplog):
                 "http://127.0.0.1:9/file?X-Amz-Signature=secret",
                 data=b"x",
                 timeout=1,
-                idempotent=True,
+                retry=True,
             )
 
     assert caplog.records

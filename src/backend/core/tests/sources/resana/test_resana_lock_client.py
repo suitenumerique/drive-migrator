@@ -137,7 +137,7 @@ def test_get_top_level_folder_ids_calls_get_folders():
         params={"slug": SLUG},
         data={"allFolders": "true"},
         timeout=30,
-        idempotent=True,
+        retry=True,
     )
 
 
@@ -183,7 +183,7 @@ def test_get_folder_access_owner_posts_to_get_all_dossier_droit():
             "id_socket": (None, "undefined"),
         },
         timeout=30,
-        idempotent=True,
+        retry=True,
     )
 
 
@@ -232,7 +232,7 @@ def test_lock_workspace_calls_figer():
         params={"slug": SLUG, "socket": "undefined", "peri": SLUG},
         timeout=30,
         allow_redirects=False,
-        idempotent=True,
+        retry=True,
     )
 
 
@@ -246,7 +246,7 @@ def test_unlock_workspace_calls_defiger():
         params={"slug": SLUG, "socket": "undefined", "peri": SLUG},
         timeout=30,
         allow_redirects=False,
-        idempotent=True,
+        retry=True,
     )
 
 
@@ -273,7 +273,7 @@ def test_grant_folder_access_calls_save_droit():
             "id_socket": (None, "undefined"),
         },
         timeout=30,
-        idempotent=True,
+        retry=True,
     )
 
 
@@ -292,7 +292,7 @@ def test_release_folder_access_calls_deverouille_dossier():
             "id_socket": (None, "undefined"),
         },
         timeout=30,
-        idempotent=True,
+        retry=True,
     )
 
 

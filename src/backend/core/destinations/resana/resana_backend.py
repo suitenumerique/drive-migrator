@@ -298,7 +298,7 @@ class ResanaBackend:
             allow_redirects=False,
             timeout=_REQUEST_TIMEOUT,
             # Logging in again only opens another session.
-            idempotent=True,
+            retry=True,
         )
         response.raise_for_status()
 

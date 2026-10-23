@@ -288,9 +288,7 @@ class DriveBackend:
     def _delete_item(self, item_id: str) -> None:
         """DELETE /items/{id}/ (soft delete)."""
         url = f"{self.api_root_url}/items/{item_id}/"
-        response = self.session.delete(
-            url, auth=self._auth, timeout=30, idempotent=True
-        )
+        response = self.session.delete(url, auth=self._auth, timeout=30, retry=True)
         response.raise_for_status()
 
     def _create_item(self, url: str, payload: dict, item_id: str | None = None) -> dict:
@@ -357,12 +355,12 @@ class DriveBackend:
         return children
 
     def _get_item_if_exists(
-        self, item_id: str, idempotent: bool | None = None
+        self, item_id: str, session_retry: bool | None = None
     ) -> dict | None:
         """GET /items/{id}/, treating a 404 as 'not created yet' rather than an error."""
         url = f"{self.api_root_url}/items/{item_id}/"
         response = self.session.get(
-            url, auth=self._auth, timeout=30, idempotent=idempotent
+            url, auth=self._auth, timeout=30, retry=session_retry
         )
         if response.status_code == 404:
             return None
@@ -375,7 +373,7 @@ class DriveBackend:
         failure (401/403) is re-raised instead of masked. Not retried by the
         session: the create loop calling it already retries."""
         try:
-            return self._get_item_if_exists(item_id, idempotent=False)
+            return self._get_item_if_exists(item_id, session_retry=False)
         except HTTPError as http_error:
             if not _is_server_error(http_error):
                 raise
@@ -399,7 +397,7 @@ class DriveBackend:
         """Step 2: Upload file content directly to the S3 presigned URL (no Drive token)."""
         with open(file_path, "rb") as f:
             response = self.session.put(
-                policy_url, data=f.read(), timeout=300, idempotent=True
+                policy_url, data=f.read(), timeout=300, retry=True
             )
         if not response.ok:
             logger.error(
@@ -482,7 +480,7 @@ class DriveBackend:
             json={"user_id": user_id, "role": "owner"},
             auth=self._auth,
             timeout=30,
-            idempotent=True,
+            retry=True,
         )
         response.raise_for_status()
 
@@ -494,7 +492,7 @@ class DriveBackend:
             json={"email": email, "role": "owner"},
             auth=self._auth,
             timeout=30,
-            idempotent=True,
+            retry=True,
         )
         response.raise_for_status()
 
@@ -512,7 +510,7 @@ class DriveServiceAccountBackend(DriveBackend):
                 "scope": "openid email",
             },
             timeout=30,
-            idempotent=True,
+            retry=True,
         )
         response.raise_for_status()
         data = response.json()
@@ -563,7 +561,7 @@ class DriveUserTokenBackend(DriveBackend):
                     "refresh_token": plaintext_refresh,
                 },
                 timeout=30,
-                idempotent=True,
+                retry=True,
             )
             response.raise_for_status()
         except HTTPError as error:

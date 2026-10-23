@@ -174,7 +174,7 @@ def test_get_workspaces_posts_to_get_onglet_trie_without_a_prior_get():
 
     client.session.get.assert_not_called()
     client.session.post.assert_called_once_with(
-        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30, idempotent=True
+        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30, retry=True
     )
 
 
@@ -222,7 +222,7 @@ def test_get_locked_workspaces_posts_to_lister_mes_espaces_with_archive_unique()
         f"{BASE_URL}/public/perimetre/listerMesEspaces",
         data={"archiveUnique": "1"},
         timeout=30,
-        idempotent=True,
+        retry=True,
     )
 
 
@@ -284,7 +284,7 @@ def test_is_workspace_locked_posts_to_lister_mes_espaces():
         f"{BASE_URL}/public/perimetre/listerMesEspaces",
         data={"archiveUnique": "1"},
         timeout=30,
-        idempotent=True,
+        retry=True,
     )
 
 
@@ -349,7 +349,7 @@ def test_find_slug_by_workspace_uuid_does_not_check_locked_workspaces_when_found
     client.find_slug_by_workspace_uuid("02-01-uuid-test")
 
     client.session.post.assert_called_once_with(
-        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30, idempotent=True
+        f"{BASE_URL}/public/perimetre/getOngletTrie", timeout=30, retry=True
     )
 
 
@@ -400,7 +400,7 @@ def test_list_workspace_members_posts_id_perimetre_and_charger_all():
         f"{BASE_URL}/public/utilisateur/listerUtilisateurByPerimetreAndGroupe",
         data={"id_perimetre": SLUG, "chargerAllUtilisateurs": "1"},
         timeout=30,
-        idempotent=True,
+        retry=True,
     )
 
 
