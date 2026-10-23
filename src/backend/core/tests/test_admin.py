@@ -159,6 +159,36 @@ def test_workspace_inline_links_task_result():
     ) in response.content.decode()
 
 
+def test_taskresult_changelist_shows_workspace_and_user():
+    """The TaskResult changelist links the migrated workspace and its user."""
+    user = UserFactory()
+    workspace = WorkspaceFactory(title="Migrated")
+    _extra_task(workspace, user=user, task_id="task-1")
+    _extra_task(WorkspaceFactory(), user=None, task_id="task-2")
+
+    response = _admin_client().get("/admin/django_celery_results/taskresult/")
+
+    content = response.content.decode()
+    assert (
+        f'<a href="/admin/core/workspace/{workspace.id}/change/">Migrated</a>'
+        in content
+    )
+    assert f'<a href="/admin/core/user/{user.id}/change/">{user.email}</a>' in content
+    assert '<td class="field-get_user">None</td>' in content
+
+
+def test_taskresult_changelist_escapes_workspace_title():
+    """A workspace title is user data: it is rendered escaped inside its link."""
+    workspace = WorkspaceFactory(title="<b>evil</b>")
+    _extra_task(workspace, user=UserFactory())
+
+    response = _admin_client().get("/admin/django_celery_results/taskresult/")
+
+    content = response.content.decode()
+    assert "&lt;b&gt;evil&lt;/b&gt;" in content
+    assert "<b>evil</b>" not in content
+
+
 def test_workspace_export_as_csv_writes_one_line_per_workspace():
     """export_as_csv lists user, domain, title, Resana organization, last run date,
     destination statuses and Drive root id, and tolerates a workspace without

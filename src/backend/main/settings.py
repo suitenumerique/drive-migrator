@@ -451,8 +451,6 @@ class Base(Configuration):
         "django.contrib.sites",
         "django.contrib.messages",
         "django.contrib.staticfiles",
-        # app
-        "core",
         # Third party apps
         "drf_spectacular",
         "corsheaders",
@@ -465,7 +463,11 @@ class Base(Configuration):
         "hijack.contrib.admin",
         # OIDC third party
         "mozilla_django_oidc",
+        # Registered before core so that its admin (TaskResult) can be
+        # customized by unregistering it in core/admin.py.
         "django_celery_results",
+        # app
+        "core",
     ]
 
     # Cache

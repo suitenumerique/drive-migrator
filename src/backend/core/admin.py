@@ -1,4 +1,5 @@
 """Admin classes and registrations for core app."""
+
 import csv
 
 from django import forms
@@ -15,6 +16,9 @@ from django.http import (
 from django.urls import path, reverse
 from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
+
+from django_celery_results.admin import TaskResultAdmin
+from django_celery_results.models import TaskResult
 
 from core.api.views.workspaces_process import push_workspace_task
 from core.destinations.drive.drive_backend import clear_drive_tokens
@@ -541,3 +545,66 @@ class ExtraTaskInfoAdmin(admin.ModelAdmin):
 
     def get_task_date_done(self, obj):
         return obj.task_result.date_done
+
+
+# django_celery_results registers its own TaskResultAdmin: replace it to show
+# the migration context (workspace, user) next to the task result. Possible
+# only because django_celery_results is listed before core in INSTALLED_APPS.
+admin.site.unregister(TaskResult)
+
+
+@admin.register(TaskResult)
+class TaskResultListAdmin(TaskResultAdmin):
+    """Admin class for the TaskResult model"""
+
+    list_display = (
+        "task_id",
+        "date_created",
+        "date_done",
+        "status",
+        "get_workspace",
+        "get_user",
+    )
+    list_filter = ("status", "date_done")
+    search_fields = (
+        "task_id",
+        "extrataskinfo__workspace__title",
+        "extrataskinfo__user__email",
+    )
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related(
+                "extrataskinfo",
+                "extrataskinfo__workspace",
+                "extrataskinfo__user",
+            )
+        )
+
+    def get_workspace(self, obj):
+        extra_task = obj.extrataskinfo
+        if extra_task is None:
+            return "-"
+        return format_html(
+            '<a href="{}">{}</a>',
+            reverse("admin:core_workspace_change", args=(extra_task.workspace.id,)),
+            extra_task.workspace.title,
+        )
+
+    get_workspace.short_description = "Workspace"
+    get_workspace.admin_order_field = "extrataskinfo__workspace__title"
+
+    def get_user(self, obj):
+        extra_task = obj.extrataskinfo
+        if extra_task is None or extra_task.user is None:
+            return "None"
+        return format_html(
+            '<a href="{}">{}</a>',
+            reverse("admin:core_user_change", args=(extra_task.user.id,)),
+            extra_task.user.email,
+        )
+
+    get_user.short_description = "User"
+    get_user.admin_order_field = "extrataskinfo__user__email"
