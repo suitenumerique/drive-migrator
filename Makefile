@@ -93,6 +93,10 @@ build: ## build the app-dev container
 	@$(COMPOSE) build app-dev --no-cache
 .PHONY: build
 
+docker-hub-build: ## build and push the images of the current branch to Docker Hub
+	@gh workflow run docker-hub.yml --ref $$(git branch --show-current)
+.PHONY: docker-hub-build
+
 down: ## stop and remove containers, networks, images, and volumes
 	@$(COMPOSE) down
 .PHONY: down
