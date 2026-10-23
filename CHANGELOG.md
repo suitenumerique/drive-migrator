@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [v0.11.0] - 2026-10-23
+
 ### Added
 
 - Configure per destination whether users must create their account #270
@@ -156,7 +158,8 @@ and this project adheres to
 
 - delete unused var in Makefile
 
-[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.10.1...main
+[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.11.0...main
+[v0.11.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.11.0
 [v0.10.1]: https://github.com/suitenumerique/drive-migrator/releases/v0.10.1
 [v0.10.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.10.0
 [v0.9.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.9.0
