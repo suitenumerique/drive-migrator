@@ -22,7 +22,7 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "Brotli==1.2.0",
+    "Brotli==1.2.1",
     "pyjwt==2.15.1",
     "WeasyPrint>=60.2",
     "boto3==1.35.64",
