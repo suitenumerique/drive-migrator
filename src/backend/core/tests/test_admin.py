@@ -132,8 +132,8 @@ def test_extra_task_changelist_escapes_workspace_title():
     assert "<b>evil</b>" not in content
 
 
-def test_extra_task_changelist_links_user_or_shows_none():
-    """The user column links to the user, or shows None for a run without user."""
+def test_extra_task_changelist_links_user_or_shows_empty_value():
+    """The user column links to the user, or shows the empty value otherwise."""
     user = UserFactory()
     _extra_task(WorkspaceFactory(), user=user, task_id="task-1")
     _extra_task(WorkspaceFactory(), user=None, task_id="task-2")
@@ -142,7 +142,7 @@ def test_extra_task_changelist_links_user_or_shows_none():
 
     content = response.content.decode()
     assert f'<a href="/admin/core/user/{user.id}/change/">{user.email}</a>' in content
-    assert '<td class="field-get_user">None</td>' in content
+    assert '<td class="field-get_user">-</td>' in content
 
 
 def test_workspace_inline_links_task_result():
@@ -157,6 +157,63 @@ def test_workspace_inline_links_task_result():
         f'<a href="/admin/django_celery_results/taskresult/{task_result_id}/change/">'
         f"{task_result_id}</a>"
     ) in response.content.decode()
+
+
+def test_taskresult_changelist_shows_workspace_and_user():
+    """The TaskResult changelist links the migrated workspace and its user."""
+    user = UserFactory()
+    workspace = WorkspaceFactory(title="Migrated")
+    _extra_task(workspace, user=user, task_id="task-1")
+    _extra_task(WorkspaceFactory(), user=None, task_id="task-2")
+
+    response = _admin_client().get("/admin/django_celery_results/taskresult/")
+
+    content = response.content.decode()
+    assert (
+        f'<a href="/admin/core/workspace/{workspace.id}/change/">Migrated</a>'
+        in content
+    )
+    assert f'<a href="/admin/core/user/{user.id}/change/">{user.email}</a>' in content
+    assert '<td class="field-get_user">-</td>' in content
+
+
+def test_taskresult_changelist_shows_empty_cells_without_extra_task_info():
+    """A TaskResult without ExtraTaskInfo renders the empty value in both cells."""
+    TaskResult.objects.create(task_id="orphan")
+
+    response = _admin_client().get("/admin/django_celery_results/taskresult/")
+
+    content = response.content.decode()
+    assert response.status_code == 200
+    assert '<td class="field-get_workspace">-</td>' in content
+    assert '<td class="field-get_user">-</td>' in content
+
+
+def test_taskresult_changelist_escapes_workspace_title():
+    """A workspace title is user data: it is rendered escaped inside its link."""
+    workspace = WorkspaceFactory(title="<b>evil</b>")
+    _extra_task(workspace, user=UserFactory())
+
+    response = _admin_client().get("/admin/django_celery_results/taskresult/")
+
+    content = response.content.decode()
+    assert "&lt;b&gt;evil&lt;/b&gt;" in content
+    assert "<b>evil</b>" not in content
+
+
+def test_taskresult_changelist_loads_related_in_a_single_query(
+    django_assert_num_queries,
+):
+    """select_related loads workspace and user for the whole changelist."""
+    for index in range(3):
+        _extra_task(WorkspaceFactory(), user=UserFactory(), task_id=f"t-{index}")
+    TaskResult.objects.create(task_id="orphan")
+    client = _admin_client()
+
+    with django_assert_num_queries(9):
+        response = client.get("/admin/django_celery_results/taskresult/")
+
+    assert response.status_code == 200
 
 
 def test_workspace_export_as_csv_writes_one_line_per_workspace():

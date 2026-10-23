@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- Show the linked workspace and migration user in the Celery task result
+  admin list view
+
 ## [v0.11.0] - 2026-10-23
 
 ### Added
