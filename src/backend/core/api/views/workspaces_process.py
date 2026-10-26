@@ -17,7 +17,7 @@ from ...models import ExtraTaskInfo, FeatureFlag, Workspace
 from ...processing.tasks import export
 from ...processing.token_status import log_token_status
 from ...retrying_session import limited_retries
-from ...sources.resana.token_manager import ResanaTokenManager
+from ...sources.resana.token_manager import ResanaTokenExpired, ResanaTokenManager
 from ...utils import is_feature
 from .. import APIException
 from ..destination_accounts import check_user_account
@@ -72,6 +72,16 @@ class WorkspacesProcessAPIView(APIView):
         except Exception as exc:  # noqa: BLE001
             raise APIException("DriveTokenRequired") from exc
 
+    @staticmethod
+    def ensure_resana_source_token(user):
+        """Make sure the user's Resana session can be used or renewed."""
+        try:
+            ResanaTokenManager(user).get_valid_token()
+        except ResanaTokenExpired as exc:
+            raise APIException("ResanaTokenRequired") from exc
+        except RequestException as exc:
+            raise APIException("SourceUnavailable") from exc
+
     def validation(self, user, data, workspaces):
         """
         Here we want to make sure the user exist on Resana if we are going to export to Resana at least one workspace.
@@ -108,8 +118,8 @@ class WorkspacesProcessAPIView(APIView):
         ):
             self.ensure_drive_token(user)
 
-        if check_resana_source_token and not ResanaTokenManager(user).is_connected():
-            raise APIException("ResanaTokenRequired")
+        if check_resana_source_token:
+            self.ensure_resana_source_token(user)
 
         # Without the account, the destination refuses the run on its first call.
         dest_names = {

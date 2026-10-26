@@ -17,6 +17,11 @@ and this project adheres to
 
 - Upgrade `django-rest-framework` to `3.18.2`
 
+### Fixed
+
+- Check the Resana session before launching a migration, and tell users
+  why they must log in again #274
+
 ## [v0.11.0] - 2026-10-23
 
 ### Added

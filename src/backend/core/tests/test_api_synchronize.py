@@ -67,3 +67,18 @@ def test_synchronize_does_not_retry_api_calls(settings):
 
     assert response.status_code == 200
     assert base_request.call_count == 1
+
+
+def test_synchronize_unreachable_source_raises_source_unavailable():
+    """A source that cannot be reached is reported, not turned into a server error."""
+    FeatureFlag.objects.create(name=FeatureFlag.Name.READ_ONLY_MODE, is_active=False)
+    client = APIClient()
+    client.force_login(factories.UserFactory())
+
+    with patch(
+        "core.api.views.synchronize.SourceManager.synchronize",
+        side_effect=requests.ConnectionError(),
+    ):
+        response = client.get("/api/v1.0/synchronize/")
+
+    assert response.json()["error_name"] == "SourceUnavailable"

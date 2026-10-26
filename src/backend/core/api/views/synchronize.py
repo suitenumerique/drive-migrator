@@ -1,4 +1,5 @@
 """Synchronize API view."""
+from requests.exceptions import RequestException
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -29,6 +30,8 @@ class SynchronizeAPIView(APIView):
                 manager.synchronize(request.user)
         except ResanaTokenExpired as exc:
             raise APIException("ResanaTokenRequired") from exc
+        except RequestException as exc:
+            raise APIException("SourceUnavailable") from exc
         posthog_capture(
             "workspaces_synchronized",
             request.user,

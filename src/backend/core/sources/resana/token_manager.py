@@ -147,12 +147,23 @@ class ResanaTokenManager:
     def get_valid_token(self) -> str:
         """Return a valid decrypted access token, refreshing proactively if near expiry.
 
-        Raises ResanaTokenExpired if expired and no refresh token is stored.
+        Raises ResanaTokenExpired (and clears the stored tokens) if the token
+        cannot be renewed or decrypted.
 
         Refreshes are serialized per user: concurrent workers (e.g. several
         workspace exports) would otherwise each submit the same offline token,
         and the loser would clear the tokens the winner just stored.
         """
+        try:
+            return self._get_valid_token()
+        except InvalidToken as exc:
+            # Encrypted with another key: the user must log in again.
+            self.clear_tokens()
+            raise ResanaTokenExpired(
+                "Stored Resana tokens cannot be decrypted."
+            ) from exc
+
+    def _get_valid_token(self) -> str:
         if self._token_is_fresh():
             return decrypt_token(self.user.resana_access_token)
 
@@ -163,6 +174,7 @@ class ResanaTokenManager:
             self.user.refresh_from_db(fields=RESANA_TOKEN_FIELDS)
             if not self._token_is_fresh():
                 if not self.user.resana_refresh_token:
+                    self.clear_tokens()
                     raise ResanaTokenExpired(
                         "Resana access token expired and no refresh token is stored."
                     )

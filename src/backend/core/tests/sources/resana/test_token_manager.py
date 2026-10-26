@@ -172,6 +172,39 @@ def test_get_valid_token_raises_when_no_refresh_token(settings):
         ResanaTokenManager(user).get_valid_token()
 
 
+def test_get_valid_token_clears_tokens_when_no_refresh_token(settings):
+    """A token that cannot be renewed is cleared, so the user shows as disconnected."""
+    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
+    user = _make_user(
+        access="old-access",
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+    with pytest.raises(ResanaTokenExpired):
+        ResanaTokenManager(user).get_valid_token()
+
+    user.refresh_from_db()
+    assert not user.resana_access_token
+    assert ResanaTokenManager(user).is_connected() is False
+
+
+@pytest.mark.parametrize("fresh", [True, False])
+def test_get_valid_token_clears_unreadable_tokens(settings, fresh):
+    """Tokens encrypted with another key are cleared and raise ResanaTokenExpired."""
+    settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
+    other_key = Fernet(_fernet_key().encode())
+    user = UserFactory(
+        resana_access_token=other_key.encrypt(b"old-access").decode(),
+        resana_refresh_token=other_key.encrypt(b"old-offline").decode(),
+        resana_token_expires_at=timezone.now() + timedelta(hours=1 if fresh else -1),
+    )
+    with pytest.raises(ResanaTokenExpired):
+        ResanaTokenManager(user).get_valid_token()
+
+    user.refresh_from_db()
+    assert not user.resana_access_token
+    assert not user.resana_refresh_token
+
+
 # ---------------------------------------------------------------------------
 # store_tokens()
 # ---------------------------------------------------------------------------
