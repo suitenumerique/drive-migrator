@@ -1,4 +1,5 @@
 import {
+  Button,
   ModalSize,
   VariantType,
   useModals,
@@ -7,7 +8,7 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { fetchAPI, fetchAPIOptions } from '@/api/fetchApi';
-import { baseApiUrl } from '@/core/conf';
+import { login } from '@/core/auth/Auth';
 import {
   MIGRATION_TARGET_STORAGE_KEY,
   getConnectPath,
@@ -17,6 +18,20 @@ import {
 const GENERIC_API_ERROR = 'generic_api_error';
 const DRIVE_TOKEN_REQUIRED = 'DriveTokenRequired';
 const RESANA_TOKEN_REQUIRED = 'ResanaTokenRequired';
+
+const reloginRedirect = (errorName: string) => {
+  if (errorName === DRIVE_TOKEN_REQUIRED) {
+    return () => login(`${window.location.pathname}${window.location.search}`);
+  }
+  if (errorName === RESANA_TOKEN_REQUIRED) {
+    return () => {
+      const stored = sessionStorage.getItem(MIGRATION_TARGET_STORAGE_KEY);
+      const target = isMigrationTarget(stored) ? stored : 'lasuite-fichiers';
+      window.location.replace(getConnectPath(target));
+    };
+  }
+  return null;
+};
 
 class APIError extends Error {
   data: any;
@@ -62,19 +77,23 @@ export const useApi = () => {
         // t('api_errors.ResanaTokenRequired')
         // t('api_errors.AccountNotFound')
         // t('api_errors.DestinationUnavailable')
-        if (errorName === DRIVE_TOKEN_REQUIRED) {
-          window.location.replace(new URL('authenticate/', baseApiUrl()).href);
-          return;
-        }
-        if (errorName === RESANA_TOKEN_REQUIRED) {
-          const stored = sessionStorage.getItem(MIGRATION_TARGET_STORAGE_KEY);
-          const target = isMigrationTarget(stored)
-            ? stored
-            : 'lasuite-fichiers';
-          window.location.replace(getConnectPath(target));
-          return;
-        }
+        // t('api_errors.SourceUnavailable')
         const errorMessage = t('api_errors.' + errorName);
+        const relogin = reloginRedirect(errorName);
+        if (relogin) {
+          void modals.messageModal({
+            messageType: VariantType.WARNING,
+            title: t('Reconnexion nécessaire'),
+            children: <p>{errorMessage}</p>,
+            size: ModalSize.MEDIUM,
+            rightActions: (
+              <Button fullWidth onClick={relogin}>
+                {t('Se reconnecter')}
+              </Button>
+            ),
+          });
+          return;
+        }
         void modals.messageModal({
           messageType: VariantType.ERROR,
           title: t('Oups ... erreur 😕'),
