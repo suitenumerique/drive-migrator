@@ -13,6 +13,10 @@ and this project adheres to
 - Show the linked workspace and migration user in the Celery task result
   admin list view
 
+#### Dependencies
+
+- Upgrade `django-rest-framework` to `3.18.2`
+
 ## [v0.11.0] - 2026-10-23
 
 ### Added
