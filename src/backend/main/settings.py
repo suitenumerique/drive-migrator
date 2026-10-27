@@ -23,6 +23,8 @@ from configurations import Configuration, values
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.logging import ignore_logger
 
+# pylint: disable=too-many-lines
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join("/", "data")
@@ -849,6 +851,24 @@ class Development(Base):
         "http://localhost:3010",
     ]
     DEBUG = True
+
+    # Lines readable in a terminal, instead of the JSON of the deployed logs
+    LOGGING = {
+        **Base.LOGGING,
+        "formatters": {
+            "console": {
+                **Base.LOGGING["formatters"]["json"],
+                "processors": [
+                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                    structlog.dev.ConsoleRenderer(),
+                ],
+            },
+        },
+        "handlers": {
+            **Base.LOGGING["handlers"],
+            "console": {"class": "logging.StreamHandler", "formatter": "console"},
+        },
+    }
 
     SESSION_COOKIE_NAME = "main_sessionid"
 
