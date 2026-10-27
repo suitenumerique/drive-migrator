@@ -28,6 +28,15 @@ def _apply_auth(kwargs: dict) -> dict:
     return {**kwargs, "headers": prepared.headers}
 
 
+def _pop_request_id(kwargs: dict) -> tuple[str, dict]:
+    """Take out the X-Request-ID header the session adds to every call, so
+    assertions keep describing the call as the backend wrote it."""
+    headers = dict(kwargs.get("headers") or {})
+    request_id = headers.pop("X-Request-ID")
+    kwargs = {key: value for key, value in kwargs.items() if key != "headers"}
+    return request_id, {**kwargs, "headers": headers} if headers else kwargs
+
+
 def _align_status_code(response) -> None:
     """Give a bare MagicMock response the status code its raise_for_status implies,
     since RetryingSession decides whether to retry from status_code."""
@@ -47,11 +56,15 @@ def patch_drive_http():
 
     Yields a mock whose get/post/put/delete attributes receive each call, so tests
     set side effects and assert calls on them as on the requests module functions,
-    while the session's retries stay in play.
+    while the session's retries stay in play. The request id of each call goes to
+    its request_ids list instead.
     """
     http = MagicMock()
+    http.request_ids = []
 
     def dispatch(method, url, **kwargs):
+        request_id, kwargs = _pop_request_id(kwargs)
+        http.request_ids.append(request_id)
         kwargs = {
             key: value
             for key, value in kwargs.items()
