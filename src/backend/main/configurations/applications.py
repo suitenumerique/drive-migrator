@@ -45,6 +45,8 @@ class ApplicationMixin:
         "django.contrib.messages.middleware.MessageMiddleware",
         "dockerflow.django.middleware.DockerflowMiddleware",
         "hijack.middleware.HijackUserMiddleware",
+        # After DockerflowMiddleware, which answers the heartbeats without logging them here
+        "django_structlog.middlewares.RequestMiddleware",
     ]
 
     AUTHENTICATION_BACKENDS = [
@@ -71,6 +73,7 @@ class ApplicationMixin:
         "drf_spectacular",
         "corsheaders",
         "dockerflow.django",
+        "django_structlog",
         "rest_framework",
         "django_filters",
         # Third Party apps

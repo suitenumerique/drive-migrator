@@ -27,6 +27,10 @@ and this project adheres to
 - Ask to log in to Resana again as soon as its offline token is refused,
   instead of showing the user as connected #304
 
+### Changed
+
+- Log as JSON with django-structlog, with the request and workspace ids
+
 ## [v0.12.1] - 2026-11-03
 
 - Drop name columns from the Drive members CSV

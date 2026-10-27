@@ -19,3 +19,5 @@ class CeleryMixin:
     CELERY_ACCEPT_CONTENT = ["json"]
     CELERY_RESULT_EXTENDED = True
     CELERY_TRACK_STARTED = True
+    # Keep the LOGGING handlers in the workers instead of Celery's own
+    CELERY_WORKER_HIJACK_ROOT_LOGGER = False

@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import ANY
 
 import pytest
 
@@ -88,9 +89,15 @@ def test_base_logging_keeps_third_party_info_logs_quiet(default_probe):
 
 def test_base_logging_formats_lines_with_date_logger_and_level(default_probe):
     """A console line tells when, where and how severe."""
-    assert re.fullmatch(
-        r"\d{4}-\d{2}-\d{2} [\d:,]+ core\.x WARNING hello", default_probe["formatted"]
-    )
+    line = json.loads(default_probe["formatted"])
+
+    assert line == {
+        "event": "hello",
+        "level": "warning",
+        "logger": "core.x",
+        "timestamp": ANY,
+    }
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T[\d:.]+Z", line["timestamp"])
 
 
 def test_base_logging_accepts_lowercase_levels():

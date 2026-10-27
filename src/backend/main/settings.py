@@ -140,6 +140,9 @@ class Base(
 
             # Ignore the logs added by the DockerflowMiddleware
             ignore_logger("request.summary")
+            # Like django.request for the Django integration: its errors are already reported
+            ignore_logger("django_structlog.middlewares.request")
+            ignore_logger("django_structlog.celery.receivers")
 
         posthog.api_key = cls.POSTHOG_KEY
         posthog.host = cls.POSTHOG_HOST
@@ -204,23 +207,6 @@ class Test(Base):
 
     EXTRA_API_URL_MODULES = ["core.sources.resana.urls"]
 
-    LOGGING = values.DictValue(
-        {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "handlers": {
-                "console": {
-                    "class": "logging.StreamHandler",
-                },
-            },
-            "loggers": {
-                "main": {
-                    "handlers": ["console"],
-                    "level": "DEBUG",
-                },
-            },
-        }
-    )
     PASSWORD_HASHERS = [
         "django.contrib.auth.hashers.MD5PasswordHasher",
     ]

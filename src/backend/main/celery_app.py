@@ -5,6 +5,7 @@ from pathlib import Path
 from celery import Celery
 from celery.signals import worker_ready, worker_shutdown
 from configurations.importer import install
+from django_structlog.celery.steps import DjangoStructLogInitStep
 
 from main.bootstraps import LivenessProbe
 
@@ -36,6 +37,8 @@ READINESS_FILE = Path("/tmp/celery_ready")  # noqa: S108
 
 # Add liveness probe for k8s
 app.steps["worker"].add(LivenessProbe)
+# Log the tasks with the context of the request that sent them
+app.steps["worker"].add(DjangoStructLogInitStep)
 
 
 @worker_ready.connect
