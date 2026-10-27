@@ -115,7 +115,6 @@ class IntegrityTracker:
         self.kept_source_ids = {file["source_id"] for file in self.source_files}
         # None while the run failed before planning its downloads.
         self.run = None
-        self.local_folder_path = ""
         self.exported_destinations = []
 
     def set_kept_files(self, truncated_folder: SourceFolder) -> None:
@@ -125,9 +124,8 @@ class IntegrityTracker:
                 file["source_id"] for file in snapshot_source_files(truncated_folder)
             }
 
-    def set_retrieval(self, run: MigrationRun, local_folder_path: str) -> None:
+    def set_retrieval(self, run: MigrationRun) -> None:
         self.run = run
-        self.local_folder_path = local_folder_path
 
     def add_exported_destination(self, destination) -> None:
         self.exported_destinations.append(destination)
@@ -156,7 +154,7 @@ class IntegrityTracker:
             try:
                 destination_results[destination.name] = destination.check_integrity(
                     self.workspace,
-                    self.local_folder_path,
+                    self.run,
                     wait_for_analysis=not run_failed,
                 )
             except NotImplementedError:

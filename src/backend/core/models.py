@@ -129,10 +129,11 @@ class Workspace(BaseModel):
     # FolderCreator.get_workspace_path). Set by the export task.
     download_errors = models.JSONField(default=list, blank=True)
 
-    # Files the destinations refused during the last export, which skipped them.
-    # Each entry: {"destination": str, "path": str, "error": str, "item_id": str
-    # (optional)}, where "path" is relative to the workspace root and "error" is
-    # the destination's code (see AbstractDestinationBackend.describe_rejection).
+    # Files the destinations refused or failed to receive during the last export,
+    # which skipped them. Each entry: {"destination": str, "path": str, "error":
+    # str, "item_id": str (optional)}, where "path" is relative to the workspace
+    # root and "error" is the destination's code (see
+    # AbstractDestinationBackend.describe_rejection).
     # Entries without "destination" predate it and came from Drive.
     upload_errors = models.JSONField(default=list, blank=True)
 

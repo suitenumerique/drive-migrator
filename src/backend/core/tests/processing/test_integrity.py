@@ -500,24 +500,24 @@ def _downloaded_run(workspace, folder):
     return run
 
 
-def _tracker(workspace, tmp_path, folder=None, destinations=()):
+def _tracker(workspace, folder=None, destinations=()):
     folder = folder or SourceFolder(name="root", files=[_source_file("f1", "a")])
     tracker = IntegrityTracker(workspace, folder)
     tracker.set_kept_files(folder)
-    tracker.set_retrieval(_downloaded_run(workspace, folder), str(tmp_path))
+    tracker.set_retrieval(_downloaded_run(workspace, folder))
     for destination in destinations:
         tracker.add_exported_destination(destination)
     return tracker
 
 
 @pytest.mark.django_db
-def test_tracker_does_nothing_when_tracking_is_disabled(tmp_path):
+def test_tracker_does_nothing_when_tracking_is_disabled():
     """Without tracking, no destination is re-read and nothing is saved."""
     workspace = WorkspaceFactory(is_file_integrity_tracked=False)
     extra_task = _extra_task(workspace)
     drive = _destination("drive", {"files": {}, "extra": []})
 
-    _tracker(workspace, tmp_path, destinations=[drive]).save("task-1", run_failed=False)
+    _tracker(workspace, destinations=[drive]).save("task-1", run_failed=False)
 
     drive.check_integrity.assert_not_called()
     extra_task.refresh_from_db()
@@ -526,16 +526,17 @@ def test_tracker_does_nothing_when_tracking_is_disabled(tmp_path):
 
 
 @pytest.mark.django_db
-def test_tracker_saves_report_on_the_run_extra_task(tmp_path):
+def test_tracker_saves_report_on_the_run_extra_task():
     """The report and its flag are saved on the ExtraTaskInfo of the task."""
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
     extra_task = _extra_task(workspace)
     drive = _destination("drive", {"files": {"a.txt": _drive_ok()}, "extra": []})
 
-    _tracker(workspace, tmp_path, destinations=[drive]).save("task-1", run_failed=False)
+    tracker = _tracker(workspace, destinations=[drive])
+    tracker.save("task-1", run_failed=False)
 
     drive.check_integrity.assert_called_once_with(
-        workspace, str(tmp_path), wait_for_analysis=True
+        workspace, tracker.run, wait_for_analysis=True
     )
     extra_task.refresh_from_db()
     assert extra_task.integrity_report["summary"]["stages"] == {"ok": 1}
@@ -546,29 +547,28 @@ def test_tracker_saves_report_on_the_run_extra_task(tmp_path):
 
 
 @pytest.mark.django_db
-def test_tracker_does_not_wait_for_analysis_after_a_failed_run(tmp_path):
+def test_tracker_does_not_wait_for_analysis_after_a_failed_run():
     """A failed run must not be delayed by the malware analysis polling."""
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
     _extra_task(workspace)
     drive = _destination("drive", {"files": {}, "extra": []})
 
-    _tracker(workspace, tmp_path, destinations=[drive]).save("task-1", run_failed=True)
+    tracker = _tracker(workspace, destinations=[drive])
+    tracker.save("task-1", run_failed=True)
 
     drive.check_integrity.assert_called_once_with(
-        workspace, str(tmp_path), wait_for_analysis=False
+        workspace, tracker.run, wait_for_analysis=False
     )
 
 
 @pytest.mark.django_db
-def test_tracker_lists_destination_without_per_file_check_as_not_checked(tmp_path):
+def test_tracker_lists_destination_without_per_file_check_as_not_checked():
     """A destination without check_integrity() is reported as not checked."""
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
     extra_task = _extra_task(workspace)
     resana = _destination("resana", not_implemented=True)
 
-    _tracker(workspace, tmp_path, destinations=[resana]).save(
-        "task-1", run_failed=False
-    )
+    _tracker(workspace, destinations=[resana]).save("task-1", run_failed=False)
 
     extra_task.refresh_from_db()
     assert extra_task.integrity_report["summary"]["destinations_not_checked"] == [
@@ -579,16 +579,14 @@ def test_tracker_lists_destination_without_per_file_check_as_not_checked(tmp_pat
 @pytest.mark.django_db
 @pytest.mark.parametrize("run_failed,expected", [(False, False), (True, True)])
 def test_tracker_not_attempted_is_unexplained_only_in_successful_run(
-    tmp_path, run_failed, expected
+    run_failed, expected
 ):
     """A file never sent is explained by a failed run, an anomaly otherwise."""
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
     extra_task = _extra_task(workspace)
     drive = _destination("drive", {"files": {}, "extra": []})
 
-    _tracker(workspace, tmp_path, destinations=[drive]).save(
-        "task-1", run_failed=run_failed
-    )
+    _tracker(workspace, destinations=[drive]).save("task-1", run_failed=run_failed)
 
     extra_task.refresh_from_db()
     assert extra_task.integrity_report["files"][0]["stage"] == "not_attempted"
@@ -596,7 +594,7 @@ def test_tracker_not_attempted_is_unexplained_only_in_successful_run(
 
 
 @pytest.mark.django_db
-def test_tracker_marks_files_removed_by_truncation(tmp_path):
+def test_tracker_marks_files_removed_by_truncation():
     """Files present in the source but dropped by the file limit are truncated."""
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
     extra_task = _extra_task(workspace)
@@ -606,7 +604,7 @@ def test_tracker_marks_files_removed_by_truncation(tmp_path):
     tracker = IntegrityTracker(workspace, folder)
     truncate_folder_files(folder, 1)
     tracker.set_kept_files(folder)
-    tracker.set_retrieval(_downloaded_run(workspace, folder), str(tmp_path))
+    tracker.set_retrieval(_downloaded_run(workspace, folder))
 
     tracker.save("task-1", run_failed=False)
 
@@ -634,22 +632,22 @@ def test_tracker_reports_files_not_reached_when_retrieval_did_not_start():
 
 
 @pytest.mark.django_db
-def test_tracker_never_raises(tmp_path):
+def test_tracker_never_raises():
     """An error while building the report is logged, never propagated."""
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
     extra_task = _extra_task(workspace)
     drive = _destination("drive")
     drive.check_integrity.side_effect = RuntimeError("boom")
 
-    _tracker(workspace, tmp_path, destinations=[drive]).save("task-1", run_failed=False)
+    _tracker(workspace, destinations=[drive]).save("task-1", run_failed=False)
 
     extra_task.refresh_from_db()
     assert extra_task.integrity_check_passed is None
 
 
 @pytest.mark.django_db
-def test_tracker_without_extra_task_does_not_raise(tmp_path):
+def test_tracker_without_extra_task_does_not_raise():
     """No ExtraTaskInfo for the task (e.g. eager run): the report is skipped."""
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
 
-    _tracker(workspace, tmp_path).save("unknown-task", run_failed=False)
+    _tracker(workspace).save("unknown-task", run_failed=False)

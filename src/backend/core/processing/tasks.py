@@ -9,7 +9,7 @@ from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
 
 from core.analytics import local_files_stats, posthog_capture, workspaces_counts
-from core.backends.destination import DestinationRegistry
+from core.backends.destination import DestinationRegistry, FileExportStatus
 from core.backends.source import (
     SourceFolder,
     SourceManager,
@@ -184,7 +184,7 @@ def _export_workspace(run, user, source_backend, integrity_tracker):
     workspace = run.workspace
     creator = FolderCreator()
     local_path = creator.get_workspace_path(workspace)
-    integrity_tracker.set_retrieval(run, local_path)
+    integrity_tracker.set_retrieval(run)
 
     # Before the downloads: file-by-file destinations need the members to close.
     logger.info("Calling prepare_export ...")
@@ -231,7 +231,8 @@ def _export_workspace(run, user, source_backend, integrity_tracker):
 
 def _file_handover(file_exports, file_by_file, legacy):
     """What to do with each downloaded file: hand it to the file-by-file
-    destinations, and drop it unless a legacy destination reads it back."""
+    destinations, and drop it unless a legacy destination reads it back, or a
+    destination did not take it and hands it back to the user once it closes."""
     if not file_by_file:
         return None
     if legacy:
@@ -239,7 +240,11 @@ def _file_handover(file_exports, file_by_file, legacy):
 
     def put_and_drop(migration_file, local_path):
         file_exports.put(migration_file, local_path)
-        os.remove(local_path)
+        if all(
+            result.get("status") == FileExportStatus.SENT
+            for result in migration_file.results.values()
+        ):
+            os.remove(local_path)
 
     return put_and_drop
 

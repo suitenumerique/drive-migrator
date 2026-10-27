@@ -6,66 +6,18 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+from requests.exceptions import HTTPError
 
-from core.backends.destination import RejectedFile
 from core.destinations.drive.backend import DriveDestinationBackend
-from core.models import Workspace
 
-
-@pytest.fixture(autouse=True)
-def _patch_mails_manager():
-    """Prevent real MailsManager calls (DB access) across all tests in this module."""
-    with patch("core.destinations.drive.backend.MailsManager"):
-        yield
-
-
-@pytest.fixture(autouse=True)
-def _patch_rejected_files_archive():
-    """Prevent the rejected files archive from reaching the DB and S3."""
-    with patch("core.destinations.drive.backend.RejectedFilesArchive"):
-        yield
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
 def _drive_settings(settings):
-    settings.DRIVE_AUTH_MODE = "service_account"
     settings.DRIVE_SHARE_MEMBERS = False
     settings.DRIVE_INTEGRITY_ANALYSIS_TIMEOUT = 30
     settings.DRIVE_INTEGRITY_ANALYSIS_POLL_INTERVAL = 10
-
-
-@pytest.fixture()
-def mock_backend():
-    """Drive HTTP client whose created items get an id derived from their name."""
-    with patch("core.destinations.drive.backend.DriveServiceAccountBackend") as cls:
-        backend = cls.return_value
-        backend.create_folder.return_value = {"id": "root"}
-        backend.create_subfolder.side_effect = lambda name, parent_id: {
-            "id": f"folder-{name}"
-        }
-        backend.create_file_item.side_effect = lambda name, parent_id, size, item_id: {
-            "id": f"id-{name}",
-            "policy": "https://s3.example.com/x",
-        }
-        backend.list_children.return_value = []
-        backend.get_item.return_value = None
-        yield backend
-
-
-def _make_workspace(workspace_id="ws-1", members=None):
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = workspace_id
-    workspace.title = "My Workspace"
-    workspace.destination_statuses = {}
-    workspace.migration_user = None
-    workspace.members = members or []
-    return workspace
-
-
-def _write(path, size):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as fh:
-        fh.write(b"x" * size)
 
 
 def _drive_file(item_id, title, upload_state="ready", size=3):
@@ -82,31 +34,57 @@ def _drive_folder(item_id, title):
     return {"id": item_id, "title": title, "type": "folder"}
 
 
-def _export_then_check(tmp_path, workspace=None, wait_for_analysis=True):
-    destination = DriveDestinationBackend()
-    workspace = workspace or _make_workspace()
-    destination.export(workspace, MagicMock(), str(tmp_path))
-    return destination.check_integrity(workspace, str(tmp_path), wait_for_analysis)
+def _drive_error(code, status_code=400):
+    response = MagicMock(status_code=status_code)
+    response.json.return_value = {
+        "type": "validation_error",
+        "errors": [{"code": code, "detail": "Refused.", "attr": None}],
+    }
+    return HTTPError(f"{status_code} Client Error", response=response)
+
+
+def _sent_ids(run):
+    """Drive item id of each file the run handed to Drive."""
+    return {
+        row.path: row.results["drive"]["item_id"]
+        for row in run.files.all()
+        if "drive" in row.results
+    }
+
+
+def _check(run, wait_for_analysis=True):
+    return DriveDestinationBackend().check_integrity(
+        run.workspace, run, wait_for_analysis
+    )
+
+
+@pytest.fixture()
+def migrated(make_run, migrate):
+    """Migrate a run, then return it with the Drive id of each of its files."""
+
+    def migrate_run(**run_fields):
+        run = make_run(**run_fields)
+        migrate(run)
+        return run, _sent_ids(run)
+
+    return migrate_run
 
 
 # ---------------------------------------------------------------------------
-# Matching local files with Drive items
+# Matching the run's files with Drive items
 # ---------------------------------------------------------------------------
 
 
-def test_ready_file_with_same_size_is_ok(tmp_path, mock_backend):
-    """A file found on Drive, ready and with the local size, is ok."""
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.list_children.return_value = [
-        _drive_file("id-report.pdf", "report.pdf")
-    ]
+def test_ready_file_with_same_size_is_ok(drive_client, migrated):
+    """A file found on Drive, ready and with the downloaded size, is ok."""
+    run, ids = migrated()
+    item_id = ids["report.pdf"]
+    drive_client.list_children.return_value = [_drive_file(item_id, "report.pdf")]
 
-    result = _export_then_check(tmp_path)
-
-    assert result == {
+    assert _check(run) == {
         "files": {
             "report.pdf": {
-                "item_id": "id-report.pdf",
+                "item_id": item_id,
                 "title": "report.pdf",
                 "upload_state": "ready",
                 "size": 3,
@@ -117,140 +95,124 @@ def test_ready_file_with_same_size_is_ok(tmp_path, mock_backend):
     }
 
 
-def test_file_renamed_by_drive_is_matched_by_item_id(tmp_path, mock_backend):
+def test_file_renamed_by_drive_is_matched_by_item_id(drive_client, migrated):
     """Drive may rename a duplicate title; matching relies on the item id."""
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.list_children.return_value = [
-        _drive_file("id-report.pdf", "report (1).pdf")
+    run, ids = migrated()
+    drive_client.list_children.return_value = [
+        _drive_file(ids["report.pdf"], "report (1).pdf")
     ]
 
-    result = _export_then_check(tmp_path)
+    entry = _check(run)["files"]["report.pdf"]
 
-    entry = result["files"]["report.pdf"]
     assert entry["stage"] == "ok"
     assert entry["title"] == "report (1).pdf"
 
 
-def test_nested_file_is_found_in_its_drive_folder(tmp_path, mock_backend):
+def test_nested_file_is_found_in_its_drive_folder(drive_client, migrated):
     """check_integrity() walks Drive subfolders recursively."""
-    _write(tmp_path / "docs" / "a.txt", 3)
-    mock_backend.list_children.side_effect = lambda folder_id: {
-        "root": [_drive_folder("folder-docs", "docs")],
-        "folder-docs": [_drive_file("id-a.txt", "a.txt")],
+    path = os.path.join("docs", "a.txt")
+    run, ids = migrated(paths=[path])
+    drive_client.list_children.side_effect = lambda folder_id: {
+        "root-uuid": [_drive_folder("folder-docs", "docs")],
+        "folder-docs": [_drive_file(ids[path], "a.txt")],
     }[folder_id]
 
-    result = _export_then_check(tmp_path)
-
-    assert result["files"][os.path.join("docs", "a.txt")]["stage"] == "ok"
+    assert _check(run)["files"][path]["stage"] == "ok"
 
 
-def test_size_mismatch_is_reported(tmp_path, mock_backend):
-    """A ready file whose Drive size differs from the local one is size_mismatch."""
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.list_children.return_value = [
-        _drive_file("id-report.pdf", "report.pdf", size=1)
+def test_size_mismatch_is_reported(drive_client, migrated):
+    """A ready file whose Drive size differs from the downloaded one is size_mismatch."""
+    run, ids = migrated()
+    drive_client.list_children.return_value = [
+        _drive_file(ids["report.pdf"], "report.pdf", size=1)
     ]
 
-    result = _export_then_check(tmp_path)
-
-    assert result["files"]["report.pdf"]["stage"] == "size_mismatch"
+    assert _check(run)["files"]["report.pdf"]["stage"] == "size_mismatch"
 
 
-@pytest.mark.parametrize("upload_state", ["suspicious"])
-def test_file_not_ready_on_drive_is_reported(tmp_path, mock_backend, upload_state):
+def test_file_not_ready_on_drive_is_reported(drive_client, migrated):
     """A file blocked by the malware analysis is not_ready, raw state kept."""
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.list_children.return_value = [
-        _drive_file("id-report.pdf", "report.pdf", upload_state=upload_state)
+    run, ids = migrated()
+    drive_client.list_children.return_value = [
+        _drive_file(ids["report.pdf"], "report.pdf", upload_state="suspicious")
     ]
 
-    result = _export_then_check(tmp_path)
+    entry = _check(run)["files"]["report.pdf"]
 
-    entry = result["files"]["report.pdf"]
     assert entry["stage"] == "not_ready"
-    assert entry["upload_state"] == upload_state
+    assert entry["upload_state"] == "suspicious"
 
 
 @pytest.mark.parametrize("drive_size,stage", [(3, "ok"), (1, "size_mismatch")])
 def test_file_too_large_to_analyze_is_checked_like_a_ready_file(
-    tmp_path, mock_backend, drive_size, stage
+    drive_client, migrated, drive_size, stage
 ):
     """Drive keeps a file too large to analyze downloadable: only its size counts."""
-    _write(tmp_path / "video.mp4", 3)
-    mock_backend.list_children.return_value = [
+    run, ids = migrated(paths=["video.mp4"])
+    drive_client.list_children.return_value = [
         _drive_file(
-            "id-video.mp4",
+            ids["video.mp4"],
             "video.mp4",
             upload_state="file_too_large_to_analyze",
             size=drive_size,
         )
     ]
 
-    result = _export_then_check(tmp_path)
+    entry = _check(run)["files"]["video.mp4"]
 
-    entry = result["files"]["video.mp4"]
     assert entry["stage"] == stage
     assert entry["upload_state"] == "file_too_large_to_analyze"
 
 
 def test_file_missing_from_listing_and_unknown_to_drive_is_not_created(
-    tmp_path, mock_backend
+    drive_client, migrated
 ):
     """An expected item absent from the listing and 404 on GET is not_created."""
-    _write(tmp_path / "report.pdf", 3)
+    run, ids = migrated()
+    item_id = ids["report.pdf"]
 
-    result = _export_then_check(tmp_path)
+    result = _check(run)
 
-    mock_backend.get_item.assert_called_once_with("id-report.pdf")
-    assert result["files"]["report.pdf"] == {
-        "item_id": "id-report.pdf",
-        "stage": "not_created",
-    }
+    drive_client.get_item.assert_called_once_with(item_id)
+    assert result["files"]["report.pdf"] == {"item_id": item_id, "stage": "not_created"}
 
 
 def test_file_missing_from_listing_but_pending_on_drive_is_pending(
-    tmp_path, mock_backend
+    drive_client, migrated
 ):
     """The listing hides pending items: a GET tells a pending item from a missing one."""
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.get_item.return_value = _drive_file(
-        "id-report.pdf", "report.pdf", upload_state="pending", size=None
+    run, ids = migrated()
+    drive_client.get_item.return_value = _drive_file(
+        ids["report.pdf"], "report.pdf", upload_state="pending", size=None
     )
 
-    result = _export_then_check(tmp_path)
+    entry = _check(run)["files"]["report.pdf"]
 
-    entry = result["files"]["report.pdf"]
     assert entry["stage"] == "pending"
     assert entry["upload_state"] == "pending"
 
 
-def test_file_rejected_by_drive_carries_the_drive_error(tmp_path, mock_backend):  # pylint: disable=unused-argument
+def test_file_rejected_by_drive_carries_the_drive_error(drive_client, migrated):
     """A file Drive refused shows the Drive error code next to its stage."""
-    _write(tmp_path / "page.txt", 3)
-    destination = DriveDestinationBackend()
-    workspace = _make_workspace()
-    destination.export(workspace, MagicMock(), str(tmp_path))
-    destination._upload_log.rejected.append(  # pylint: disable=protected-access
-        RejectedFile("page.txt", "file_type_not_allowed", "id-page.txt")
-    )
+    drive_client.notify_upload_ended.side_effect = _drive_error("file_type_not_allowed")
+    run, ids = migrated(paths=["page.txt"])
 
-    result = destination.check_integrity(workspace, str(tmp_path), True)
-
-    assert result["files"]["page.txt"] == {
-        "item_id": "id-page.txt",
+    assert _check(run)["files"]["page.txt"] == {
+        "item_id": ids["page.txt"],
         "stage": "not_created",
         "error": "file_type_not_allowed",
     }
 
 
-def test_drive_file_without_local_counterpart_is_extra(tmp_path, mock_backend):
+def test_drive_file_without_counterpart_in_the_run_is_extra(drive_client, migrated):
     """A Drive file this run did not upload is listed in extra with its Drive path."""
-    mock_backend.list_children.side_effect = lambda folder_id: {
-        "root": [_drive_folder("folder-docs", "docs")],
+    run, _ = migrated(paths=[])
+    drive_client.list_children.side_effect = lambda folder_id: {
+        "root-uuid": [_drive_folder("folder-docs", "docs")],
         "folder-docs": [_drive_file("dup-id", "a (1).txt")],
     }[folder_id]
 
-    result = _export_then_check(tmp_path)
+    result = _check(run)
 
     assert result["files"] == {}
     assert result["extra"] == [
@@ -263,16 +225,20 @@ def test_drive_file_without_local_counterpart_is_extra(tmp_path, mock_backend):
     ]
 
 
-def test_generated_users_csv_is_flagged(tmp_path, mock_backend):
+def test_generated_users_csv_is_flagged(drive_client, migrated):
     """users_list_by_migrator.csv is written by the migrator itself, not by the source."""
-    mock_backend.list_children.return_value = [
-        _drive_file("id-users_list_by_migrator.csv", "users_list_by_migrator.csv")
+    run, _ = migrated(
+        paths=[], members=[{"name": "A", "firstName": "B", "email": "c@d.fr"}]
+    )
+    csv_id = drive_client.create_file_item.call_args.kwargs["item_id"]
+    drive_client.list_children.return_value = [
+        _drive_file(csv_id, "users_list_by_migrator.csv", size=None)
     ]
-    workspace = _make_workspace(members=[{"name": "A", "firstName": "B", "email": "c"}])
 
-    result = _export_then_check(tmp_path, workspace=workspace)
+    entry = _check(run)["files"]["users_list_by_migrator.csv"]
 
-    assert result["files"]["users_list_by_migrator.csv"]["generated"] is True
+    assert entry["generated"] is True
+    assert entry["stage"] == "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -280,34 +246,35 @@ def test_generated_users_csv_is_flagged(tmp_path, mock_backend):
 # ---------------------------------------------------------------------------
 
 
-def test_analyzing_file_that_becomes_ready_is_ok(tmp_path, mock_backend):
+def test_analyzing_file_that_becomes_ready_is_ok(drive_client, migrated):
     """Files still analyzing are polled until they settle."""
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.list_children.return_value = [
-        _drive_file("id-report.pdf", "report.pdf", upload_state="analyzing")
+    run, ids = migrated()
+    item_id = ids["report.pdf"]
+    drive_client.list_children.return_value = [
+        _drive_file(item_id, "report.pdf", upload_state="analyzing")
     ]
-    mock_backend.get_item.return_value = _drive_file("id-report.pdf", "report.pdf")
+    drive_client.get_item.return_value = _drive_file(item_id, "report.pdf")
 
     with patch("core.destinations.drive.backend.time") as mock_time:
         mock_time.monotonic.return_value = 0
-        result = _export_then_check(tmp_path)
+        result = _check(run)
 
     mock_time.sleep.assert_called_once_with(10)
-    mock_backend.get_item.assert_called_once_with("id-report.pdf")
+    drive_client.get_item.assert_called_once_with(item_id)
     assert result["files"]["report.pdf"]["stage"] == "ok"
 
 
-def test_analyzing_file_after_timeout_is_analysis_unfinished(tmp_path, mock_backend):
+def test_analyzing_file_after_timeout_is_analysis_unfinished(drive_client, migrated):
     """Polling stops at DRIVE_INTEGRITY_ANALYSIS_TIMEOUT: a slow analysis is not
     a loss, the file is analysis_unfinished."""
-    _write(tmp_path / "report.pdf", 3)
-    analyzing = _drive_file("id-report.pdf", "report.pdf", upload_state="analyzing")
-    mock_backend.list_children.return_value = [analyzing]
-    mock_backend.get_item.return_value = analyzing
+    run, ids = migrated()
+    analyzing = _drive_file(ids["report.pdf"], "report.pdf", upload_state="analyzing")
+    drive_client.list_children.return_value = [analyzing]
+    drive_client.get_item.return_value = analyzing
 
     with patch("core.destinations.drive.backend.time") as mock_time:
         mock_time.monotonic.side_effect = [0, 0, 10, 20, 30]
-        result = _export_then_check(tmp_path)
+        result = _check(run)
 
     assert mock_time.sleep.call_count == 3
     entry = result["files"]["report.pdf"]
@@ -315,18 +282,18 @@ def test_analyzing_file_after_timeout_is_analysis_unfinished(tmp_path, mock_back
     assert entry["upload_state"] == "analyzing"
 
 
-def test_no_polling_when_not_waiting_for_analysis(tmp_path, mock_backend):
+def test_no_polling_when_not_waiting_for_analysis(drive_client, migrated):
     """With wait_for_analysis=False (failed run), analyzing files are not polled."""
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.list_children.return_value = [
-        _drive_file("id-report.pdf", "report.pdf", upload_state="analyzing")
+    run, ids = migrated()
+    drive_client.list_children.return_value = [
+        _drive_file(ids["report.pdf"], "report.pdf", upload_state="analyzing")
     ]
 
     with patch("core.destinations.drive.backend.time") as mock_time:
-        result = _export_then_check(tmp_path, wait_for_analysis=False)
+        result = _check(run, wait_for_analysis=False)
 
     mock_time.sleep.assert_not_called()
-    mock_backend.get_item.assert_not_called()
+    drive_client.get_item.assert_not_called()
     entry = result["files"]["report.pdf"]
     assert entry["stage"] == "analysis_unfinished"
     assert entry["upload_state"] == "analyzing"
@@ -334,70 +301,66 @@ def test_no_polling_when_not_waiting_for_analysis(tmp_path, mock_backend):
 
 @pytest.mark.parametrize("wait_for_analysis", [True, False])
 def test_analyzing_file_with_wrong_size_is_size_mismatch(
-    tmp_path, mock_backend, wait_for_analysis
+    drive_client, migrated, wait_for_analysis
 ):
     """The size is checked even while the malware analysis is unfinished."""
-    _write(tmp_path / "report.pdf", 3)
+    run, ids = migrated()
     analyzing = _drive_file(
-        "id-report.pdf", "report.pdf", upload_state="analyzing", size=2
+        ids["report.pdf"], "report.pdf", upload_state="analyzing", size=2
     )
-    mock_backend.list_children.return_value = [analyzing]
-    mock_backend.get_item.return_value = analyzing
+    drive_client.list_children.return_value = [analyzing]
+    drive_client.get_item.return_value = analyzing
 
     with patch("core.destinations.drive.backend.time") as mock_time:
         mock_time.monotonic.side_effect = [0, 0, 10, 20, 30]
-        result = _export_then_check(tmp_path, wait_for_analysis=wait_for_analysis)
+        result = _check(run, wait_for_analysis=wait_for_analysis)
 
     assert result["files"]["report.pdf"]["stage"] == "size_mismatch"
 
 
-def test_blocked_file_is_not_ready_even_without_waiting(tmp_path, mock_backend):
+def test_blocked_file_is_not_ready_even_without_waiting(drive_client, migrated):
     """Only a file still analyzing depends on the wait: a blocked one is not_ready."""
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.list_children.return_value = [
-        _drive_file("id-report.pdf", "report.pdf", upload_state="suspicious")
+    run, ids = migrated()
+    drive_client.list_children.return_value = [
+        _drive_file(ids["report.pdf"], "report.pdf", upload_state="suspicious")
     ]
 
-    result = _export_then_check(tmp_path, wait_for_analysis=False)
-
-    assert result["files"]["report.pdf"]["stage"] == "not_ready"
+    assert _check(run, wait_for_analysis=False)["files"]["report.pdf"]["stage"] == (
+        "not_ready"
+    )
 
 
 # ---------------------------------------------------------------------------
-# Interrupted runs and failures
+# Failed files and unreadable Drive
 # ---------------------------------------------------------------------------
 
 
-def test_file_whose_creation_failed_is_tracked_with_its_client_id(
-    tmp_path, mock_backend
+def test_file_whose_creation_failed_is_checked_with_its_client_id(
+    drive_client, migrated
 ):
-    """The item id is recorded before the request, so a failed creation is still
-    checked on Drive; files after it were never attempted and are left out."""
-    _write(tmp_path / "a.txt", 3)
-    _write(tmp_path / "b.txt", 3)
-    mock_backend.create_file_item.side_effect = RuntimeError("Drive down")
-    destination = DriveDestinationBackend()
-    workspace = _make_workspace()
+    """A file failing at creation is still looked up on Drive, by the id sent."""
+    drive_client.create_file_item.side_effect = _drive_error("server_error", 500)
+    run, ids = migrated()
+    client_id = ids["report.pdf"]
 
-    with pytest.raises(RuntimeError):
-        destination.export(workspace, MagicMock(), str(tmp_path))
-    result = destination.check_integrity(workspace, str(tmp_path), False)
+    result = _check(run, wait_for_analysis=False)
 
-    client_id = mock_backend.create_file_item.call_args.kwargs["item_id"]
-    mock_backend.get_item.assert_called_once_with(client_id)
-    assert result["files"] == {"a.txt": {"item_id": client_id, "stage": "not_created"}}
+    drive_client.get_item.assert_called_once_with(client_id)
+    assert result["files"]["report.pdf"] == {
+        "item_id": client_id,
+        "stage": "not_created",
+        "error": str(drive_client.create_file_item.side_effect),
+    }
 
 
-def test_listing_failure_marks_uploaded_files_unverified(tmp_path, mock_backend):
-    """If Drive can't be re-read, uploaded files are unverified and the error kept."""
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.list_children.side_effect = RuntimeError("token expired")
+def test_listing_failure_marks_sent_files_unverified(drive_client, migrated):
+    """If Drive can't be re-read, sent files are unverified and the error kept."""
+    run, ids = migrated()
+    drive_client.list_children.side_effect = RuntimeError("token expired")
 
-    result = _export_then_check(tmp_path)
-
-    assert result == {
+    assert _check(run) == {
         "files": {
-            "report.pdf": {"item_id": "id-report.pdf", "stage": "unverified"},
+            "report.pdf": {"item_id": ids["report.pdf"], "stage": "unverified"},
         },
         "extra": [],
         "error": "token expired",
@@ -405,54 +368,45 @@ def test_listing_failure_marks_uploaded_files_unverified(tmp_path, mock_backend)
 
 
 def test_listing_failure_keeps_the_drive_error_of_rejected_files(
-    tmp_path, mock_backend
+    drive_client, migrated
 ):
     """Drive refusals are known locally: an unverified report still shows them."""
-    _write(tmp_path / "page.txt", 3)
-    _write(tmp_path / "report.pdf", 3)
-    mock_backend.list_children.side_effect = RuntimeError("token expired")
-    destination = DriveDestinationBackend()
-    workspace = _make_workspace()
-    destination.export(workspace, MagicMock(), str(tmp_path))
-    destination._upload_log.rejected.append(  # pylint: disable=protected-access
-        RejectedFile("page.txt", "file_type_not_allowed", "id-page.txt")
-    )
+    drive_client.notify_upload_ended.side_effect = [
+        _drive_error("file_type_not_allowed"),
+        None,
+    ]
+    run, ids = migrated(paths=["page.txt", "report.pdf"])
+    drive_client.list_children.side_effect = RuntimeError("token expired")
 
-    result = destination.check_integrity(workspace, str(tmp_path), True)
-
-    assert result["files"] == {
+    assert _check(run)["files"] == {
         "page.txt": {
-            "item_id": "id-page.txt",
+            "item_id": ids["page.txt"],
             "stage": "unverified",
             "error": "file_type_not_allowed",
         },
-        "report.pdf": {"item_id": "id-report.pdf", "stage": "unverified"},
+        "report.pdf": {"item_id": ids["report.pdf"], "stage": "unverified"},
     }
 
 
-def test_nothing_to_check_when_drive_export_did_not_run_for_workspace(
-    tmp_path, mock_backend
-):
-    """The backend is a cached singleton: a previous run's upload log for another
-    workspace must not leak into this workspace's report."""
-    _write(tmp_path / "report.pdf", 3)
-    destination = DriveDestinationBackend()
-    destination.export(_make_workspace("ws-1"), MagicMock(), str(tmp_path))
-
-    result = destination.check_integrity(_make_workspace("ws-2"), str(tmp_path), True)
-
-    assert result == {"files": {}, "extra": []}
-    mock_backend.list_children.assert_not_called()
+def test_nothing_to_check_when_drive_did_not_export_the_run(drive_client, make_run):
+    """A run Drive never opened has nothing on Drive to compare with."""
+    assert _check(make_run()) == {"files": {}, "extra": []}
+    drive_client.list_children.assert_not_called()
 
 
-def test_nothing_to_check_when_root_folder_creation_failed(tmp_path, mock_backend):
+def test_nothing_to_check_when_root_folder_creation_failed(drive_client, migrated):
     """If the root folder could not be created, nothing was sent to Drive."""
-    mock_backend.create_folder.side_effect = RuntimeError("Drive down")
-    destination = DriveDestinationBackend()
-    workspace = _make_workspace()
+    drive_client.create_folder.side_effect = RuntimeError("Drive down")
+    run, _ = migrated()
 
-    with pytest.raises(RuntimeError):
-        destination.export(workspace, MagicMock(), str(tmp_path))
-    result = destination.check_integrity(workspace, str(tmp_path), False)
+    assert _check(run) == {"files": {}, "extra": []}
 
-    assert result == {"files": {}, "extra": []}
+
+def test_nothing_to_check_without_a_run():
+    """The run failed before planning its files: there is nothing to check."""
+    workspace = MagicMock()
+
+    assert DriveDestinationBackend().check_integrity(workspace, None, True) == {
+        "files": {},
+        "extra": [],
+    }

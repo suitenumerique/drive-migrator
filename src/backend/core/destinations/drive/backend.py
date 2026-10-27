@@ -1,10 +1,10 @@
-"""DriveDestinationBackend — uploads a workspace to La Suite Drive."""
+"""DriveDestinationBackend — uploads a workspace to La Suite Drive, file by file."""
 
 import csv
 import os
+import tempfile
 import time
 import uuid
-from dataclasses import dataclass, field
 
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
@@ -16,6 +16,7 @@ from core.backends.destination import (
     MEMBERS_CSV_FILENAME,
     AbstractDestinationBackend,
     AccountPolicy,
+    FileExportStatus,
     RejectedFile,
 )
 from core.destinations.drive.drive_backend import (
@@ -26,7 +27,8 @@ from core.destinations.drive.drive_backend import (
     get_file_rejection,
 )
 from core.mails_manager import MailsManager
-from core.models import Workspace
+from core.models import MigrationRun, Workspace
+from core.processing.folder_creator import FolderCreator
 from core.processing.integrity import Stage
 from core.processing.rejected_files import RejectedFilesArchive
 
@@ -38,6 +40,10 @@ _UPLOAD_STATE_READY = "ready"
 # Set by Drive when the analyzer rejects the size (413): still downloadable.
 _UPLOAD_STATE_TOO_LARGE_TO_ANALYZE = "file_too_large_to_analyze"
 
+# Code of a file lost to an error rather than refused: its error message may
+# hold URLs, so the CSV gets this code instead.
+_UPLOAD_FAILED = "upload_failed"
+
 # pylint: disable-next=fixme
 # TODO: French only until the backend ships translations (.po), then switch
 # these texts to English msgids wrapped in gettext.
@@ -47,20 +53,12 @@ _REJECTION_REASONS = {
     FileRejection.SIZE_EXCEEDED: "Fichier trop volumineux",
     FileRejection.SIZE_MISMATCH: "Fichier corrompu pendant le transfert",
     FileRejection.BLOCKED_UPSTREAM: "Fichier bloqué en amont de Drive (ex. pare-feu)",
+    _UPLOAD_FAILED: "Fichier non reçu par La Suite Drive (erreur d'envoi)",
 }
 
-
-@dataclass
-class _UploadLog:
-    """What the last export() of a workspace sent to Drive."""
-
-    workspace_id: str
-    backend: DriveBackend
-    root_id: str | None = None
-    # Local path relative to the workspace root -> Drive item id.
-    items: dict[str, str] = field(default_factory=dict)
-    # Files refused on upload.
-    rejected: list[RejectedFile] = field(default_factory=list)
+# Drive item ids are derived from the run's rows in this namespace, so that a
+# file sent again (e.g. by a retried task) lands on the same Drive item.
+_ITEM_ID_NAMESPACE = uuid.UUID("5b3f7c0e-9d2a-4e8b-a1f6-2c7d9e4b8a10")
 
 
 class DriveDestinationBackend(AbstractDestinationBackend):
@@ -77,11 +75,13 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
     name = "drive"
     label = "La Suite Drive"
+    exports_file_by_file = True
 
     def __init__(self):
-        # Backends are cached singletons (DestinationRegistry): the log is tagged
-        # with its workspace and reset by every export().
-        self._upload_log = None
+        # Backends are cached singletons (DestinationRegistry): one Drive client,
+        # hence one token, for each run.
+        self._client = None
+        self._client_run_id = None
 
     def describe_rejection(self, code: str) -> str:
         return _REJECTION_REASONS.get(code) or super().describe_rejection(code)
@@ -115,45 +115,66 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             return DriveUserTokenBackend(user)
         return DriveServiceAccountBackend()
 
+    def _client_for(self, user, run: MigrationRun) -> DriveBackend:
+        if self._client is None or self._client_run_id != run.id:
+            self._client = self._make_backend(user)
+            self._client_run_id = run.id
+        return self._client
+
     def export(self, workspace, user, local_folder_path: str) -> None:
-        backend = self._make_backend(user)
-        self._upload_log = _UploadLog(workspace_id=workspace.id, backend=backend)
+        """Drive receives the run file by file, see exports_file_by_file."""
+        raise NotImplementedError
 
-        root = backend.create_folder(workspace.title)
-        root_id = root["id"]
-        self._upload_log.root_id = root_id
+    # --- File-by-file export ---
+
+    def open_export(self, user, run) -> None:
+        """Create the root folder, then every planned folder, parents first."""
+        workspace = run.workspace
+        client = self._client_for(user, run)
+        root_id = client.create_folder(workspace.title)["id"]
         workspace.set_destination_metadata("drive", {"workspace_id": root_id})
+        workspace.save(update_fields=["destination_metadata"])
 
-        csv_path = self._write_users_csv(workspace, local_folder_path)
-        try:
-            self._upload_tree(backend, local_folder_path, root_id)
-        finally:
-            if csv_path:
-                os.remove(csv_path)
-            RejectedFilesArchive(workspace, self).build(
-                local_folder_path, self._upload_log.rejected
+        folder_ids = {}
+        for directory in run.dirs:
+            parent, title = os.path.split(directory)
+            folder = client.create_subfolder(
+                title, parent_id=folder_ids.get(parent, root_id)
             )
-            # One event per run, without paths: file names may be personal data.
-            if self._upload_log.rejected:
-                logger.error(
-                    "%s file(s) rejected on upload: %s",
-                    len(self._upload_log.rejected),
-                    [
-                        (rejected.item_id, rejected.code)
-                        for rejected in self._upload_log.rejected
-                    ],
-                )
+            folder_ids[directory] = folder["id"]
+        self._save_state(run, {"root_id": root_id, "folder_ids": folder_ids})
 
-        source_paths = set(self._upload_log.items) - {MEMBERS_CSV_FILENAME}
-        rejected_paths = {rejected.path for rejected in self._upload_log.rejected}
-        if source_paths and source_paths <= rejected_paths:
+    def put_file(self, user, run, migration_file, local_path: str) -> None:
+        state = run.destinations_state[self.name]
+        folder = os.path.dirname(migration_file.path)
+        migration_file.results[self.name] = _send_file(
+            self._client_for(user, run),
+            local_path,
+            parent_id=state["folder_ids"].get(folder, state["root_id"]),
+            item_id=_item_id(str(migration_file.id)),
+        )
+
+    def close_export(self, user, run) -> None:
+        workspace = run.workspace
+        client = self._client_for(user, run)
+        state = run.destinations_state[self.name]
+        if workspace.members:
+            state["members_csv"] = self._send_members_csv(client, run, state["root_id"])
+            self._save_state(run, state)
+
+        file_results = self._file_results(run)
+        # Before the mail, which links the archive.
+        self._archive_lost_files(run, file_results)
+        if file_results and not any(
+            result["status"] == FileExportStatus.SENT for _, result in file_results
+        ):
             raise RuntimeError(
-                f"All {len(source_paths)} file(s) were rejected on upload for "
-                f"workspace {workspace.id}"
+                f"All {len(file_results)} file(s) were rejected or failed on Drive "
+                f"for workspace {workspace.id}"
             )
 
         if getattr(settings, "DRIVE_SHARE_MEMBERS", True):
-            self._share_members(backend, workspace, root_id)
+            self._share_members(client, workspace, state["root_id"])
 
         title = _("Votre espace {title} est prêt sur La Suite Drive !").format(
             title=workspace.title
@@ -165,15 +186,69 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         workspace.set_destination_status("drive", Workspace.Status.SUCCESS)
         workspace.save()
 
-    def _write_users_csv(self, workspace, local_folder_path: str) -> str | None:
-        """Write one email per line, with no header, so Drive can parse the file."""
-        if not workspace.members:
-            return None
-        csv_path = os.path.join(local_folder_path, MEMBERS_CSV_FILENAME)
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerows([m.get("email", "")] for m in workspace.members)
-        return csv_path
+    def abort_export(self, run) -> None:
+        """Hand back the files Drive refused, even though the export failed."""
+        if self.name in run.destinations_state:
+            self._archive_lost_files(run, self._file_results(run))
+
+    def _save_state(self, run, state: dict) -> None:
+        run.destinations_state[self.name] = state
+        MigrationRun.objects.filter(pk=run.pk).update(
+            destinations_state=run.destinations_state
+        )
+
+    def _file_results(self, run) -> list[tuple[str, dict]]:
+        """(path, result) of every source file handed to Drive."""
+        return [
+            (row.path, row.results[self.name])
+            for row in run.files.iterator()
+            if self.name in row.results
+        ]
+
+    def _send_members_csv(self, client, run, root_id: str) -> dict:
+        """Upload the shared-users listing at the root: one email per line, with
+        no header, so Drive can parse the file."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            csv_path = os.path.join(tmp_dir, MEMBERS_CSV_FILENAME)
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerows([m.get("email", "")] for m in run.workspace.members)
+            return _send_file(
+                client,
+                csv_path,
+                parent_id=root_id,
+                item_id=_item_id(f"{run.id}:{MEMBERS_CSV_FILENAME}"),
+            )
+
+    def _archive_lost_files(self, run, file_results: list[tuple[str, dict]]) -> None:
+        """Hand the files Drive refused or failed to receive to the rejected files
+        archive, from the local folder that kept them, members listing included."""
+        members_csv = run.destinations_state[self.name].get("members_csv")
+        if members_csv:
+            file_results = [*file_results, (MEMBERS_CSV_FILENAME, members_csv)]
+        lost = [
+            RejectedFile(
+                path,
+                result["error"]
+                if result["status"] == FileExportStatus.REJECTED
+                else _UPLOAD_FAILED,
+                result["item_id"],
+            )
+            for path, result in file_results
+            if result["status"] != FileExportStatus.SENT
+        ]
+        workspace = run.workspace
+        RejectedFilesArchive(workspace, self).build(
+            FolderCreator().get_workspace_path(workspace), lost
+        )
+        # One event per run, without paths nor error messages (they may hold
+        # URLs): file names may be personal data.
+        if lost:
+            logger.error(
+                "%s file(s) not received by Drive: %s",
+                len(lost),
+                [(rejected.item_id, rejected.code) for rejected in lost],
+            )
 
     def _share_members(self, backend, workspace, root_id: str) -> None:
         """Share root_id with all relevant emails, respecting the auth mode."""
@@ -208,130 +283,43 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         else:
             backend.invite_by_email(item_id, email)
 
-    def _upload_tree(
-        self, backend, local_path: str, drive_parent_id: str, relative_dir: str = ""
-    ) -> None:
-        """Recursively create Drive folders and upload files from the local tree."""
-        for entry in sorted(os.scandir(local_path), key=lambda e: e.name):
-            relative_path = os.path.join(relative_dir, entry.name)
-            if entry.is_dir():
-                folder = backend.create_subfolder(entry.name, parent_id=drive_parent_id)
-                self._upload_tree(backend, entry.path, folder["id"], relative_path)
-            elif entry.is_file():
-                # Logged before the request so a failed creation can still be
-                # looked up on Drive by the integrity check.
-                item_id = str(uuid.uuid4())
-                self._upload_log.items[relative_path] = item_id
-                size = entry.stat().st_size
-                # On a failure, the last of these Sentry breadcrumbs names the file.
-                logger.info("Uploading file %s (%s bytes)", item_id, size)
-                # Only a refusal of this file is skipped: any other error
-                # would hit every file.
-                try:
-                    item = backend.create_file_item(
-                        entry.name,
-                        parent_id=drive_parent_id,
-                        size=size,
-                        item_id=item_id,
-                    )
-                except HTTPError as error:
-                    rejection = get_file_rejection(error, at_creation=True)
-                    if rejection is None or (
-                        rejection is FileRejection.BLOCKED_UPSTREAM
-                        and not self._is_drive_reachable(backend, drive_parent_id)
-                    ):
-                        raise
-                    self._reject(relative_path, rejection)
-                    continue
-                # Drive may have replaced a recovered pending item with a new id.
-                self._upload_log.items[relative_path] = item["id"]
-                try:
-                    backend.upload_to_s3(item["policy"], entry.path)
-                    backend.notify_upload_ended(item["id"])
-                except HTTPError as error:
-                    rejection = get_file_rejection(error)
-                    if rejection is None:
-                        raise
-                    self._reject(relative_path, rejection)
-
-    def _reject(self, relative_path: str, rejection: FileRejection) -> None:
-        """Record a file skipped because it was refused."""
-        self._upload_log.rejected.append(
-            RejectedFile(
-                relative_path, rejection.value, self._upload_log.items[relative_path]
-            )
-        )
-
-    @staticmethod
-    def _is_drive_reachable(backend, folder_id: str) -> bool:
-        """Probe the folder with a payload-less request: False if it is blocked
-        too, so the block is not the file's."""
-        try:
-            backend.get_item(folder_id)
-        except RequestException:
-            return False
-        return True
-
-    def check_integrity(
-        self, workspace, local_folder_path: str, wait_for_analysis: bool
-    ) -> dict:
-        log = self._upload_log
-        if log is None or log.workspace_id != workspace.id or log.root_id is None:
+    def check_integrity(self, workspace, run, wait_for_analysis: bool) -> dict:
+        state = run.destinations_state.get(self.name) if run else None
+        if not state:
             return {"files": {}, "extra": []}
 
-        rejections = {rejected.path: rejected.code for rejected in log.rejected}
+        expected = self._expected_files(run)
+        client = self._client_for(workspace.migration_user, run)
         try:
-            drive_files = self._list_drive_files(log.backend, log.root_id)
+            drive_files = self._list_drive_files(client, state["root_id"])
             # The listing hides pending items: look up the missing ones directly.
             items = {
-                path: drive_files.pop(item_id, None) or log.backend.get_item(item_id)
-                for path, item_id in log.items.items()
+                path: drive_files.pop(result["item_id"], None)
+                or client.get_item(result["item_id"])
+                for path, (result, _, _) in expected.items()
             }
             if wait_for_analysis:
-                self._wait_for_analysis(log.backend, items)
+                self._wait_for_analysis(client, items)
         # Broad on purpose: whatever prevents re-reading Drive (expired token,
         # outage...), the report must say so instead of failing the task.
         except Exception as error:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             logger.warning("Drive integrity check failed: %s", error)
-            return {
-                "files": {
-                    path: _without_none(
-                        {
-                            "item_id": item_id,
-                            "stage": Stage.UNVERIFIED,
-                            "error": rejections.get(path),
-                        }
-                    )
-                    for path, item_id in log.items.items()
-                },
-                "extra": [],
-                "error": str(error),
-            }
+            return _unverified(expected, error)
 
-        files = {}
-        for path, item_id in log.items.items():
-            local_file = os.path.join(local_folder_path, path)
-            local_size = (
-                os.path.getsize(local_file) if os.path.isfile(local_file) else None
-            )
-            files[path] = _integrity_entry(item_id, items[path], local_size)
-            if path == MEMBERS_CSV_FILENAME:
-                files[path]["generated"] = True
-            if path in rejections:
-                files[path]["error"] = rejections[path]
+        return _checked(expected, items, drive_files)
 
-        extra = [
-            _without_none(
-                {
-                    "item_id": item["id"],
-                    "path": item["path"],
-                    "upload_state": item.get("upload_state"),
-                    "size": item.get("size"),
-                }
-            )
-            for item in drive_files.values()
-        ]
-        return {"files": files, "extra": extra}
+    def _expected_files(self, run) -> dict[str, tuple[dict, int | None, bool]]:
+        """Path -> (upload result, downloaded size, generated by the migrator)
+        of everything the run sent Drive."""
+        expected = {
+            row.path: (row.results[self.name], row.size, False)
+            for row in run.files.iterator()
+            if self.name in row.results
+        }
+        members_csv = run.destinations_state[self.name].get("members_csv")
+        if members_csv:
+            expected[MEMBERS_CSV_FILENAME] = (members_csv, None, True)
+        return expected
 
     def _list_drive_files(self, backend, folder_id: str, path: str = "") -> dict:
         """Map Drive item id -> file item (with its Drive path) under folder_id."""
@@ -355,6 +343,136 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             for path, item in items.items():
                 if _is_analyzing(item):
                     items[path] = backend.get_item(item["id"])
+
+
+def _item_id(name: str) -> str:
+    return str(uuid.uuid5(_ITEM_ID_NAMESPACE, name))
+
+
+def _is_unauthorized(error: RequestException) -> bool:
+    return (
+        isinstance(error, HTTPError)
+        and getattr(error.response, "status_code", None) == 401
+    )
+
+
+def _send_file(client, local_path: str, parent_id: str, item_id: str) -> dict:
+    """Create, upload and complete one Drive file, named after local_path.
+    Return its result; raise only when Drive rejects our credentials."""
+    size = os.path.getsize(local_path)
+    # On a failure, the last of these Sentry breadcrumbs names the file.
+    logger.info("Uploading file %s (%s bytes)", item_id, size)
+    try:
+        try:
+            item = client.create_file_item(
+                os.path.basename(local_path),
+                parent_id=parent_id,
+                size=size,
+                item_id=item_id,
+            )
+        except HTTPError as error:
+            rejection = _creation_rejection(client, error, parent_id)
+            if rejection is None:
+                raise
+            return _rejected(item_id, rejection)
+        # Drive may have replaced a recovered pending item with a new id.
+        item_id = item["id"]
+        try:
+            client.upload_to_s3(item["policy"], local_path)
+            client.notify_upload_ended(item_id)
+        except HTTPError as error:
+            rejection = get_file_rejection(error)
+            if rejection is None:
+                raise
+            return _rejected(item_id, rejection)
+    except RequestException as error:
+        if _is_unauthorized(error):
+            raise
+        # The error's message may hold its URL, hence the file name.
+        logger.warning(
+            "Upload of file %s failed: %s %s",
+            item_id,
+            type(error).__name__,
+            getattr(error.response, "status_code", ""),
+        )
+        return {
+            "status": FileExportStatus.FAILED,
+            "item_id": item_id,
+            "error": str(error),
+        }
+    return {"status": FileExportStatus.SENT, "item_id": item_id}
+
+
+def _creation_rejection(client, error: HTTPError, parent_id: str):
+    """The refusal of a file at its creation, if error is one. A block in front
+    of Drive is the file's only when its folder can still be read."""
+    rejection = get_file_rejection(error, at_creation=True)
+    if rejection is FileRejection.BLOCKED_UPSTREAM and not _is_drive_reachable(
+        client, parent_id
+    ):
+        return None
+    return rejection
+
+
+def _is_drive_reachable(client, folder_id: str) -> bool:
+    """Probe the folder with a payload-less request: False if it is blocked
+    too, so the block is not the file's."""
+    try:
+        client.get_item(folder_id)
+    except RequestException:
+        return False
+    return True
+
+
+def _rejected(item_id: str, rejection: FileRejection) -> dict:
+    return {
+        "status": FileExportStatus.REJECTED,
+        "item_id": item_id,
+        "error": rejection.value,
+    }
+
+
+def _unverified(expected: dict, error: Exception) -> dict:
+    """Integrity result when Drive could not be re-read."""
+    return {
+        "files": {
+            path: _without_none(
+                {
+                    "item_id": result["item_id"],
+                    "stage": Stage.UNVERIFIED,
+                    "error": result.get("error"),
+                }
+            )
+            for path, (result, _, _) in expected.items()
+        },
+        "extra": [],
+        "error": str(error),
+    }
+
+
+def _checked(expected: dict, items: dict, unmatched_drive_files: dict) -> dict:
+    """Integrity result from the Drive item found for each expected file."""
+    files = {}
+    for path, (result, local_size, generated) in expected.items():
+        entry = _integrity_entry(result["item_id"], items[path], local_size)
+        if generated:
+            entry["generated"] = True
+        if result.get("error"):
+            entry["error"] = result["error"]
+        files[path] = entry
+
+    extra = [
+        _without_none(
+            {
+                "item_id": item["id"],
+                "path": item["path"],
+                "upload_state": item.get("upload_state"),
+                "size": item.get("size"),
+            }
+        )
+        for item in unmatched_drive_files.values()
+    ]
+    return {"files": files, "extra": extra}
 
 
 def _is_analyzing(item: dict | None) -> bool:

@@ -31,9 +31,7 @@ def test_optional_hooks_raise_not_implemented_by_default():
     with pytest.raises(NotImplementedError):
         dest.poll_completion(workspace=None)
     with pytest.raises(NotImplementedError):
-        dest.check_integrity(
-            workspace=None, local_folder_path="/tmp", wait_for_analysis=False
-        )
+        dest.check_integrity(workspace=None, run=None, wait_for_analysis=False)
 
 
 def test_subclass_without_name_raises():
