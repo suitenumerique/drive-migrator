@@ -1,6 +1,7 @@
 """DriveBackend — HTTP client for La Suite Drive API."""
 
 import logging
+import os
 import time
 import uuid
 from datetime import timedelta
@@ -413,11 +414,13 @@ class DriveBackend:
             return None
 
     def upload_to_s3(self, policy_url: str, file_path: str) -> None:
-        """Step 2: Upload file content directly to the S3 presigned URL (no Drive token)."""
+        """Step 2: Upload file content directly to the S3 presigned URL (no Drive token).
+        The open file is streamed, never loaded in memory."""
         with open(file_path, "rb") as f:
-            response = self.session.put(
-                policy_url, data=f.read(), timeout=300, retry=True
-            )
+            # Without a length, requests would switch to chunked encoding, which
+            # S3 presigned PUTs refuse: an empty file goes as an empty body.
+            data = f if os.fstat(f.fileno()).st_size else b""
+            response = self.session.put(policy_url, data=data, timeout=300, retry=True)
         if not response.ok:
             logger.error(
                 "S3 upload failed (%s) for %s: %s",

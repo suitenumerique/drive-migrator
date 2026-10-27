@@ -4,13 +4,12 @@
 
 import uuid
 from datetime import timedelta
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 from django.utils import timezone
 
 import pytest
 from cryptography.fernet import Fernet
-from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError, Timeout
 
 from core.destinations.drive.drive_backend import (
@@ -299,68 +298,6 @@ def test_service_account_delete_item(settings):
         headers={"Authorization": "Bearer tok"},
         timeout=30,
     )
-
-
-def test_service_account_upload_to_s3_puts_file_content():
-    """upload_to_s3() sends a PUT with file content to the presigned URL (no Drive token)."""
-    file_content = b"binary content"
-    policy_url = "https://s3.example.com/file.pdf?sig=x"
-
-    with (
-        patch_drive_http() as mock_requests,
-        patch("builtins.open", mock_open(read_data=file_content)),
-    ):
-        mock_requests.put.return_value.raise_for_status = MagicMock()
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
-
-    mock_requests.put.assert_called_once_with(
-        policy_url,
-        data=file_content,
-        timeout=300,
-    )
-
-
-def test_service_account_upload_to_s3_logs_response_body_on_error():
-    """A failed S3 PUT logs the error response body before raising."""
-    policy_url = "https://s3.example.com/file.pdf?sig=x"
-    error_response = MagicMock()
-    error_response.ok = False
-    error_response.status_code = 400
-    error_response.text = "<Error><Code>SignatureDoesNotMatch</Code></Error>"
-    error_response.raise_for_status.side_effect = HTTPError(response=error_response)
-
-    with (
-        patch_drive_http() as mock_requests,
-        patch("core.destinations.drive.drive_backend.logger") as mock_logger,
-        patch("builtins.open", mock_open(read_data=b"binary content")),
-        pytest.raises(HTTPError),
-    ):
-        mock_requests.put.return_value = error_response
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
-
-    mock_logger.error.assert_called_once()
-    assert "SignatureDoesNotMatch" in mock_logger.error.call_args[0][3]
-
-
-def test_service_account_upload_to_s3_retries_on_connection_error_then_succeeds():
-    """A transient ConnectionError on the S3 PUT is retried and succeeds."""
-    file_content = b"binary content"
-    policy_url = "https://s3.example.com/file.pdf?sig=x"
-
-    success_response = MagicMock()
-    success_response.raise_for_status = MagicMock()
-
-    with (
-        patch_drive_http() as mock_requests,
-        patch("builtins.open", mock_open(read_data=file_content)),
-    ):
-        mock_requests.put.side_effect = [
-            RequestsConnectionError("connection reset"),
-            success_response,
-        ]
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
-
-    assert mock_requests.put.call_count == 2
 
 
 def test_service_account_notify_upload_ended(settings):

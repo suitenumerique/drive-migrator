@@ -5,7 +5,7 @@ Split out of test_drive_backend.py to stay under pylint's max-module-lines.
 
 import uuid
 from datetime import timedelta
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 from django.utils import timezone
 
@@ -95,23 +95,31 @@ def no_retry_delay():
         yield
 
 
-def test_service_account_upload_to_s3_retries_configured_max_attempts(settings):
+def _doc(tmp_path, content=b"binary content"):
+    """A real file to upload, since upload_to_s3() streams it from the disk."""
+    path = tmp_path / "doc.pdf"
+    path.write_bytes(content)
+    return str(path)
+
+
+def test_service_account_upload_to_s3_retries_configured_max_attempts(
+    settings, tmp_path
+):
     """The number of retry attempts before giving up follows DRIVE_RETRY_MAX_ATTEMPTS."""
     settings.DRIVE_RETRY_MAX_ATTEMPTS = 2
     policy_url = "https://s3.example.com/file.pdf?sig=x"
 
     with (
         patch_drive_http() as mock_requests,
-        patch("builtins.open", mock_open(read_data=b"binary content")),
         pytest.raises(RequestsConnectionError),
     ):
         mock_requests.put.side_effect = RequestsConnectionError("connection reset")
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
+        DriveServiceAccountBackend().upload_to_s3(policy_url, _doc(tmp_path))
 
     assert mock_requests.put.call_count == 2
 
 
-def test_service_account_upload_to_s3_wait_uses_configured_timing(settings):
+def test_service_account_upload_to_s3_wait_uses_configured_timing(settings, tmp_path):
     """Retry backoff timing follows DRIVE_RETRY_WAIT_MULTIPLIER / DRIVE_RETRY_WAIT_MIN."""
     settings.DRIVE_RETRY_WAIT_MULTIPLIER = 5
     settings.DRIVE_RETRY_WAIT_MIN = 7
@@ -122,20 +130,19 @@ def test_service_account_upload_to_s3_wait_uses_configured_timing(settings):
 
     with (
         patch_drive_http() as mock_requests,
-        patch("builtins.open", mock_open(read_data=b"binary content")),
         patch("tenacity.nap.time.sleep") as mock_sleep,
     ):
         mock_requests.put.side_effect = [
             RequestsConnectionError("connection reset"),
             success_response,
         ]
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
+        DriveServiceAccountBackend().upload_to_s3(policy_url, _doc(tmp_path))
 
     mock_sleep.assert_called_once()
     assert mock_sleep.call_args[0][0] >= 7
 
 
-def test_service_account_upload_to_s3_logs_before_sleeping_on_retry():
+def test_service_account_upload_to_s3_logs_before_sleeping_on_retry(tmp_path):
     """A retry attempt is logged at INFO: it's recoverable, not a definitive failure."""
     policy_url = "https://s3.example.com/file.pdf?sig=x"
 
@@ -144,32 +151,30 @@ def test_service_account_upload_to_s3_logs_before_sleeping_on_retry():
 
     with (
         patch_drive_http() as mock_requests,
-        patch("builtins.open", mock_open(read_data=b"binary content")),
         patch.object(drive_backend.logger, "info") as mock_info,
     ):
         mock_requests.put.side_effect = [
             RequestsConnectionError("connection reset"),
             success_response,
         ]
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
+        DriveServiceAccountBackend().upload_to_s3(policy_url, _doc(tmp_path))
 
     mock_info.assert_called_once()
     assert mock_info.call_args[0][1] == "PUT"
 
 
-def test_service_account_upload_to_s3_logs_error_on_final_failure(settings):
+def test_service_account_upload_to_s3_logs_error_on_final_failure(settings, tmp_path):
     """Once every attempt is exhausted, the definitive failure is logged at ERROR."""
     settings.DRIVE_RETRY_MAX_ATTEMPTS = 2
     policy_url = "https://s3.example.com/file.pdf?sig=x"
 
     with (
         patch_drive_http() as mock_requests,
-        patch("builtins.open", mock_open(read_data=b"binary content")),
         patch.object(drive_backend.logger, "error") as mock_error,
         pytest.raises(RequestsConnectionError),
     ):
         mock_requests.put.side_effect = RequestsConnectionError("connection reset")
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
+        DriveServiceAccountBackend().upload_to_s3(policy_url, _doc(tmp_path))
 
     mock_error.assert_called_once()
 
