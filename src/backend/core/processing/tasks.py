@@ -3,6 +3,7 @@ import os
 from django.conf import settings
 from django.utils import timezone
 
+import structlog
 from celery import states
 from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
@@ -109,6 +110,8 @@ def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
 @app.task(bind=True)
 def export(self, data):  # pylint: disable=unused-argument
     workspace_id = data["workspace"]["id"]
+    # The logs of the migration, its end handlers included, tell its workspace
+    structlog.contextvars.bind_contextvars(workspace_id=workspace_id)
     logger.info("Starting workspace %s ...", workspace_id)
 
     workspace = Workspace.objects.get(id=workspace_id)

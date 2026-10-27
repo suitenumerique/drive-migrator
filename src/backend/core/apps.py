@@ -1,11 +1,14 @@
 """Main Core application"""
-# from django.apps import AppConfig
-# from django.utils.translation import gettext_lazy as _
+
+from django.apps import AppConfig
 
 
-# class CoreConfig(AppConfig):
-#     """Configuration class for the main core app."""
+class CoreConfig(AppConfig):
+    """Configuration class for the main core app."""
 
-#     name = "core"
-#     app_label = "core"
-#     verbose_name = _("main core application")
+    name = "core"
+
+    def ready(self):
+        """Connect the signal receivers of the application."""
+        # pylint: disable-next=import-outside-toplevel,unused-import
+        from core import signals

@@ -840,6 +840,28 @@ def test_migration_finished_counts_zero_unfinished_analyses_in_a_report():
     assert capture.call_args.args[2]["analysis_unfinished_count"] == 0
 
 
+def test_export_logs_with_the_workspace(workspace, user, console_logs):
+    """The logs of a migration should tell its workspace."""
+    with patch("core.processing.tasks.log_token_status"):
+        _run_export(workspace, user)
+
+    task_logs = [
+        log for log in console_logs if log["logger"] == "core.processing.tasks"
+    ]
+    assert task_logs[0] == {
+        "event": "Starting workspace ws-1 ...",
+        "level": "info",
+        "logger": "core.processing.tasks",
+        "workspace_id": "ws-1",
+    }
+    assert task_logs[-1] == {
+        "event": "Task done",
+        "level": "info",
+        "logger": "core.processing.tasks",
+        "workspace_id": "ws-1",
+    }
+
+
 def test_export_logs_token_status_before_migrating(workspace, user):
     """The tokens of the services the workspace relies on are logged at task start."""
     workspace.source_type = "resana"

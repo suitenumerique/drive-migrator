@@ -1,7 +1,9 @@
 """requests.Session that retries transient failures of requests."""
 
 import re
+import secrets
 import ssl
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from urllib.parse import urlsplit
@@ -9,6 +11,7 @@ from urllib.parse import urlsplit
 from django.conf import settings
 
 import requests
+import structlog
 from requests.exceptions import ChunkedEncodingError, SSLError, Timeout
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from tenacity import (
@@ -25,8 +28,15 @@ from tenacity import (
 # unencoded in a URL string, so stopping at them could leak the rest.
 _QUERY_IN_TEXT_RE = re.compile(r"\?\S*")
 
+# Logs the calls of every service, whose retries go to the logger of the service
+request_logger = structlog.get_logger(__name__)
+
 _max_attempts_cap: ContextVar[int | None] = ContextVar(
     "retrying_session_max_attempts_cap", default=None
+)
+
+_request_id: ContextVar[str | None] = ContextVar(
+    "retrying_session_request_id", default=None
 )
 
 
@@ -39,6 +49,17 @@ def limited_retries(max_attempts: int):
         yield
     finally:
         _max_attempts_cap.reset(token)
+
+
+@contextmanager
+def same_request_id():
+    """Send one request id with every RetryingSession call made inside the block,
+    e.g. the attempts of a retry loop that calls the session again."""
+    token = _request_id.set(_request_id.get() or secrets.token_hex(16))
+    try:
+        yield
+    finally:
+        _request_id.reset(token)
 
 
 def _is_caused_by(error: BaseException, error_type: type) -> bool:
@@ -84,6 +105,11 @@ def _strip_query(url: str) -> str:
     return urlsplit(url)._replace(query="", fragment="").geturl()
 
 
+def _strip_path(url: str) -> str:
+    """Keep the scheme and host only, for a path that may hold a file name."""
+    return urlsplit(url)._replace(path="", query="", fragment="").geturl()
+
+
 def _describe_failure(outcome) -> str:
     if not outcome.failed:
         return f"HTTP {outcome.result().status_code}"
@@ -102,6 +128,10 @@ class RetryingSession(requests.Session):
 
     Errors raised while streaming a response body (stream=True) happen after
     request() returns, so they are not covered here.
+
+    Each attempt is logged and sends an X-Request-ID header, the same for every
+    attempt of a call, so that the remote logs can be matched with ours. A call
+    whose URL path holds a file name passes `log_path=False`.
     """
 
     SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -119,12 +149,46 @@ class RetryingSession(requests.Session):
         cap = _max_attempts_cap.get()
         return configured if cap is None else min(configured, cap)
 
+    def _send(self, log_path, method, url, *args, **kwargs):
+        """Send one attempt of a call, then log it with its outcome and duration."""
+        fields = {
+            "service": self.settings_prefix.lower(),
+            "method": method.upper(),
+            "url": _strip_query(url) if log_path else _strip_path(url),
+            "request_id": kwargs["headers"]["X-Request-ID"],
+        }
+        started_at = time.monotonic()
+        try:
+            response = super().request(method, url, *args, **kwargs)
+        except Exception as error:
+            # The message of the error may hold the URL with its query
+            request_logger.info(
+                "http_request",
+                **fields,
+                error=type(error).__name__,
+                duration_ms=round((time.monotonic() - started_at) * 1000),
+            )
+            raise
+        request_logger.info(
+            "http_request",
+            **fields,
+            status=response.status_code,
+            duration_ms=round((time.monotonic() - started_at) * 1000),
+        )
+        return response
+
     # pylint: disable-next=arguments-differ
-    def request(self, method, url, *args, retry=None, **kwargs):
+    def request(self, method, url, *args, retry=None, log_path=True, **kwargs):
+        # Unless the caller or a same_request_id() block gives one, a new id
+        # per call, kept by its attempts
+        kwargs["headers"] = {
+            "X-Request-ID": _request_id.get() or secrets.token_hex(16),
+            **(kwargs.get("headers") or {}),
+        }
         if retry is None:
             retry = method.upper() in self.SAFE_METHODS
         if not retry:
-            return super().request(method, url, *args, **kwargs)
+            return self._send(log_path, method, url, *args, **kwargs)
 
         retrying = Retrying(
             retry=retry_if_exception(is_transient_error)
@@ -137,7 +201,7 @@ class RetryingSession(requests.Session):
             before_sleep=self._log_retry(method, url),
             retry_error_callback=self._give_up(method, url),
         )
-        return retrying(super().request, method, url, *args, **kwargs)
+        return retrying(self._send, log_path, method, url, *args, **kwargs)
 
     def _log_retry(self, method, url):
         def _before_sleep(retry_state):

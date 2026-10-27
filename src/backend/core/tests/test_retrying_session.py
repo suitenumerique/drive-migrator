@@ -2,7 +2,7 @@
 
 import logging
 import ssl
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 import requests
@@ -10,7 +10,7 @@ import urllib3
 from requests.exceptions import ChunkedEncodingError, ProxyError, SSLError, Timeout
 from requests.exceptions import ConnectionError as RequestsConnectionError
 
-from core.retrying_session import RetryingSession, limited_retries
+from core.retrying_session import RetryingSession, limited_retries, same_request_id
 
 URL = "https://api.example.com/items"
 LOGGER_NAME = "core.tests.retrying_session"
@@ -168,7 +168,9 @@ def test_each_retry_is_logged_at_info(base_request, caplog):
     with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
         _session().get(URL)
 
-    infos = [r for r in caplog.records if r.levelno == logging.INFO]
+    infos = [
+        r for r in caplog.records if r.levelno == logging.INFO and r.name == LOGGER_NAME
+    ]
     assert len(infos) == 1
     assert "Retrying" in infos[0].getMessage()
 
@@ -212,8 +214,9 @@ def test_query_string_is_not_logged(base_request, caplog):
         with pytest.raises(RequestsConnectionError):
             _session().put(f"{URL}?X-Amz-Signature=secret", data=b"x", retry=True)
 
-    assert caplog.records
-    for record in caplog.records:
+    retry_records = [r for r in caplog.records if r.name == LOGGER_NAME]
+    assert retry_records
+    for record in retry_records:
         assert "secret" not in record.getMessage()
         assert URL in record.getMessage()
 
@@ -349,3 +352,72 @@ def test_query_with_unencoded_quotes_is_fully_redacted(base_request, caplog):
     for record in caplog.records:
         assert "Brien" not in record.getMessage()
         assert "token=abc" not in record.getMessage()
+
+
+def _request_logs(console_logs):
+    """Return the logs of the requests sent by the session, without logger and level."""
+    return [
+        {key: value for key, value in log.items() if key not in ("logger", "level")}
+        for log in console_logs
+        if log["logger"] == "core.retrying_session"
+    ]
+
+
+def test_each_attempt_is_logged_with_the_request_id_it_sends(
+    base_request, console_logs
+):
+    """Every attempt of a call sends and logs the same request id."""
+    base_request.side_effect = [Timeout("read timed out"), _response(200)]
+
+    _session().get(f"{URL}?token=secret")
+
+    request_id = base_request.call_args.kwargs["headers"]["X-Request-ID"]
+    assert [call.kwargs["headers"] for call in base_request.call_args_list] == [
+        {"X-Request-ID": request_id},
+        {"X-Request-ID": request_id},
+    ]
+    assert _request_logs(console_logs) == [
+        {
+            "event": "http_request",
+            "service": "test",
+            "method": "GET",
+            "url": URL,
+            "request_id": request_id,
+            "error": "Timeout",
+            "duration_ms": ANY,
+        },
+        {
+            "event": "http_request",
+            "service": "test",
+            "method": "GET",
+            "url": URL,
+            "request_id": request_id,
+            "status": 200,
+            "duration_ms": ANY,
+        },
+    ]
+
+
+def test_the_calls_of_a_same_request_id_block_share_their_request_id(base_request):
+    """A retry loop calling the session again keeps one request id."""
+    base_request.return_value = _response(200)
+
+    with same_request_id():
+        _session().post(URL)
+        _session().get(URL)
+    _session().get(URL)
+
+    first, second, outside = (
+        call.kwargs["headers"]["X-Request-ID"] for call in base_request.call_args_list
+    )
+    assert first == second != outside
+
+
+def test_a_path_holding_a_file_name_is_not_logged(base_request, console_logs):
+    """A call passing log_path=False is logged with the host of its URL only."""
+    base_request.return_value = _response(200)
+
+    _session().put(f"{URL}/report.pdf", data=b"x", log_path=False)
+
+    [log] = _request_logs(console_logs)
+    assert log["url"] == "https://api.example.com"
