@@ -1,7 +1,7 @@
 """Tests for FolderCreator — generic SourceFolder/SourceFile-based implementation."""
 
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -565,25 +565,47 @@ def test_failed_download_removes_partial_file(tmp_path, settings):
 
 
 def test_create_folder_ensures_filename_uniqueness(tmp_path, settings):
-    """When ensure_file_uniqueness returns a different path, create_folder() uses it."""
+    """Files sharing a name in one folder are written side by side, numbered."""
     settings.APP_WORK_DIR = str(tmp_path)
     workspace = _make_workspace("ws11")
-    file = SourceFile(id="f1", name="doc", extension=".pdf", download_url="http://x")
+    first = SourceFile(id="f1", name="doc", extension=".pdf", download_url="http://x")
+    second = SourceFile(id="f2", name="doc", extension=".pdf", download_url="http://x")
     folder = SourceFolder(
-        name="root", children=[SourceFolder(name="sub", files=[file])]
+        name="root", children=[SourceFolder(name="sub", files=[first, second])]
     )
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, _make_backend())
+
+    assert creator.written_files == {
+        "f1": os.path.join("sub", "doc.pdf"),
+        "f2": os.path.join("sub", "doc (1).pdf"),
+    }
+
+
+def test_create_folder_counts_the_bytes_written(tmp_path, settings):
+    """bytes_written sums the size of every downloaded file, failed ones excluded."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws23")
+    files = [
+        SourceFile(id="f1", name="a", extension=".txt", download_url="x"),
+        SourceFile(id="f2", name="b", extension=".txt", download_url="x"),
+        SourceFile(id="f3", name="broken", extension=".txt", download_url="x"),
+    ]
     backend = _make_backend()
 
-    # Simulate a name collision: ensure_file_uniqueness returns a different path
-    with patch(
-        "core.processing.folder_creator.ensure_file_uniqueness",
-        side_effect=lambda p: p.replace("doc.pdf", "doc (1).pdf"),
-    ):
-        creator = FolderCreator()
-        creator.create_folder(workspace, folder, backend)
+    def download_file(file, destination):
+        if file.id == "f3":
+            raise RuntimeError("403 Forbidden")
+        with open(destination, "wb") as fh:
+            fh.write(b"x" * (3 if file.id == "f1" else 4))
 
-    called_dest = backend.download_file.call_args[0][1]
-    assert "doc (1).pdf" in called_dest
+    backend.download_file.side_effect = download_file
+
+    creator = FolderCreator()
+    creator.create_folder(workspace, SourceFolder(name="root", files=files), backend)
+
+    assert creator.bytes_written == 7
 
 
 # ---------------------------------------------------------------------------
