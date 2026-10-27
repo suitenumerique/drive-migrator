@@ -269,6 +269,7 @@ def test_task_handlers_capture_migration_finished(handler, status):
     mock_workspace.upload_errors = [{"path": "c"}]
     mock_extra_task.workspace = mock_workspace
     mock_extra_task.integrity_check_passed = False
+    mock_extra_task.files_stats = {"workspace_size_bytes": 3}
     mock_extra_task.integrity_report = {
         "summary": {
             "source_files_count": 7,
@@ -283,10 +284,6 @@ def test_task_handlers_capture_migration_finished(handler, status):
         patch("core.processing.tasks.cleanup_workspace_dir"),
         patch("core.processing.tasks.MailsManager"),
         patch("core.processing.tasks.workspaces_counts", return_value={"c": 1}),
-        patch(
-            "core.processing.tasks.local_files_stats",
-            return_value={"workspace_size_bytes": 3},
-        ),
         patch("core.processing.tasks.posthog_capture") as capture,
     ):
         mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result

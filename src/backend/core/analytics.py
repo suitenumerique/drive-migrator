@@ -5,10 +5,12 @@ from collections import Counter
 
 from django.conf import settings
 
-import magic
 import posthog
+from celery.utils.log import get_task_logger
 
-from core.models import Workspace
+from core.models import ExtraTaskInfo, MigrationFile, MigrationRun, Workspace
+
+logger = get_task_logger(__name__)
 
 
 def workspaces_counts(user) -> dict:
@@ -21,21 +23,16 @@ def workspaces_counts(user) -> dict:
     }
 
 
-def local_files_stats(path) -> dict:
-    """Return the size and file types of a local workspace folder."""
-    if not os.path.isdir(path):
-        return {}
+def run_files_stats(run: MigrationRun) -> dict:
+    """Return the size and file types of what a migration run downloaded."""
     counts = Counter()
     sizes = Counter()
-    for root, _, filenames in os.walk(path):
-        for filename in filenames:
-            file_path = os.path.join(root, filename)
-            file_type = (
-                os.path.splitext(filename)[1].lower(),
-                magic.from_file(file_path, mime=True),
-            )
-            counts[file_type] += 1
-            sizes[file_type] += os.path.getsize(file_path)
+    for path, mime_type, size in run.files.filter(
+        status=MigrationFile.Status.DOWNLOADED
+    ).values_list("path", "mime_type", "size"):
+        file_type = (os.path.splitext(path)[1].lower(), mime_type)
+        counts[file_type] += 1
+        sizes[file_type] += size
     return {
         "workspace_size_bytes": sum(sizes.values()),
         "file_types": [
@@ -48,6 +45,18 @@ def local_files_stats(path) -> dict:
             for extension, mime_type in sorted(counts)
         ],
     }
+
+
+def save_run_files_stats(task_id: str, run: MigrationRun) -> None:
+    """Keep the stats of a run on its task, for the task handlers to send them
+    once the run is purged. Never raises: analytics must not fail a migration."""
+    try:
+        ExtraTaskInfo.objects.filter(task_result__task_id=task_id).update(
+            files_stats=run_files_stats(run)
+        )
+    # Broad on purpose, see the docstring.
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("Could not save the files stats of task %s", task_id)
 
 
 def posthog_capture(event_name, user, properties=None, workspace=None):

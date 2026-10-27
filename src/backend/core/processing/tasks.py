@@ -8,7 +8,11 @@ from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
 
-from core.analytics import local_files_stats, posthog_capture, workspaces_counts
+from core.analytics import (
+    posthog_capture,
+    save_run_files_stats,
+    workspaces_counts,
+)
 from core.backends.destination import DestinationRegistry, FileExportStatus
 from core.backends.source import (
     SourceFolder,
@@ -107,8 +111,7 @@ def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
                 timezone.now() - extra_task.task_result.date_created
             ).total_seconds(),
             "$set": workspaces_counts(extra_task.user),
-            # Called before cleanup_workspace_dir, the local folder still exists.
-            **local_files_stats(FolderCreator().get_workspace_path(workspace)),
+            **extra_task.files_stats,
         },
         workspace=workspace,
     )
@@ -162,6 +165,7 @@ def export(self, data):  # pylint: disable=unused-argument
         integrity_tracker.set_kept_files(folder)
 
         run_failed = True
+        run = None
         try:
             plan = build_plan(folder)
             run = create_migration_run(workspace, self.request.id, plan)
@@ -170,6 +174,9 @@ def export(self, data):  # pylint: disable=unused-argument
         finally:
             # Before the task_success/task_failure handlers delete the local folder.
             integrity_tracker.save(self.request.id, run_failed=run_failed)
+            if run is not None:
+                # Read from the run's rows, for the task handlers.
+                save_run_files_stats(self.request.id, run)
             delete_migration_run(self.request.id)
     finally:
         logger.info("Calling finalize_export ...")

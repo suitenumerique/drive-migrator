@@ -27,11 +27,12 @@ def migration_run():
     with (
         patch("core.processing.tasks.create_migration_run") as create,
         patch("core.processing.tasks.delete_migration_run") as delete,
+        patch("core.processing.tasks.save_run_files_stats") as save_stats,
     ):
         create.side_effect = lambda workspace, task_id, plan: SimpleNamespace(
             workspace=workspace
         )
-        yield SimpleNamespace(create=create, delete=delete)
+        yield SimpleNamespace(create=create, delete=delete, save_stats=save_stats)
 
 
 @pytest.fixture()
@@ -177,6 +178,30 @@ def test_export_deletes_the_migration_run_when_it_fails(workspace, user, migrati
         _run_export(workspace, user, dest_backends=[dest_drive])
 
     migration_run.delete.assert_called_once()
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+def test_export_keeps_the_files_stats_before_purging_the_run(
+    workspace, user, migration_run, fails
+):
+    """The analytics stats are read from the run's rows, so before they go."""
+    calls = []
+    migration_run.save_stats.side_effect = lambda task_id, run: calls.append(
+        ("stats", task_id, run)
+    )
+    migration_run.delete.side_effect = lambda task_id: calls.append(("delete",))
+    destination = _destination("archive")
+    if fails:
+        destination.export.side_effect = RuntimeError("down")
+
+    try:
+        _run_export(workspace, user, dest_backends=[destination])
+    except RuntimeError:
+        assert fails
+
+    task_id = migration_run.create.call_args.args[1]
+    assert calls == [("stats", task_id, ANY), ("delete",)]
+    assert calls[0][2].workspace is workspace
 
 
 def test_export_calls_prepare_export_before_downloading(workspace, user):

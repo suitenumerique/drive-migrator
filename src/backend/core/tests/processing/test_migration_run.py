@@ -122,6 +122,18 @@ def test_download_migration_file_records_the_size(tmp_path):
     )
 
 
+def test_download_migration_file_records_the_mime_type(tmp_path):
+    """The type of a downloaded file is detected from its content."""
+    migration_file = _run_with_files(_source("f1", "doc")).files.get()
+
+    download_migration_file(
+        migration_file, _backend(_write(b"%PDF-1.4\n")), str(tmp_path / "doc.txt")
+    )
+
+    migration_file.refresh_from_db()
+    assert migration_file.mime_type == "application/pdf"
+
+
 def test_download_migration_file_records_a_failure_without_raising(tmp_path):
     """A failed download is recorded with its error and leaves no partial file."""
     migration_file = _run_with_files(_source("f1", "doc")).files.get()

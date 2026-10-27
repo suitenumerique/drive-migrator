@@ -239,6 +239,10 @@ class ExtraTaskInfo(models.Model):
     # None when the integrity check did not run for this task.
     integrity_check_passed = models.BooleanField(null=True, blank=True)
 
+    # Size and file types of what the run downloaded, sent to the analytics once
+    # the task is over, see core.analytics.run_files_stats.
+    files_stats = models.JSONField(default=dict, blank=True)
+
     def __str__(self):
         return f"TaskResult {self.task_result.task_id} for {self.workspace.source_id} "
 
@@ -284,6 +288,8 @@ class MigrationFile(BaseModel):
         max_length=20, choices=Status.choices, default=Status.PENDING
     )
     size = models.BigIntegerField(null=True, blank=True)
+    # Detected from the downloaded content, for the analytics.
+    mime_type = models.CharField(max_length=255, blank=True, default="")
     error = models.TextField(blank=True, default="")
     # Keyed by destination name: what each destination did with the file.
     results = models.JSONField(default=dict, blank=True)

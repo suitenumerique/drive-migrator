@@ -5,6 +5,7 @@ import os
 
 from django.db import transaction
 
+import magic
 from celery.utils.log import get_task_logger
 
 from core.backends.source import (
@@ -71,6 +72,7 @@ def download_migration_file(
     way."""
     file = SourceFile.from_dict(migration_file.source)
     size = None
+    mime_type = ""
     error = ""
     token_expired = None
     try:
@@ -89,6 +91,7 @@ def download_migration_file(
         if os.path.isfile(destination):
             status = MigrationFile.Status.DOWNLOADED
             size = os.path.getsize(destination)
+            mime_type = magic.from_file(destination, mime=True)
         else:
             logger.error(
                 "Download of %s reported success but wrote no file",
@@ -99,10 +102,11 @@ def download_migration_file(
 
     migration_file.status = status
     migration_file.size = size
+    migration_file.mime_type = mime_type
     migration_file.error = error
     # A single UPDATE: save() would also validate the row with extra queries.
     MigrationFile.objects.filter(pk=migration_file.pk).update(
-        status=status, size=size, error=error
+        status=status, size=size, mime_type=mime_type, error=error
     )
     if token_expired is not None:
         raise token_expired
