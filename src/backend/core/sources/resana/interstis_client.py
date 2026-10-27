@@ -14,7 +14,11 @@ from tenacity import (
 )
 
 from core.retry_utils import log_final_failure_and_reraise
-from core.retrying_session import RetryingSession, is_transient_error
+from core.retrying_session import (
+    RetryingSession,
+    is_transient_error,
+    same_request_id,
+)
 
 logger = get_task_logger(__name__)
 
@@ -85,6 +89,8 @@ class InterstisClient:
             f"{settings.RESANA_API_ENDPOINT}/api/targets/{uuid}/explore"
         )
 
+    # Its attempts are one download
+    @same_request_id()
     @_retry_on_transient_error
     def download_file(self, uuid: str, destination_path: str) -> None:
         url = f"{settings.RESANA_API_ENDPOINT}/api/targets/{uuid}/download"

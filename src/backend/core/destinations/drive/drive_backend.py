@@ -22,7 +22,11 @@ from tenacity import (
 from core.backends.destination import DestinationTokenExpired
 from core.encryption import decrypt_token, encrypt_token
 from core.retry_utils import log_final_failure_and_reraise
-from core.retrying_session import RetryingSession, is_transient_error
+from core.retrying_session import (
+    RetryingSession,
+    is_transient_error,
+    same_request_id,
+)
 from core.utils import (
     describe_access_expiry,
     describe_oauth_error,
@@ -310,6 +314,8 @@ class DriveBackend:
         response = self.session.delete(url, auth=self._auth, timeout=30, retry=True)
         response.raise_for_status()
 
+    # Its attempts, and the existence checks between them, are one creation
+    @same_request_id()
     def _create_item(self, url: str, payload: dict, item_id: str | None = None) -> dict:
         """POST with a client-generated id, retried via tenacity on 5xx/network
         errors or a Drive id conflict: creation isn't idempotent (Drive silently
@@ -415,8 +421,9 @@ class DriveBackend:
     def upload_to_s3(self, policy_url: str, file_path: str) -> None:
         """Step 2: Upload file content directly to the S3 presigned URL (no Drive token)."""
         with open(file_path, "rb") as f:
+            # The path of the presigned URL holds the file name
             response = self.session.put(
-                policy_url, data=f.read(), timeout=300, retry=True
+                policy_url, data=f.read(), timeout=300, retry=True, log_path=False
             )
         if not response.ok:
             logger.error(
@@ -427,6 +434,8 @@ class DriveBackend:
             )
         response.raise_for_status()
 
+    # Its attempts are one notification
+    @same_request_id()
     def notify_upload_ended(self, item_id: str) -> None:
         """Step 3: notify Drive the upload is complete. A retried timeout/5xx may
         land on an item that's no longer PENDING - see _is_upload_already_processed().
