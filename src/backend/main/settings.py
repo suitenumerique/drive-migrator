@@ -18,6 +18,7 @@ from django.utils.translation import gettext_lazy as _
 
 import posthog
 import sentry_sdk
+import structlog
 from configurations import Configuration, values
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.logging import ignore_logger
@@ -44,6 +45,23 @@ def get_release():
             return json.load(version)["version"]
     except FileNotFoundError:
         return "NA"  # Default: not available
+
+
+def drop_celery_task_data(_logger, _method_name, event_dict):
+    """Drop the task context that Celery adds to its logs, whose arguments can hold user data."""
+    if event_dict["_record"].name.startswith("celery."):
+        event_dict.pop("data", None)
+    return event_dict
+
+
+# Hand the structlog events to the standard loggers, so that the LOGGING
+# formatter writes them like any other log
+structlog.configure(
+    processors=[structlog.stdlib.render_to_log_args_and_kwargs],
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
+)
 
 
 class Base(Configuration):
@@ -438,6 +456,8 @@ class Base(Configuration):
         "django.contrib.messages.middleware.MessageMiddleware",
         "dockerflow.django.middleware.DockerflowMiddleware",
         "hijack.middleware.HijackUserMiddleware",
+        # After DockerflowMiddleware, which answers the heartbeats without logging them here
+        "django_structlog.middlewares.RequestMiddleware",
     ]
 
     AUTHENTICATION_BACKENDS = [
@@ -464,6 +484,7 @@ class Base(Configuration):
         "drf_spectacular",
         "corsheaders",
         "dockerflow.django",
+        "django_structlog",
         "rest_framework",
         "django_filters",
         "parler",
@@ -542,21 +563,36 @@ class Base(Configuration):
     CORS_ALLOWED_ORIGIN_REGEXES = values.ListValue([])
 
     # Logging: the web process logs to the console through the root handler.
-    # Celery workers replace it with their own (no duplicated lines) and set
-    # the root and task loggers to their -l level.
+    # Celery workers keep it (CELERY_WORKER_HIJACK_ROOT_LOGGER) and set the
+    # root and task loggers to their -l level.
     LOGGING = {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
-            "simple": {
-                "format": "{asctime} {name} {levelname} {message}",
-                "style": "{",
+            "json": {
+                "()": structlog.stdlib.ProcessorFormatter,
+                "foreign_pre_chain": [
+                    structlog.contextvars.merge_contextvars,
+                    structlog.stdlib.ExtraAdder(),
+                    drop_celery_task_data,
+                    structlog.stdlib.add_logger_name,
+                    structlog.stdlib.add_log_level,
+                    structlog.processors.TimeStamper(fmt="iso", utc=True),
+                ],
+                "processors": [
+                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                    structlog.processors.format_exc_info,
+                    structlog.processors.JSONRenderer(default=str),
+                ],
             },
         },
         "handlers": {
             "console": {
                 "class": "logging.StreamHandler",
-                "formatter": "simple",
+                "formatter": "json",
+            },
+            "null": {
+                "class": "logging.NullHandler",
             },
         },
         "root": {
@@ -572,20 +608,34 @@ class Base(Configuration):
         },
         # get_task_logger() parents the application's task loggers to
         # "celery.task" instead of "core": in the web process, both get the
-        # application level.
+        # application level, as do the request logs of django-structlog.
         "loggers": {
-            logger: {
-                "level": str(
-                    values.Value(
-                        "INFO",
-                        environ_name="LOGGING_LEVEL_LOGGERS_APP",
-                        environ_prefix=None,
-                    )
-                ).upper(),
-            }
-            for logger in ("core", "celery.task")
+            **{
+                logger: {
+                    "level": str(
+                        values.Value(
+                            "INFO",
+                            environ_name="LOGGING_LEVEL_LOGGERS_APP",
+                            environ_prefix=None,
+                        )
+                    ).upper(),
+                }
+                for logger in ("core", "celery.task", "django_structlog")
+            },
+            # Replaced by the request logs of django-structlog
+            "request.summary": {
+                "handlers": ["null"],
+                "propagate": False,
+            },
+            "django.request": {
+                "handlers": ["null"],
+                "propagate": False,
+            },
         },
     }
+    # Personal data, which the access logs already hold
+    DJANGO_STRUCTLOG_IP_LOGGING_ENABLED = False
+    DJANGO_STRUCTLOG_CELERY_ENABLED = True
 
     # Sentry
     SENTRY_DSN = values.Value(environ_name="SENTRY_DSN", environ_prefix=None)
@@ -615,6 +665,8 @@ class Base(Configuration):
     CELERY_ACCEPT_CONTENT = ["json"]
     CELERY_RESULT_EXTENDED = True
     CELERY_TRACK_STARTED = True
+    # Keep the LOGGING handlers in the workers instead of Celery's own
+    CELERY_WORKER_HIJACK_ROOT_LOGGER = False
 
     # Session
     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
@@ -753,6 +805,9 @@ class Base(Configuration):
 
             # Ignore the logs added by the DockerflowMiddleware
             ignore_logger("request.summary")
+            # Like django.request for the Django integration: its errors are already reported
+            ignore_logger("django_structlog.middlewares.request")
+            ignore_logger("django_structlog.celery.receivers")
 
         posthog.api_key = cls.POSTHOG_KEY
         posthog.host = cls.POSTHOG_HOST
@@ -817,23 +872,6 @@ class Test(Base):
 
     EXTRA_API_URL_MODULES = ["core.sources.resana.urls"]
 
-    LOGGING = values.DictValue(
-        {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "handlers": {
-                "console": {
-                    "class": "logging.StreamHandler",
-                },
-            },
-            "loggers": {
-                "main": {
-                    "handlers": ["console"],
-                    "level": "DEBUG",
-                },
-            },
-        }
-    )
     PASSWORD_HASHERS = [
         "django.contrib.auth.hashers.MD5PasswordHasher",
     ]

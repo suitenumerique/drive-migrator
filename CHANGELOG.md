@@ -12,6 +12,7 @@ and this project adheres to
 
 - Show the linked workspace and migration user in the Celery task result
   admin list view
+- Log as JSON with django-structlog, with the request and workspace ids
 
 #### Dependencies
 
