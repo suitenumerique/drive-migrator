@@ -24,6 +24,7 @@ from socket import gethostbyname, gethostname
 
 import posthog
 import sentry_sdk
+import structlog
 from configurations import Configuration, values
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.logging import ignore_logger
@@ -184,6 +185,24 @@ class Development(Base):
         "http://localhost:3010",
     ]
     DEBUG = True
+
+    # Lines readable in a terminal, instead of the JSON of the deployed logs
+    LOGGING = {
+        **Base.LOGGING,
+        "formatters": {
+            "console": {
+                **Base.LOGGING["formatters"]["json"],
+                "processors": [
+                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                    structlog.dev.ConsoleRenderer(),
+                ],
+            },
+        },
+        "handlers": {
+            **Base.LOGGING["handlers"],
+            "console": {"class": "logging.StreamHandler", "formatter": "console"},
+        },
+    }
 
     SESSION_COOKIE_NAME = "main_sessionid"
 
