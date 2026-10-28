@@ -20,13 +20,34 @@ class S3ResanaManager:
     def get_destination_path(self, workspace: Workspace):
         return f"workspace_{workspace.id}"
 
+    def get_s3_bucket(self, workspace=None):
+        s3 = boto3.resource(
+            "s3",
+            endpoint_url=settings.RESANA_S3_ENDPOINT_URL,
+            aws_access_key_id=settings.RESANA_S3_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.RESANA_S3_SECRET_ACCESS_KEY,
+            region_name=settings.RESANA_S3_REGION,
+        )
+        return s3.Bucket(self.get_bucket(workspace))
+
+    def upload_file(self, path: str, s3_key: str) -> None:
+        self.get_s3_bucket().upload_file(path, s3_key)
+
+    def put_object(self, s3_key: str, body: bytes) -> None:
+        self.get_s3_bucket().put_object(Key=s3_key, Body=body)
+
+    def delete_prefix(self, prefix: str) -> None:
+        """Delete every object under the prefix, taken as a folder."""
+        bucket = self.get_s3_bucket()
+        bucket.objects.filter(Prefix=prefix.rstrip("/") + "/").delete()
+
     def list_bucket(self, bucket):
-        logger.info(f"Listing bucket {bucket.name} ...")
+        logger.info("Listing bucket %s ...", bucket.name)
         for obj in bucket.objects.all():
             logger.info(obj.key)
 
     def list_bucket_prefix(self, bucket, prefix):
-        logger.info(f"Listing bucket {bucket.name} with prefix {prefix} ...")
+        logger.info("Listing bucket %s with prefix %s ...", bucket.name, prefix)
         for obj in bucket.objects.filter(Prefix=prefix):
             logger.info(obj.key)
 
@@ -223,31 +244,17 @@ class S3ResanaManager:
         mime_type = magic.from_file(absolute_file_path, mime=True)
         if mime_type not in allowed:
             logger.info(
-                f"({count}) Skipping {absolute_file_path} due to mime type {mime_type}"
+                "(%s) Skipping %s due to mime type %s",
+                count,
+                absolute_file_path,
+                mime_type,
             )
             return False
 
         return True
 
-    def format_folders(self, workspace: Workspace):
-        """
-        Goes through all the folders recursively and make sure the maximum length of folders and files is 60. If longer
-        It truncate their size to 60.
-        """
-        folder_creator = FolderCreator()
-        path = folder_creator.get_workspace_path(workspace)
-
     def upload_folder(self, workspace: Workspace):
-        s3 = boto3.resource(
-            "s3",
-            endpoint_url=settings.RESANA_S3_ENDPOINT_URL,
-            aws_access_key_id=settings.RESANA_S3_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.RESANA_S3_SECRET_ACCESS_KEY,
-            region_name=settings.RESANA_S3_REGION,
-        )
-
-        bucket_name = self.get_bucket(workspace)
-        bucket = s3.Bucket(bucket_name)
+        bucket = self.get_s3_bucket(workspace)
         # We can't rely on bucket creation date because it's not available in OutScale;
         # if bucket.creation_date is None:
         #     raise Exception(f"Bucket {bucket_name} does not exist")  # pylint: disable=broad-exception-raised
@@ -256,9 +263,9 @@ class S3ResanaManager:
         path = folder_creator.get_workspace_path(workspace)
         destination_path = self.get_destination_path(workspace)
 
-        logger.info(f"Deleting objects with prefix {destination_path}")
+        logger.info("Deleting objects with prefix %s", destination_path)
         bucket.objects.filter(Prefix=destination_path).delete()
-        logger.info(f"Listing {destination_path} after deletion ...")
+        logger.info("Listing %s after deletion ...", destination_path)
         self.list_bucket_prefix(bucket, destination_path)
 
         count = 0
@@ -277,7 +284,10 @@ class S3ResanaManager:
                 #     continue
 
                 logger.info(
-                    f"({count}) Uploading {absolute_file_path} to {relative_file_path} ...."
+                    "(%s) Uploading %s to %s ....",
+                    count,
+                    absolute_file_path,
+                    relative_file_path,
                 )
 
                 bucket.upload_file(absolute_file_path, relative_file_path)
