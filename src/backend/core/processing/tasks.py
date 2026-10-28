@@ -24,7 +24,6 @@ from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.file_exports import FileExports
 from core.processing.folder_creator import FolderCreator
-from core.processing.folder_helper import ArchiveManager
 from core.processing.integrity import IntegrityTracker, Stage
 from core.processing.migration_run import create_migration_run, delete_migration_run
 from core.processing.plan import build_plan
@@ -71,8 +70,6 @@ def cleanup_workspace_dir(workspace: Workspace):
     logger.info("Cleaning up %s directory ...", workspace.id)
     creator = FolderCreator()
     creator.delete_folder(workspace)
-    archive_manager = ArchiveManager()
-    archive_manager.delete_archive(workspace)
     logger.info("Cleaned up %s directory !", workspace.id)
     list_work_dir()
 

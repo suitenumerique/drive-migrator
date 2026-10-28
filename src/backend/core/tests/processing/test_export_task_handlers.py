@@ -61,19 +61,17 @@ def test_list_workspace_dir_logs_files(tmp_path, settings):
 # ---------------------------------------------------------------------------
 
 
-def test_cleanup_workspace_dir_deletes_folder_and_archive(tmp_path, settings):
-    """cleanup_workspace_dir() deletes the local folder and the S3 archive."""
+def test_cleanup_workspace_dir_deletes_the_local_folder(tmp_path, settings):
+    """cleanup_workspace_dir() deletes the workspace's local folder."""
     settings.APP_WORK_DIR = str(tmp_path)
     ws = MagicMock(spec=Workspace)
     ws.id = "ws-clean"
     workspace_dir = tmp_path / "workspace_ws-clean"
     workspace_dir.mkdir()
 
-    with patch("core.processing.tasks.ArchiveManager") as mock_archive_cls:
-        cleanup_workspace_dir(ws)
+    cleanup_workspace_dir(ws)
 
     assert not workspace_dir.exists()
-    mock_archive_cls.return_value.delete_archive.assert_called_once_with(ws)
 
 
 # ---------------------------------------------------------------------------
