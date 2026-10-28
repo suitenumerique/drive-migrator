@@ -157,3 +157,18 @@ class ArchiveManager:
         s3 = self.get_s3_resource()
         bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
         bucket.objects.filter(Prefix=prefix.rstrip("/") + "/").delete()
+
+    def read_object(self, s3_key: str) -> bytes:
+        s3 = self.get_s3_resource()
+        response = s3.meta.client.get_object(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=s3_key
+        )
+        return response["Body"].read()
+
+    def iter_object(self, s3_key: str, chunk_size: int = 1024 * 1024):
+        """Yield the object chunk by chunk, reaching S3 on the first one only."""
+        s3 = self.get_s3_resource()
+        response = s3.meta.client.get_object(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=s3_key
+        )
+        yield from response["Body"].iter_chunks(chunk_size)

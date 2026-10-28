@@ -1,6 +1,13 @@
 """Tests for WorkspacesViewset: auth, download_archive and integrity."""
 
+import io
+import json
+import zipfile
 from unittest.mock import patch
+
+from django.core.cache import cache
+from django.core.signals import request_finished
+from django.db import close_old_connections
 
 import pytest
 from django_celery_results.models import TaskResult
@@ -56,6 +63,168 @@ def test_download_archive_authenticated_owner():
 
     assert response.status_code == 200
     assert response.json() == {"url": "http://s3.example.com/ws.zip?token=abc"}
+
+
+# ---------------------------------------------------------------------------
+# archive_zip
+# ---------------------------------------------------------------------------
+
+_MANIFEST_KEY = "archives/ws/run/manifest.json"
+
+
+@pytest.fixture(name="archive_bucket")
+def fixture_archive_bucket(settings):
+    """An archive of two files on S3, behind the download module, with the
+    download slots counted in a cache of this test only."""
+    settings.CACHES = {
+        "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+    }
+    cache.clear()
+    objects = {
+        _MANIFEST_KEY: json.dumps(
+            {
+                "dirs": ["docs"],
+                "files": [
+                    {"path": "a.txt", "key": "k1", "size": 5},
+                    {"path": "docs/b.txt", "key": "k2", "size": 5},
+                ],
+            }
+        ).encode(),
+        "k1": b"hello",
+        "k2": b"world",
+    }
+    with patch("core.destinations.archive.download.ArchiveManager") as mock_cls:
+        manager = mock_cls.return_value
+        manager.read_object.side_effect = lambda key: objects[key]
+        manager.iter_object.side_effect = lambda key: iter([objects[key]])
+        yield manager
+
+
+def _archived_workspace(**fields):
+    return factories.WorkspaceFactory(
+        destination_metadata={"archive": {"manifest_key": _MANIFEST_KEY}}, **fields
+    )
+
+
+def _archive_zip_url(workspace):
+    return f"/api/v1.0/workspaces/{workspace.id}/archive_zip/"
+
+
+def test_download_archive_links_the_streamed_zip_of_a_manifest():
+    """An archive made of a manifest is streamed by the backend, so the URL
+    handed to the frontend is the backend's own, behind the user's session."""
+    workspace = _archived_workspace()
+
+    response = _owner_client(workspace).get(
+        f"/api/v1.0/workspaces/{workspace.id}/download_archive/"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "url": f"http://testserver/api/v1.0/workspaces/{workspace.id}/archive_zip/"
+    }
+
+
+def test_archive_zip_anonymous():
+    """Anonymous users must not download an archive."""
+    workspace = _archived_workspace()
+
+    response = APIClient().get(_archive_zip_url(workspace))
+
+    assert response.status_code == 401
+
+
+def test_archive_zip_other_user_workspace_not_found():
+    """A workspace not owned by the requesting user must not be accessible."""
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    response = client.get(_archive_zip_url(_archived_workspace()))
+
+    assert response.status_code == 404
+
+
+def test_archive_zip_not_found_without_manifest():
+    """A workspace archived by the former export has no zip to stream."""
+    workspace = factories.WorkspaceFactory(
+        destination_metadata={"archive": {"s3_key": "ws.zip"}}
+    )
+
+    response = _owner_client(workspace).get(_archive_zip_url(workspace))
+
+    assert response.status_code == 404
+
+
+@pytest.mark.usefixtures("archive_bucket")
+def test_archive_zip_streams_the_archive():
+    """The zip is streamed with its exact size, named after the workspace,
+    and without proxy buffering, which would hold it on disk."""
+    workspace = _archived_workspace(title="Équipe/projets")
+
+    response = _owner_client(workspace).get(_archive_zip_url(workspace))
+
+    assert response.status_code == 200
+    content = b"".join(response.streaming_content)
+    assert response["Content-Type"] == "application/zip"
+    assert response["Content-Length"] == str(len(content))
+    assert response["X-Accel-Buffering"] == "no"
+    assert response["Content-Disposition"] == (
+        "attachment; filename*=utf-8''%C3%89quipe_projets.zip"
+    )
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        assert archive.read("a.txt") == b"hello"
+        assert archive.read("docs/b.txt") == b"world"
+
+
+@pytest.mark.usefixtures("archive_bucket")
+def test_archive_zip_refuses_downloads_beyond_the_limit(settings):
+    """Downloads beyond the limit are told to retry later, so the API keeps
+    threads to answer."""
+    settings.ARCHIVE_MAX_CONCURRENT_DOWNLOADS = 1
+    workspace = _archived_workspace()
+    client = _owner_client(workspace)
+
+    first = client.get(_archive_zip_url(workspace))
+    second = client.get(_archive_zip_url(workspace))
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+@pytest.mark.usefixtures("archive_bucket")
+def test_archive_zip_releases_its_slot_once_the_response_is_closed(settings):
+    """A finished or interrupted download frees its slot."""
+    settings.ARCHIVE_MAX_CONCURRENT_DOWNLOADS = 1
+    workspace = _archived_workspace()
+    client = _owner_client(workspace)
+
+    first = client.get(_archive_zip_url(workspace))
+    # As the test client does, so that closing keeps the test's connection.
+    request_finished.disconnect(close_old_connections)
+    try:
+        first.close()
+    finally:
+        request_finished.connect(close_old_connections)
+
+    assert client.get(_archive_zip_url(workspace)).status_code == 200
+
+
+def test_archive_zip_releases_its_slot_when_the_manifest_cannot_be_read(
+    archive_bucket, settings
+):
+    """A download failing before streaming does not keep its slot."""
+    settings.ARCHIVE_MAX_CONCURRENT_DOWNLOADS = 1
+    workspace = _archived_workspace()
+    client = _owner_client(workspace)
+    client.raise_request_exception = False
+    read_object = archive_bucket.read_object.side_effect
+    archive_bucket.read_object.side_effect = RuntimeError("S3 down")
+
+    assert client.get(_archive_zip_url(workspace)).status_code == 500
+
+    archive_bucket.read_object.side_effect = read_object
+    assert client.get(_archive_zip_url(workspace)).status_code == 200
 
 
 # ---------------------------------------------------------------------------

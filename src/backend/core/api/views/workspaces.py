@@ -2,15 +2,27 @@
 from django.db.models import JSONField, OuterRef, Subquery
 from django.db.models.functions import Lower
 from django.forms.fields import UUIDField
+from django.http import StreamingHttpResponse
+from django.urls import reverse
+from django.utils.http import content_disposition_header
 
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, Throttled, ValidationError
 from rest_framework.response import Response
 
 from ...backends.destination import DestinationRegistry
+from ...destinations.archive.download import (
+    SlotStream,
+    acquire_download_slot,
+    archive_stream,
+    get_manifest_key,
+    read_manifest,
+    release_download_slot,
+)
 from ...destinations.resana.resana_backend import ResanaBackend
 from ...models import ExtraTaskInfo, Workspace
 from ...processing.folder_helper import ArchiveManager
@@ -65,9 +77,43 @@ class WorkspacesViewset(viewsets.ReadOnlyModelViewSet):  # pylint: disable=too-m
 
     @action(detail=True)
     def download_archive(self, request, *args, **kwargs):
-        helper = ArchiveManager()
         workspace = self.get_object()
+        if get_manifest_key(workspace):
+            url = reverse("workspaces-archive-zip", kwargs={"pk": workspace.pk})
+            return Response({"url": request.build_absolute_uri(url)})
+        # Zip built by the former export, served by S3 itself.
+        helper = ArchiveManager()
         return Response({"url": helper.get_download_url(workspace)})
+
+    @extend_schema(responses={(200, "application/zip"): OpenApiTypes.BINARY})
+    @action(detail=True)
+    def archive_zip(self, request, *args, **kwargs):
+        """Stream the zip of the workspace's archive, built from its S3 manifest."""
+        workspace = self.get_object()
+        manifest_key = get_manifest_key(workspace)
+        if not manifest_key:
+            raise NotFound("This workspace has no archive to stream.")
+        if not acquire_download_slot():
+            raise Throttled(
+                wait=60, detail="Too many archive downloads at once, retry later."
+            )
+        try:
+            stream = archive_stream(read_manifest(manifest_key))
+        except BaseException:
+            release_download_slot()
+            raise
+
+        response = StreamingHttpResponse(
+            SlotStream(stream), content_type="application/zip"
+        )
+        response["Content-Length"] = len(stream)
+        filename = workspace.title.replace("/", "_").replace("\\", "_")
+        response["Content-Disposition"] = content_disposition_header(
+            True, f"{filename}.zip"
+        )
+        # A buffering proxy would hold the whole zip on its disk.
+        response["X-Accel-Buffering"] = "no"
+        return response
 
     @extend_schema(
         parameters=[

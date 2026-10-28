@@ -375,3 +375,38 @@ def test_delete_prefix_removes_every_object_under_it(settings):
     objects = mock_boto3.resource.return_value.Bucket.return_value.objects
     objects.filter.assert_called_once_with(Prefix="archives/a/")
     objects.filter.return_value.delete.assert_called_once_with()
+
+
+def test_read_object_returns_the_content_of_the_key(settings):
+    """read_object() returns the whole content stored under the key."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        client = mock_boto3.resource.return_value.meta.client
+        client.get_object.return_value["Body"].read.return_value = b"{}"
+        content = ArchiveManager().read_object("archives/a/manifest.json")
+
+    assert content == b"{}"
+    client.get_object.assert_called_once_with(
+        Bucket="my-bucket", Key="archives/a/manifest.json"
+    )
+
+
+def test_iter_object_streams_the_key_only_once_iterated(settings):
+    """iter_object() reads the object chunk by chunk, and does not reach S3
+    before the first chunk is wanted."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        client = mock_boto3.resource.return_value.meta.client
+        client.get_object.return_value["Body"].iter_chunks.return_value = iter(
+            [b"ab", b"c"]
+        )
+        chunks = ArchiveManager().iter_object("archives/a/files/1")
+        client.get_object.assert_not_called()
+
+        assert list(chunks) == [b"ab", b"c"]
+
+    client.get_object.assert_called_once_with(
+        Bucket="my-bucket", Key="archives/a/files/1"
+    )

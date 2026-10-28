@@ -43,6 +43,14 @@ class MigrationBackendsMixin:
         environ_prefix=None,
     )
 
+    # Archive downloads streamed at once, each holding a gunicorn thread for
+    # its whole length: beyond, a download is refused, so the API keeps threads.
+    ARCHIVE_MAX_CONCURRENT_DOWNLOADS = values.PositiveIntegerValue(
+        12,
+        environ_name="ARCHIVE_MAX_CONCURRENT_DOWNLOADS",
+        environ_prefix=None,
+    )
+
     # Filesystem source backend
     FILESYSTEM_SOURCE_ROOT = values.Value(
         environ_name="FILESYSTEM_SOURCE_ROOT", environ_prefix=None, default="/demo-data"
