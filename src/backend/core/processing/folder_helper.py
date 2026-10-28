@@ -146,3 +146,14 @@ class ArchiveManager:
         s3.meta.client.delete_object(
             Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=s3_key
         )
+
+    def put_object(self, s3_key: str, body: bytes) -> None:
+        s3 = self.get_s3_resource()
+        bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
+        bucket.put_object(Key=s3_key, Body=body)
+
+    def delete_prefix(self, prefix: str) -> None:
+        """Delete every object under the prefix, taken as a folder."""
+        s3 = self.get_s3_resource()
+        bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
+        bucket.objects.filter(Prefix=prefix.rstrip("/") + "/").delete()

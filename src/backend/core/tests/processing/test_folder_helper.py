@@ -348,3 +348,30 @@ def test_delete_file_removes_the_given_key(settings):
     mock_boto3.resource.return_value.meta.client.delete_object.assert_called_once_with(
         Bucket="my-bucket", Key="some-key.zip"
     )
+
+
+def test_put_object_stores_the_bytes_under_the_given_key(settings):
+    """put_object() stores in-memory content under the given key."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        ArchiveManager().put_object("archives/a/manifest.json", b"{}")
+
+    mock_s3 = mock_boto3.resource.return_value
+    mock_s3.Bucket.assert_called_once_with("my-bucket")
+    mock_s3.Bucket.return_value.put_object.assert_called_once_with(
+        Key="archives/a/manifest.json", Body=b"{}"
+    )
+
+
+def test_delete_prefix_removes_every_object_under_it(settings):
+    """delete_prefix() deletes the objects under the prefix, and only them:
+    the prefix is a folder, so "archives/a" does not match "archives/ab"."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        ArchiveManager().delete_prefix("archives/a")
+
+    objects = mock_boto3.resource.return_value.Bucket.return_value.objects
+    objects.filter.assert_called_once_with(Prefix="archives/a/")
+    objects.filter.return_value.delete.assert_called_once_with()
