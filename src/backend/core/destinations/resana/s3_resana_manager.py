@@ -1,5 +1,3 @@
-import os
-
 from django.conf import settings
 
 import boto3
@@ -7,7 +5,6 @@ import magic
 from celery.utils.log import get_task_logger
 
 from core.models import Workspace
-from core.processing.folder_creator import FolderCreator
 
 logger = get_task_logger(__name__)
 
@@ -40,16 +37,6 @@ class S3ResanaManager:
         """Delete every object under the prefix, taken as a folder."""
         bucket = self.get_s3_bucket()
         bucket.objects.filter(Prefix=prefix.rstrip("/") + "/").delete()
-
-    def list_bucket(self, bucket):
-        logger.info("Listing bucket %s ...", bucket.name)
-        for obj in bucket.objects.all():
-            logger.info(obj.key)
-
-    def list_bucket_prefix(self, bucket, prefix):
-        logger.info("Listing bucket %s with prefix %s ...", bucket.name, prefix)
-        for obj in bucket.objects.filter(Prefix=prefix):
-            logger.info(obj.key)
 
     def upload_validation(self, count, absolute_file_path):
         allowed = [
@@ -252,46 +239,3 @@ class S3ResanaManager:
             return False
 
         return True
-
-    def upload_folder(self, workspace: Workspace):
-        bucket = self.get_s3_bucket(workspace)
-        # We can't rely on bucket creation date because it's not available in OutScale;
-        # if bucket.creation_date is None:
-        #     raise Exception(f"Bucket {bucket_name} does not exist")  # pylint: disable=broad-exception-raised
-
-        folder_creator = FolderCreator()
-        path = folder_creator.get_workspace_path(workspace)
-        destination_path = self.get_destination_path(workspace)
-
-        logger.info("Deleting objects with prefix %s", destination_path)
-        bucket.objects.filter(Prefix=destination_path).delete()
-        logger.info("Listing %s after deletion ...", destination_path)
-        self.list_bucket_prefix(bucket, destination_path)
-
-        count = 0
-
-        for root, _dir, files in os.walk(path):
-            for name in files:
-                count += 1
-                relative_path = root.replace(path, "")
-                # lstrip is needed because os.path.join will ignore the first argument if it starts with os.sep
-                relative_file_path = os.path.join(
-                    destination_path, relative_path.lstrip(os.sep), name
-                )
-                absolute_file_path = os.path.join(root, name)
-
-                # if not self.upload_validation(count, absolute_file_path):
-                #     continue
-
-                logger.info(
-                    "(%s) Uploading %s to %s ....",
-                    count,
-                    absolute_file_path,
-                    relative_file_path,
-                )
-
-                bucket.upload_file(absolute_file_path, relative_file_path)
-
-        # self.list_bucket(bucket)
-
-        return destination_path

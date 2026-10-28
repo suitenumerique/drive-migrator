@@ -7,12 +7,9 @@ from django.utils.translation import gettext_lazy as _
 import requests
 from celery.utils.log import get_task_logger
 
-from core.destinations.resana.s3_resana_manager import S3ResanaManager
 from core.mails_manager import MailsManager
 from core.models import ResanaEmailMapping, User, Workspace
-from core.processing.folder_creator import FolderCreator
 from core.retrying_session import RetryingSession
-from core.utils import truncate_folder_and_file_names
 
 _REQUEST_TIMEOUT = 30
 # Creation POSTs are not retried: timing out while Resana still completes one
@@ -94,7 +91,7 @@ class ResanaBackend:
         get_logger().info("User found: %s", user)
         return user
 
-    def add_admin(self, workspace: Workspace, user):
+    def add_admin(self, workspace: Workspace, user_uuid: str):
         resana_id = workspace.get_destination_metadata("resana").get("id")
         if not resana_id:
             raise ValueError("Workspace not created in Resana")
@@ -104,7 +101,7 @@ class ResanaBackend:
             "post",
             "/api-workspaces/members",
             json={
-                "userUuid": user["uuid"],
+                "userUuid": user_uuid,
                 "workspaceUuid": resana_id,
                 "profileCode": "GESTIONNAIRE",
             },
@@ -120,33 +117,35 @@ class ResanaBackend:
         organizations = data["hydra:member"]
         return organizations
 
-    def create_workspace(self, workspace: Workspace, user: User):
+    def prepare_import(self, workspace: Workspace, user: User) -> dict:
+        """Check that Resana can receive the workspace, before any file is sent;
+        return what create_import() needs."""
         if workspace.get_destination_metadata("resana").get("id"):
             raise ValueError("Workspace already created in Resana")
 
-        # Fetch resana user to make sure it exists before proceeding to upload.
         resana_user = self.fetch_user(user)
         if not resana_user:
             raise ValueError(f"User {user.email} not found in Resana")
 
-        # Make sure folder and file name are not too long.
-        folder_creator = FolderCreator()
-        path = folder_creator.get_workspace_path(workspace)
-        truncate_folder_and_file_names(path)
-
-        # Upload folder to S3.
-        get_logger().info("Calling upload_folder ...")
-        s3_manager = S3ResanaManager()
-        upload_path = s3_manager.upload_folder(workspace)
-
-        # Get organization data.
         organization_uuid = self.get_destination_organization_uuid(user, workspace)
+        self.request("get", f"/organizations/{organization_uuid}")
+        return {
+            "user_uuid": resana_user["uuid"],
+            "organization_uuid": organization_uuid,
+        }
+
+    def create_import(
+        self,
+        workspace: Workspace,
+        user_uuid: str,
+        organization_uuid: str,
+        import_path: str,
+    ):
+        """Create the Resana workspace, administered by the user, and the job
+        importing the files stored under import_path."""
         get_logger().info(
             "Creating workspace inside organization %s ...", organization_uuid
         )
-        self.request("get", f"/organizations/{organization_uuid}")
-
-        # Create workspace.
         response = self.request(
             "post",
             "/workspaces",
@@ -161,28 +160,26 @@ class ResanaBackend:
         get_logger().info("Workspace creation data")
         get_logger().info(json.dumps(workspace_data, indent=2))
 
-        resana_id = workspace_data["uuid"]
-        workspace.set_destination_metadata("resana", {"id": resana_id})
+        resana_meta = dict(workspace.get_destination_metadata("resana"))
+        resana_meta["id"] = workspace_data["uuid"]
+        workspace.set_destination_metadata("resana", resana_meta)
         workspace.save()
 
-        # Add user as admin.
-        self.add_admin(workspace, resana_user)
+        self.add_admin(workspace, user_uuid)
 
-        # Create job.
         response = self.request(
             "post",
             "/jobs",
             json={
                 "type": "import",
-                "destinationWorkspaceUuid": resana_id,
-                "importPath": upload_path,
+                "destinationWorkspaceUuid": resana_meta["id"],
+                "importPath": import_path,
             },
         )
         get_logger().info("Job creation data")
         get_logger().info(json.dumps(response.json(), indent=2))
         job_data = response.json()
 
-        resana_meta = workspace.get_destination_metadata("resana")
         resana_meta["job_id"] = job_data["uuid"]
         workspace.set_destination_metadata("resana", resana_meta)
         workspace.save()
