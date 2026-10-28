@@ -12,6 +12,8 @@ and this project adheres to
 
 - Show the linked workspace and migration user in the Celery task result
   admin list view
+- Run gunicorn with threaded workers, so long streamed downloads are not
+  killed by its timeout #243
 
 #### Dependencies
 

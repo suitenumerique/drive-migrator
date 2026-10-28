@@ -7,6 +7,10 @@ python_path = "/app"
 graceful_timeout = 90
 timeout = 90
 workers = 3
+# Threaded workers keep notifying the arbiter while a request runs, so a long
+# streamed response (e.g. an archive download) is not killed by the timeout.
+worker_class = "gthread"
+threads = 8
 
 # Logging
 # Using '-' for the access log file makes gunicorn log accesses to stdout
