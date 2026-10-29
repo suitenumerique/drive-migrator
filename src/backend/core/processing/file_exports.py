@@ -1,6 +1,9 @@
 """Destinations receiving a run file by file, see exports_file_by_file."""
 
+from contextlib import contextmanager
+
 from django.conf import settings
+from django.db import transaction
 
 from celery.utils.log import get_task_logger
 
@@ -23,12 +26,30 @@ class _Session:
     def active(self) -> bool:
         return self.error is None and not self.closed
 
+    def merge(self, state: dict) -> None:
+        """Take in what the other tasks of the run saved: the failures count,
+        and an error or a closing, which are final."""
+        self.consecutive_failures = state.get("consecutive_failures", 0)
+        self.closed = self.closed or state.get("closed", False)
+        if self.error is None and state.get("error") is not None:
+            self.error = RuntimeError(state["error"])
+
+    def state(self) -> dict:
+        return {
+            "error": None if self.error is None else str(self.error),
+            "consecutive_failures": self.consecutive_failures,
+            "closed": self.closed,
+        }
+
 
 class FileExports:
     """
     Hand each downloaded file of a run to the file-by-file destinations, so that
     a destination failing never stops the others: an error it raises, or too
     many files failing in a row, only disables that destination.
+
+    The state of each destination is saved on the run, so that every task of
+    the run builds its own FileExports and carries on from there.
     """
 
     def __init__(
@@ -40,6 +61,7 @@ class FileExports:
         self.run = run
         self.user = user
         self.sessions = [_Session(destination) for destination in destinations]
+        self._merge(run.exports_state)
 
     def open(self) -> None:
         for session in self.sessions:
@@ -49,13 +71,19 @@ class FileExports:
                 self.user,
                 self.run,
             )
+        self._save()
 
     def put(self, migration_file: MigrationFile, local_path: str) -> None:
         """Send one downloaded file to every active destination, then save
         their results on its row in a single UPDATE."""
-        for session in self.sessions:
-            if not session.active:
-                continue
+        # Another task may have disabled a destination meanwhile.
+        self._merge(
+            MigrationRun.objects.values_list("exports_state", flat=True).get(
+                pk=self.run.pk
+            )
+        )
+        receiving = [session for session in self.sessions if session.active]
+        for session in receiving:
             self._call(
                 session,
                 session.destination.put_file,
@@ -64,10 +92,12 @@ class FileExports:
                 migration_file,
                 local_path,
             )
-            self._count_failure(session, migration_file)
-        MigrationFile.objects.filter(pk=migration_file.pk).update(
-            results=migration_file.results
-        )
+        with self._saving():
+            for session in receiving:
+                self._count_failure(session, migration_file)
+            MigrationFile.objects.filter(pk=migration_file.pk).update(
+                results=migration_file.results
+            )
 
     def close(self) -> dict[str, Exception]:
         """Close the destinations still active, abort the failed ones, and
@@ -81,6 +111,7 @@ class FileExports:
                     self.run,
                 )
                 session.closed = session.error is None
+        self._save()
         self.abort()
         return {
             session.destination.name: session.error
@@ -101,6 +132,40 @@ class FileExports:
                 logger.exception(
                     "Could not abort the %s export", session.destination.name
                 )
+        self._save()
+
+    def _merge(self, exports_state: dict) -> None:
+        for session in self.sessions:
+            session.merge(exports_state.get(session.destination.name, {}))
+
+    def _save(self) -> None:
+        if not self.sessions:
+            return
+        with self._saving():
+            pass
+
+    @contextmanager
+    def _saving(self):
+        """Update the sessions from the run's saved state, then save them back,
+        the run being locked in between so tasks running alongside queue up."""
+        with transaction.atomic():
+            exports_state = (
+                MigrationRun.objects.select_for_update()
+                .values_list("exports_state", flat=True)
+                .get(pk=self.run.pk)
+            )
+            self._merge(exports_state)
+            yield
+            self.run.exports_state = {
+                **exports_state,
+                **{
+                    session.destination.name: session.state()
+                    for session in self.sessions
+                },
+            }
+            MigrationRun.objects.filter(pk=self.run.pk).update(
+                exports_state=self.run.exports_state
+            )
 
     def _call(self, session: _Session, method, *args) -> None:
         try:

@@ -20,4 +20,9 @@ class Migration(migrations.Migration):
             name='mime_type',
             field=models.CharField(blank=True, default='', max_length=255),
         ),
+        migrations.AddField(
+            model_name='migrationrun',
+            name='exports_state',
+            field=models.JSONField(blank=True, default=dict),
+        ),
     ]

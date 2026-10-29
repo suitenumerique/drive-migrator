@@ -263,6 +263,8 @@ class MigrationRun(BaseModel):
     finish_published = models.BooleanField(default=False)
     # Destination state shared by the file tasks (e.g. Drive folder ids).
     destinations_state = models.JSONField(default=dict, blank=True)
+    # Each destination's error, failures in a row and closing, see FileExports.
+    exports_state = models.JSONField(default=dict, blank=True)
 
 
 class MigrationFile(BaseModel):

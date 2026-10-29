@@ -30,7 +30,7 @@ def migration_run():
         patch("core.processing.tasks.save_run_files_stats") as save_stats,
     ):
         create.side_effect = lambda workspace, task_id, plan: SimpleNamespace(
-            workspace=workspace
+            workspace=workspace, exports_state={}
         )
         yield SimpleNamespace(create=create, delete=delete, save_stats=save_stats)
 
