@@ -20,7 +20,6 @@ from core.backends.destination import (
     FileExportStatus,
 )
 from core.backends.source import (
-    AbstractSourceBackend,
     SourceFolder,
     SourceManager,
     SourceTokenExpired,
@@ -180,16 +179,17 @@ def export(self, data):  # pylint: disable=unused-argument
         try:
             plan = build_plan(folder)
             run = create_migration_run(workspace, self.request.id, plan)
-            _export_workspace(run, user, source_backend, integrity_tracker)
+            try:
+                _start_export(run, user, source_backend, integrity_tracker)
+                for migration_file in run.files.iterator():
+                    _export_file(run, user, source_backend, migration_file)
+            except BaseException:
+                _abort_export(run, user)
+                raise
+            _finish_export(run, user)
             run_failed = False
         finally:
-            # Before the task_success/task_failure handlers delete the local folder.
-            integrity_tracker.save(self.request.id, run_failed=run_failed)
-            if run is not None:
-                # Read from the run's rows, for the task handlers.
-                save_run_files_stats(self.request.id, run)
-                drop_unlinked_kept_files(run)
-            delete_migration_run(self.request.id)
+            _clean_up_run(self.request.id, run, integrity_tracker, run_failed)
     finally:
         logger.info("Calling finalize_export ...")
         source_backend.finalize_export(workspace)
@@ -199,42 +199,48 @@ def export(self, data):  # pylint: disable=unused-argument
     return True
 
 
-def _export_workspace(
-    run: MigrationRun,
-    user: User,
-    source_backend: AbstractSourceBackend,
-    integrity_tracker: IntegrityTracker,
-) -> None:
+def _start_export(run, user, source_backend, integrity_tracker):
+    """Open the run: fetch the members, open the destinations and prepare the
+    local folder."""
     workspace = run.workspace
     creator = FolderCreator()
-    local_path = creator.get_workspace_path(workspace)
     integrity_tracker.set_retrieval(run)
 
     # Before the downloads: the destinations need the members to close.
     logger.info("Calling prepare_export ...")
-    source_backend.prepare_export(workspace, local_path)
+    source_backend.prepare_export(workspace, creator.get_workspace_path(workspace))
 
     destinations = _pending_destinations(workspace)
     for destination in destinations:
         # Registered first so a destination that fails midway is still checked.
         integrity_tracker.add_exported_destination(destination)
-    file_exports = FileExports(run, user, destinations)
+    FileExports(run, user, destinations).open()
+    creator.prepare_folder(workspace, run)
 
+
+def _export_file(run, user, source_backend, migration_file):
+    """Download one file of the run and hand it to the destinations."""
+    workspace = run.workspace
+    destinations = _pending_destinations(workspace)
     try:
-        file_exports.open()
-        creator.prepare_folder(workspace, run)
-        handover = _file_handover(file_exports, destinations)
-        try:
-            for migration_file in run.files.iterator():
-                downloaded_path = creator.download_file(
-                    workspace, migration_file, source_backend
-                )
-                if downloaded_path is not None and handover is not None:
-                    handover(migration_file, downloaded_path)
-        except SourceTokenExpired:
-            # Also keep the files that failed before the token expired.
-            _save_download_errors(workspace, run)
-            raise
+        local_path = FolderCreator().download_file(
+            workspace, migration_file, source_backend
+        )
+    except SourceTokenExpired:
+        # The run stops: keep the files that failed before the token expired.
+        _save_download_errors(workspace, run)
+        raise
+    handover = _file_handover(FileExports(run, user, destinations), destinations)
+    if local_path is not None and handover is not None:
+        handover(migration_file, local_path)
+
+
+def _finish_export(run, user):
+    """Close the destinations once every file of the run is done; raise when
+    the run failed."""
+    workspace = run.workspace
+    file_exports = FileExports(run, user, _pending_destinations(workspace))
+    try:
         _check_downloads(workspace, run)
         list_workspace_dir(workspace)
     except BaseException:
@@ -246,6 +252,23 @@ def _export_workspace(
         raise RuntimeError(
             f"Export failed for {', '.join(failures)} on workspace {workspace.id}"
         ) from next(iter(failures.values()))
+
+
+def _abort_export(run, user):
+    """Leave no destination half open after a fatal run error."""
+    FileExports(run, user, _pending_destinations(run.workspace)).abort()
+
+
+def _clean_up_run(task_id, run, integrity_tracker, run_failed):
+    """Save what the task handlers read, then purge the working rows of the
+    run, whatever its outcome."""
+    # Before the task_success/task_failure handlers delete the local folder.
+    integrity_tracker.save(task_id, run_failed=run_failed)
+    if run is not None:
+        # Read from the run's rows, for the task handlers.
+        save_run_files_stats(task_id, run)
+        drop_unlinked_kept_files(run)
+    delete_migration_run(task_id)
 
 
 def _file_handover(
@@ -270,13 +293,12 @@ def _file_handover(
 
 
 def _pending_destinations(workspace: Workspace) -> list[AbstractDestinationBackend]:
-    destinations = []
-    for destination in DestinationRegistry.get_all():
-        status = workspace.get_destination_status(destination.name)
-        logger.info("%s status = %s", destination.name, status)
-        if status == Workspace.Status.PENDING:
-            destinations.append(destination)
-    return destinations
+    return [
+        destination
+        for destination in DestinationRegistry.get_all()
+        if workspace.get_destination_status(destination.name)
+        == Workspace.Status.PENDING
+    ]
 
 
 def _save_download_errors(workspace: Workspace, run: MigrationRun) -> list[dict]:
@@ -316,14 +338,15 @@ def create_task_result_on_publish(sender=None, headers=None, body=None, **kwargs
     )
 
 
-@task_success.connect
-def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
-    task_result = TaskResult.objects.filter(task_id=sender.request.id).first()
+def _extra_task_of(task_id):
+    task_result = TaskResult.objects.filter(task_id=task_id).first()
     if task_result is None:
-        return
-    extra_task = ExtraTaskInfo.objects.filter(task_result=task_result).first()
-    if extra_task is None:
-        return
+        return None
+    return ExtraTaskInfo.objects.filter(task_result=task_result).first()
+
+
+def on_export_success(extra_task: ExtraTaskInfo) -> None:
+    """Record a successful run and delete its local folder."""
     workspace = extra_task.workspace
     workspace.save()
     capture_migration_finished(extra_task, "success")
@@ -331,14 +354,11 @@ def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
     cleanup_workspace_dir(workspace)
 
 
-@task_failure.connect
-def task_failure(sender=None, **kwargs):
-    task_result = TaskResult.objects.filter(task_id=sender.request.id).first()
-    if task_result is None:
-        return
-    extra_task = ExtraTaskInfo.objects.filter(task_result=task_result).first()
-    if extra_task is None:
-        return
+def on_export_failure(
+    extra_task: ExtraTaskInfo, exception: BaseException | None = None
+) -> None:
+    """Mark the destinations still pending as failed, delete the local folder
+    of the run and tell the user."""
     workspace = extra_task.workspace
 
     for dest_name, status in workspace.destination_statuses.items():
@@ -353,5 +373,19 @@ def task_failure(sender=None, **kwargs):
     mail_manager.send_fail_mail(
         extra_task.user,
         workspace,
-        source_token_expired=isinstance(kwargs.get("exception"), SourceTokenExpired),
+        source_token_expired=isinstance(exception, SourceTokenExpired),
     )
+
+
+@task_success.connect
+def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
+    extra_task = _extra_task_of(sender.request.id)
+    if extra_task is not None:
+        on_export_success(extra_task)
+
+
+@task_failure.connect
+def task_failure(sender=None, **kwargs):
+    extra_task = _extra_task_of(sender.request.id)
+    if extra_task is not None:
+        on_export_failure(extra_task, kwargs.get("exception"))

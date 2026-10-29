@@ -3,7 +3,7 @@
 # pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
 
 from types import SimpleNamespace
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
@@ -462,7 +462,8 @@ def test_export_calls_each_pending_destination():
         _saved_workspace("archive", "resana"), user, [dest_archive, dest_resana]
     )
 
-    exports_cls.assert_called_once_with(ANY, user, [dest_archive, dest_resana])
+    # Built by the start of the run, then its finish.
+    assert exports_cls.call_args_list == [call(ANY, user, [dest_archive, dest_resana])] * 2
 
 
 @pytest.mark.django_db
@@ -481,7 +482,8 @@ def test_export_skips_non_pending_destinations():
         workspace, user, [dest_archive, dest_resana]
     )
 
-    exports_cls.assert_called_once_with(ANY, user, [dest_resana])
+    # Built by the start of the run, then its finish.
+    assert exports_cls.call_args_list == [call(ANY, user, [dest_resana])] * 2
 
 
 # ---------------------------------------------------------------------------
@@ -556,7 +558,8 @@ def test_export_streams_files_to_file_by_file_destinations(tmp_path, migration_r
             _saved_workspace("drive"), user, [drive], downloaded_path=str(local_file)
         )
 
-    exports_cls.assert_called_once_with(ANY, user, [drive])
+    # Built by the start of the run, its file, then its finish.
+    assert exports_cls.call_args_list == [call(ANY, user, [drive])] * 3
     exports = exports_cls.return_value
     exports.open.assert_called_once_with()
     exports.close.assert_called_once_with()
