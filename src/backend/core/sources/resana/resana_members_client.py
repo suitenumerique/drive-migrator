@@ -23,7 +23,15 @@ GESTIONNAIRE_CODE = "GESTIONNAIRE"
 # Role badge labels, as shown in the workspace page header.
 ANIMATEUR_LABEL = "Animateur"
 ROLE_LABELS = {ANIMATEUR_LABEL, "Contributeur", "Lecteur"}
-_ROLE_BADGE_RE = re.compile(r"ic-layout-header__user-status[^>]*>\s*([^<]*?)\s*<")
+# The redesigned header puts the role in a "Rôle dans l’espace" tooltip, the former
+# one in a status paragraph. Both are still served, depending on the instance.
+_ROLE_BADGE_RES = (
+    re.compile(
+        r'tooltip-title="R(?:ô|&ocirc;|&#244;)le dans l[^"]*?espace"[^>]*>'
+        r"\s*<span[^>]*>\s*([^<]*?)\s*<"
+    ),
+    re.compile(r"ic-layout-header__user-status[^>]*>\s*([^<]*?)\s*<"),
+)
 
 
 class ResanaMembersClient:
@@ -118,10 +126,11 @@ class ResanaMembersClient:
         resp.raise_for_status()
         if resp.status_code != 200:
             return None
-        match = _ROLE_BADGE_RE.search(resp.text)
-        if match is None:
-            return None
-        return html.unescape(match.group(1)) or None
+        for badge_re in _ROLE_BADGE_RES:
+            match = badge_re.search(resp.text)
+            if match is not None:
+                return html.unescape(match.group(1)) or None
+        return None
 
     def _fetch_raw_members(self, slug: str) -> list[dict]:
         """Return the raw listerUtilisateurByPerimetreAndGroupe payload.

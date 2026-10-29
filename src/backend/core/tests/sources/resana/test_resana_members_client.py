@@ -609,6 +609,73 @@ def test_get_own_role_label_returns_none_on_redirect():
     assert client.get_own_role_label(SLUG) is None
 
 
+# Header of the redesigned portal, where the role sits in a tooltip.
+_TOOLTIP_CONSULTER_PAGE_TEMPLATE = """
+<cl-header-sr show-search="">
+    <div slot="header-title" class="cl-header-workspace-wrapper">
+        <cl-tooltip-sr tooltip-title="Paramétrages de l’espace" placement="right">
+            <button id="cl-header-workspace-administration" data-visible="false">
+                <i class="ph-bold ph-gear"></i>
+            </button>
+        </cl-tooltip-sr>
+        <cl-tooltip-sr tooltip-title="{title}" placement="right" open-delay="0">
+            <span class="cl-content-body-s cl-weight-medium">{label}</span>
+        </cl-tooltip-sr>
+    </div>
+</cl-header-sr>
+"""
+
+
+@pytest.mark.parametrize("label", ["Animateur", "Contributeur", "Lecteur"])
+def test_get_own_role_label_returns_tooltip_badge(label):
+    """get_own_role_label() returns the role shown in the redesigned header's tooltip."""
+    client = _make_client()
+    client.session.get.return_value.text = _TOOLTIP_CONSULTER_PAGE_TEMPLATE.format(
+        title="Rôle dans l’espace", label=label
+    )
+
+    assert client.get_own_role_label(SLUG) == label
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Rôle dans l'espace",
+        "Rôle dans l&rsquo;espace",
+        "Rôle dans l&#8217;espace",
+        "R&ocirc;le dans l&#39;espace",
+    ],
+)
+def test_get_own_role_label_accepts_tooltip_title_spellings(title):
+    """get_own_role_label() matches the role tooltip whatever the apostrophe or accent encoding."""
+    client = _make_client()
+    client.session.get.return_value.text = _TOOLTIP_CONSULTER_PAGE_TEMPLATE.format(
+        title=title, label="Animateur"
+    )
+
+    assert client.get_own_role_label(SLUG) == "Animateur"
+
+
+def test_get_own_role_label_returns_none_for_empty_tooltip_badge():
+    """get_own_role_label() returns None when the role tooltip has no text."""
+    client = _make_client()
+    client.session.get.return_value.text = _TOOLTIP_CONSULTER_PAGE_TEMPLATE.format(
+        title="Rôle dans l’espace", label=""
+    )
+
+    assert client.get_own_role_label(SLUG) is None
+
+
+def test_get_own_role_label_unescapes_tooltip_badge():
+    """get_own_role_label() decodes HTML entities in the role tooltip text."""
+    client = _make_client()
+    client.session.get.return_value.text = _TOOLTIP_CONSULTER_PAGE_TEMPLATE.format(
+        title="Rôle dans l’espace", label="Anim&#97;teur"
+    )
+
+    assert client.get_own_role_label(SLUG) == "Animateur"
+
+
 # ---------------------------------------------------------------------------
 # Retry on transient errors, through the real RetryingSession
 # ---------------------------------------------------------------------------
