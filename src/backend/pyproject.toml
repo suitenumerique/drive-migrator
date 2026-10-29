@@ -76,7 +76,7 @@ dev = [
     "ipython==8.18.1",
     "pyfakefs==5.3.2",
     "pylint-django==2.5.5",
-    "pylint==3.0.3",
+    "pylint==4.0.9",
     "pytest-cov==4.1.0",
     "pytest-django==4.7.0",
     "pytest-icdiff==0.8",
