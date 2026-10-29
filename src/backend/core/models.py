@@ -265,6 +265,8 @@ class MigrationRun(BaseModel):
     destinations_state = models.JSONField(default=dict, blank=True)
     # Each destination's error, failures in a row and closing, see FileExports.
     exports_state = models.JSONField(default=dict, blank=True)
+    # Source files and destinations of the integrity report, see IntegrityTracker.
+    integrity_state = models.JSONField(default=dict, blank=True)
 
 
 class MigrationFile(BaseModel):

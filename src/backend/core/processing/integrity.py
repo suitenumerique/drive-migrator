@@ -6,6 +6,7 @@ from enum import StrEnum
 
 from celery.utils.log import get_task_logger
 
+from core.backends.destination import DestinationRegistry
 from core.backends.source import SourceFolder
 from core.models import (
     ExtraTaskInfo,
@@ -124,11 +125,43 @@ class IntegrityTracker:
                 file["source_id"] for file in snapshot_source_files(truncated_folder)
             }
 
+    @classmethod
+    def from_run(cls, run: MigrationRun) -> "IntegrityTracker":
+        """The tracker whose state set_retrieval() saved on the run, for a task
+        other than the one that planned it."""
+        state = run.integrity_state
+        tracker = cls.__new__(cls)
+        tracker.workspace = run.workspace
+        tracker.enabled = bool(state)
+        tracker.source_files = state.get("source_files", [])
+        tracker.kept_source_ids = set(state.get("kept_source_ids", []))
+        tracker.run = run
+        tracker.exported_destinations = [
+            DestinationRegistry.get(name) for name in state.get("destinations", [])
+        ]
+        return tracker
+
     def set_retrieval(self, run: MigrationRun) -> None:
         self.run = run
+        self._save_state()
 
     def add_exported_destination(self, destination) -> None:
         self.exported_destinations.append(destination)
+        self._save_state()
+
+    def _save_state(self) -> None:
+        if not self.enabled or self.run is None:
+            return
+        self.run.integrity_state = {
+            "source_files": self.source_files,
+            "kept_source_ids": sorted(self.kept_source_ids),
+            "destinations": [
+                destination.name for destination in self.exported_destinations
+            ],
+        }
+        MigrationRun.objects.filter(pk=self.run.pk).update(
+            integrity_state=self.run.integrity_state
+        )
 
     def save(self, task_id: str, run_failed: bool) -> None:
         """Build and save the report. Never raises: the check must neither fail

@@ -1,14 +1,20 @@
 """Tests for the migration integrity check."""
 
 import os
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django_celery_results.models import TaskResult
 
 from core.backends.source import SourceFile, SourceFolder, truncate_folder_files
 from core.factories import UserFactory, WorkspaceFactory
-from core.models import ExtraTaskInfo, FeatureFlag, MigrationFile, Workspace
+from core.models import (
+    ExtraTaskInfo,
+    FeatureFlag,
+    MigrationFile,
+    MigrationRun,
+    Workspace,
+)
 from core.processing.integrity import (
     IntegrityTracker,
     build_integrity_report,
@@ -651,3 +657,80 @@ def test_tracker_without_extra_task_does_not_raise():
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
 
     _tracker(workspace).save("unknown-task", run_failed=False)
+
+
+@pytest.mark.django_db
+def test_tracker_saves_its_state_on_the_run():
+    """What the report needs is on the run, for the task that finishes it."""
+    workspace = WorkspaceFactory(is_file_integrity_tracked=True)
+    folder = SourceFolder(
+        name="root", files=[_source_file("f1", "a"), _source_file("f2", "b")]
+    )
+    tracker = IntegrityTracker(workspace, folder)
+    truncate_folder_files(folder, 1)
+    tracker.set_kept_files(folder)
+    run = _downloaded_run(workspace, folder)
+    tracker.set_retrieval(run)
+    tracker.add_exported_destination(_destination("drive"))
+
+    run.refresh_from_db()
+    assert run.integrity_state == {
+        "source_files": [
+            {"source_id": "f1", "source_path": "a.txt"},
+            {"source_id": "f2", "source_path": "b.txt"},
+        ],
+        "kept_source_ids": ["f1"],
+        "destinations": ["drive"],
+    }
+
+
+@pytest.mark.django_db
+def test_tracker_saves_nothing_on_the_run_when_tracking_is_disabled():
+    """Without tracking, the run keeps an empty state."""
+    workspace = WorkspaceFactory(is_file_integrity_tracked=False)
+
+    tracker = _tracker(workspace, destinations=[_destination("drive")])
+
+    tracker.run.refresh_from_db()
+    assert tracker.run.integrity_state == {}
+
+
+@pytest.mark.django_db
+def test_tracker_rebuilt_from_the_run_saves_the_same_report():
+    """A tracker read back from the run reports like the one that filled it."""
+    workspace = WorkspaceFactory(is_file_integrity_tracked=True)
+    extra_task = _extra_task(workspace)
+    folder = SourceFolder(
+        name="root", files=[_source_file("f1", "a"), _source_file("f2", "b")]
+    )
+    drive = _destination("drive", {"files": {"a.txt": _drive_ok()}, "extra": []})
+    tracker = IntegrityTracker(workspace, folder)
+    truncate_folder_files(folder, 1)
+    tracker.set_kept_files(folder)
+    run = _downloaded_run(workspace, folder)
+    tracker.set_retrieval(run)
+    tracker.add_exported_destination(drive)
+
+    with patch(
+        "core.processing.integrity.DestinationRegistry.get", return_value=drive
+    ) as get_destination:
+        rebuilt = IntegrityTracker.from_run(MigrationRun.objects.get(pk=run.pk))
+    rebuilt.save("task-1", run_failed=False)
+
+    get_destination.assert_called_once_with("drive")
+    extra_task.refresh_from_db()
+    stages = {
+        row["source_id"]: row["stage"] for row in extra_task.integrity_report["files"]
+    }
+    assert stages == {"f1": "ok", "f2": "truncated"}
+    assert extra_task.integrity_check_passed is True
+
+
+@pytest.mark.django_db
+def test_tracker_rebuilt_from_the_run_is_disabled_without_state():
+    """A run saved without tracking gives a tracker that does nothing."""
+    workspace = WorkspaceFactory(is_file_integrity_tracked=True)
+    folder = SourceFolder(name="root", files=[_source_file("f1", "a")])
+    run = _downloaded_run(workspace, folder)
+
+    assert IntegrityTracker.from_run(run).enabled is False
