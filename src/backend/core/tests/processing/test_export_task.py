@@ -37,12 +37,20 @@ def migration_run():
         patch("core.processing.tasks.delete_migration_run") as delete,
         patch("core.processing.tasks.save_run_files_stats") as save_stats,
         patch("core.processing.tasks.drop_unlinked_kept_files") as drop_kept,
+        patch("core.processing.tasks.failed_downloads", return_value=[]) as failed,
     ):
+        files = MagicMock()
+        files.count.return_value = 0
         create.side_effect = lambda workspace, task_id, plan: SimpleNamespace(
-            workspace=workspace, exports_state={}
+            workspace=workspace, exports_state={}, files=files
         )
         yield SimpleNamespace(
-            create=create, delete=delete, save_stats=save_stats, drop_kept=drop_kept
+            create=create,
+            delete=delete,
+            save_stats=save_stats,
+            drop_kept=drop_kept,
+            failed=failed,
+            files=files,
         )
 
 
@@ -250,7 +258,6 @@ def test_export_calls_prepare_export_before_downloading():
         creator.create_folder.side_effect = lambda *args, **kwargs: calls.append(
             "download"
         )
-        creator.failed_files = []
 
     source_backend, creator = _run_export_with_creator(
         workspace,
@@ -268,9 +275,10 @@ def test_export_calls_prepare_export_before_downloading():
     assert calls == ["prepare", "download"]
 
 
-def test_export_persists_download_errors_on_workspace(workspace, user):
-    """export() persists FolderCreator.failed_files onto the workspace's download_errors."""
+def test_export_persists_download_errors_on_workspace(workspace, user, migration_run):
+    """export() persists the run's failed downloads onto the workspace's download_errors."""
     failed_files = [{"name": "broken.docx", "error": "403 Forbidden"}]
+    migration_run.failed.return_value = failed_files
     with (
         patch("core.models.Workspace.objects.get", return_value=workspace),
         patch("core.models.User.objects.get", return_value=user),
@@ -282,7 +290,6 @@ def test_export_persists_download_errors_on_workspace(workspace, user):
             name="root"
         )
         mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
-        mock_fc.return_value.failed_files = failed_files
         mock_dr.get_all.return_value = []
 
         export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
@@ -292,7 +299,7 @@ def test_export_persists_download_errors_on_workspace(workspace, user):
 
 
 def test_export_keeps_earlier_download_errors_when_the_source_token_expires(
-    workspace, user
+    workspace, user, migration_run
 ):
     """An expired source token stops the run with that error, so the user is
     asked to log in again, and keeps the files that failed before it."""
@@ -300,6 +307,7 @@ def test_export_keeps_earlier_download_errors_when_the_source_token_expires(
         {"name": "doc0.pdf", "error": "504 Gateway Timeout"},
         {"name": "doc1.pdf", "error": "Resana offline token is no longer valid."},
     ]
+    migration_run.failed.return_value = failed_files
     with (
         patch("core.models.Workspace.objects.get", return_value=workspace),
         patch("core.models.User.objects.get", return_value=user),
@@ -314,7 +322,6 @@ def test_export_keeps_earlier_download_errors_when_the_source_token_expires(
         mock_fc.return_value.create_folder.side_effect = ResanaTokenExpired(
             "Resana offline token is no longer valid."
         )
-        mock_fc.return_value.failed_files = failed_files
         mock_dr.get_all.return_value = []
 
         with pytest.raises(ResanaTokenExpired):
@@ -380,9 +387,6 @@ def test_export_does_not_save_download_errors_when_all_files_succeed(
             name="root"
         )
         mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
-        mock_fc.return_value.failed_files = []
-        mock_fc.return_value.files_count = 1
-        mock_fc.return_value.files_success = 1
         mock_dr.get_all.return_value = []
 
         export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
@@ -390,10 +394,15 @@ def test_export_does_not_save_download_errors_when_all_files_succeed(
     workspace.save.assert_not_called()
 
 
-def test_export_saves_download_errors_with_update_fields(workspace, user, settings):
+def test_export_saves_download_errors_with_update_fields(
+    workspace, user, settings, migration_run
+):
     """export() saves download_errors with update_fields=["download_errors"] only."""
     settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE = 0
-    failed_files = [{"name": "broken.docx", "error": "403 Forbidden"}]
+    migration_run.failed.return_value = [
+        {"name": "broken.docx", "error": "403 Forbidden"}
+    ]
+    migration_run.files.count.return_value = 2
     with (
         patch("core.models.Workspace.objects.get", return_value=workspace),
         patch("core.models.User.objects.get", return_value=user),
@@ -405,9 +414,6 @@ def test_export_saves_download_errors_with_update_fields(workspace, user, settin
             name="root"
         )
         mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
-        mock_fc.return_value.failed_files = failed_files
-        mock_fc.return_value.files_count = 2
-        mock_fc.return_value.files_success = 1
         mock_dr.get_all.return_value = []
 
         export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
@@ -415,13 +421,14 @@ def test_export_saves_download_errors_with_update_fields(workspace, user, settin
     workspace.save.assert_called_once_with(update_fields=["download_errors"])
 
 
-def test_export_fails_when_all_downloads_fail(workspace, user):
+def test_export_fails_when_all_downloads_fail(workspace, user, migration_run):
     """export() raises instead of returning True when every download failed,
     and no destination is closed."""
-    failed_files = [
+    migration_run.failed.return_value = [
         {"name": "a.docx", "error": "boom"},
         {"name": "b.docx", "error": "boom"},
     ]
+    migration_run.files.count.return_value = 2
     with (
         patch("core.processing.tasks.FileExports") as exports_cls,
         patch("core.models.Workspace.objects.get", return_value=workspace),
@@ -434,9 +441,6 @@ def test_export_fails_when_all_downloads_fail(workspace, user):
             name="root"
         )
         mock_fc.return_value.create_folder.return_value = "/tmp/ws-1"
-        mock_fc.return_value.failed_files = failed_files
-        mock_fc.return_value.files_count = 2
-        mock_fc.return_value.files_success = 0
         mock_dr.get_all.return_value = [_destination("archive")]
 
         with pytest.raises(RuntimeError):
@@ -503,12 +507,8 @@ def _run_file_by_file_export(workspace, user, dest_backends, failures=None):
     return exports_cls, creator
 
 
-def _no_failed_download(creator):
-    creator.failed_files = []
-
-
 def _run_export_with_creator(
-    workspace, user, dest_backends, setup_creator=_no_failed_download, setup_source=None
+    workspace, user, dest_backends, setup_creator=None, setup_source=None
 ):
     """Run export() for a saved workspace and user, with the creator (and
     source) set up by the caller; return (source backend, creator)."""
@@ -521,7 +521,8 @@ def _run_export_with_creator(
         source_backend.get_workspace_structure.return_value = SourceFolder(name="root")
         if setup_source:
             setup_source(source_backend)
-        setup_creator(mock_fc.return_value)
+        if setup_creator:
+            setup_creator(mock_fc.return_value)
         mock_dr.get_all.return_value = dest_backends
 
         export({"workspace": {"id": workspace.id}, "user": {"id": user.id}})  # pylint: disable=no-value-for-parameter
@@ -588,15 +589,14 @@ def test_export_fails_when_a_destination_failed():
     assert isinstance(raised.value.__cause__, ValueError)
 
 
-def _disk_full(creator):
+def _disk_full(creator, _migration_run):
     creator.create_folder.side_effect = OSError("disk full")
 
 
-def _every_download_failed(creator):
+def _every_download_failed(creator, migration_run):
     creator.create_folder.return_value = "/tmp/ws-1"
-    creator.failed_files = [{"id": "f1", "error": "403"}]
-    creator.files_count = 1
-    creator.files_success = 0
+    migration_run.failed.return_value = [{"id": "f1", "error": "403"}]
+    migration_run.files.count.return_value = 1
 
 
 @pytest.mark.parametrize(
@@ -605,7 +605,7 @@ def _every_download_failed(creator):
 )
 @pytest.mark.django_db
 def test_export_aborts_file_by_file_destinations_when_the_run_fails(
-    setup_creator, error
+    migration_run, setup_creator, error
 ):
     """A run failing before the end leaves no destination half open."""
     with (
@@ -616,7 +616,7 @@ def test_export_aborts_file_by_file_destinations_when_the_run_fails(
             _saved_workspace("drive"),
             UserFactory(),
             [_destination("drive")],
-            setup_creator,
+            lambda creator: setup_creator(creator, migration_run),
         )
 
     exports_cls.return_value.abort.assert_called_once_with()
@@ -634,9 +634,7 @@ def mock_tracker_cls():
         yield tracker_cls
 
 
-def _run_export_with_tracker(
-    workspace, user, dest_backends, setup_creator=None, failures=None
-):
+def _run_export_with_tracker(workspace, user, dest_backends, failures=None):
     """Run export() with standard mocks; return (creator, source folder)."""
     folder = SourceFolder(name="root")
     with (
@@ -650,9 +648,6 @@ def _run_export_with_tracker(
         mock_sm.return_value.get_backend.return_value.get_workspace_structure.return_value = folder
         creator = mock_fc.return_value
         creator.create_folder.return_value = "/tmp/ws-1"
-        creator.failed_files = []
-        if setup_creator:
-            setup_creator(creator)
         mock_dr.get_all.return_value = dest_backends
         exports_cls.return_value.close.return_value = failures or {}
 
@@ -699,17 +694,16 @@ def test_export_saves_integrity_report_when_a_destination_fails(
 
 
 def test_export_saves_integrity_report_when_all_downloads_fail(
-    workspace, user, mock_tracker_cls
+    workspace, user, mock_tracker_cls, migration_run
 ):
     """The report is also saved when the run stops during retrieval."""
-
-    def all_downloads_failed(creator):
-        creator.failed_files = [{"id": "f1", "name": "a", "path": "a", "error": "x"}]
-        creator.files_count = 1
-        creator.files_success = 0
+    migration_run.failed.return_value = [
+        {"id": "f1", "name": "a", "path": "a", "error": "x"}
+    ]
+    migration_run.files.count.return_value = 1
 
     with pytest.raises(RuntimeError, match="failed to download"):
-        _run_export_with_tracker(workspace, user, [], all_downloads_failed)
+        _run_export_with_tracker(workspace, user, [])
 
     mock_tracker_cls.return_value.save.assert_called_once_with(ANY, run_failed=True)
 

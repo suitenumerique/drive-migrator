@@ -112,6 +112,27 @@ def download_migration_file(
         raise token_expired
 
 
+def failed_downloads(run: MigrationRun) -> list[dict]:
+    """The files of the run that did not reach the local disk, refused ones
+    included, as Workspace.download_errors lists them."""
+    return [
+        {
+            "id": source["id"],
+            "name": source["name"] + source["extension"],
+            "path": path,
+            "error": error,
+        }
+        for source, path, error in run.files.filter(
+            status__in=[
+                MigrationFile.Status.DOWNLOAD_FAILED,
+                MigrationFile.Status.NOT_WRITTEN,
+            ]
+        )
+        .order_by("position")
+        .values_list("source", "path", "error")
+    ]
+
+
 def delete_migration_run(task_id: str) -> None:
     """Purge the working rows of a run, its files included."""
     MigrationRun.objects.filter(task_id=task_id).delete()

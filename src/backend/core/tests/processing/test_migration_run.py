@@ -12,6 +12,7 @@ from core.processing.migration_run import (
     create_migration_run,
     delete_migration_run,
     download_migration_file,
+    failed_downloads,
 )
 from core.processing.plan import build_plan
 
@@ -197,3 +198,32 @@ def test_delete_migration_run_purges_the_run_and_its_files():
 def test_delete_migration_run_is_safe_when_there_is_none():
     """A task that failed before creating its run has nothing to purge."""
     delete_migration_run("unknown-task")  # must not raise
+
+
+def test_failed_downloads_lists_the_files_that_did_not_reach_the_disk():
+    """Refused, failed and unwritten files are listed in the plan order, as
+    Workspace.download_errors keeps them."""
+    escaping = SourceFile(id="f4", name="..", extension="", download_url="x")
+    run = _run_with_files(
+        _source("f1", "a"), _source("f2", "b"), _source("f3", "c"), escaping
+    )
+    run.files.filter(path="a.txt").update(status=MigrationFile.Status.DOWNLOADED)
+    run.files.filter(path="b.txt").update(
+        status=MigrationFile.Status.DOWNLOAD_FAILED, error="403"
+    )
+    run.files.filter(path="c.txt").update(
+        status=MigrationFile.Status.NOT_WRITTEN, error="no file"
+    )
+
+    failed = failed_downloads(run)
+
+    assert [error["id"] for error in failed] == ["f2", "f3", "f4"]
+    assert failed[0] == {"id": "f2", "name": "b.txt", "path": "b.txt", "error": "403"}
+
+
+def test_failed_downloads_is_empty_when_every_file_was_downloaded():
+    """A run without loss has no download error."""
+    run = _run_with_files(_source("f1", "a"))
+    run.files.update(status=MigrationFile.Status.DOWNLOADED)
+
+    assert not failed_downloads(run)

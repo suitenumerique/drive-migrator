@@ -31,7 +31,11 @@ from core.models import ExtraTaskInfo, MigrationFile, MigrationRun, User, Worksp
 from core.processing.file_exports import FileExports
 from core.processing.folder_creator import FolderCreator
 from core.processing.integrity import IntegrityTracker, Stage
-from core.processing.migration_run import create_migration_run, delete_migration_run
+from core.processing.migration_run import (
+    create_migration_run,
+    delete_migration_run,
+    failed_downloads,
+)
 from core.processing.plan import build_plan
 from core.processing.rejected_files import (
     RejectedFilesArchive,
@@ -228,9 +232,9 @@ def _export_workspace(
             )
         except SourceTokenExpired:
             # Also keep the files that failed before the token expired.
-            _save_download_errors(workspace, creator)
+            _save_download_errors(workspace, run)
             raise
-        _check_downloads(workspace, creator)
+        _check_downloads(workspace, run)
         list_workspace_dir(workspace)
     except BaseException:
         file_exports.abort()
@@ -274,24 +278,21 @@ def _pending_destinations(workspace: Workspace) -> list[AbstractDestinationBacke
     return destinations
 
 
-def _save_download_errors(workspace: Workspace, creator: FolderCreator) -> None:
-    if creator.failed_files:
-        workspace.download_errors = creator.failed_files
+def _save_download_errors(workspace: Workspace, run: MigrationRun) -> list[dict]:
+    failed = failed_downloads(run)
+    if failed:
+        workspace.download_errors = failed
         workspace.save(update_fields=["download_errors"])
-        logger.warning(
-            "%s file(s) failed to download: %s",
-            len(creator.failed_files),
-            creator.failed_files,
-        )
+        logger.warning("%s file(s) failed to download: %s", len(failed), failed)
+    return failed
 
 
-def _check_downloads(workspace: Workspace, creator: FolderCreator) -> None:
+def _check_downloads(workspace: Workspace, run: MigrationRun) -> None:
     """Keep the failed downloads on the workspace; fail when none succeeded."""
-    _save_download_errors(workspace, creator)
-
-    if creator.files_count and creator.files_success == 0:
+    failed = _save_download_errors(workspace, run)
+    if failed and len(failed) == run.files.count():
         raise RuntimeError(
-            f"All {creator.files_count} file(s) failed to download for "
+            f"All {len(failed)} file(s) failed to download for "
             f"workspace {workspace.id}"
         )
 
