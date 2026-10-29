@@ -15,4 +15,9 @@ class Migration(migrations.Migration):
             name='integrity_state',
             field=models.JSONField(blank=True, default=dict),
         ),
+        migrations.AddField(
+            model_name='migrationfile',
+            name='expected_size',
+            field=models.BigIntegerField(blank=True, null=True),
+        ),
     ]

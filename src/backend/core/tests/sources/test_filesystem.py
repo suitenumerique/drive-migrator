@@ -85,7 +85,7 @@ def test_get_workspaces_returns_empty_when_no_user(settings, tmp_path):
     (tmp_path / "a_workspace").mkdir()
     settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
     fs_backend = FileSystemSourceBackend()
-    assert fs_backend.get_workspaces(user=None) == []
+    assert not fs_backend.get_workspaces(user=None)
 
 
 def test_get_workspaces_returns_empty_when_no_user_directory(settings, tmp_path):
@@ -95,7 +95,7 @@ def test_get_workspaces_returns_empty_when_no_user_directory(settings, tmp_path)
     (tmp_path / "WS-A").mkdir()
     settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
     fs_backend = FileSystemSourceBackend()
-    assert fs_backend.get_workspaces(user=user) == []
+    assert not fs_backend.get_workspaces(user=user)
 
 
 def test_get_workspace_structure_flat(backend, user):
@@ -110,6 +110,7 @@ def test_get_workspace_structure_flat(backend, user):
     assert len(root.files) == 1
     assert root.files[0].name == "fichier"
     assert root.files[0].extension == ".txt"
+    assert root.files[0].size == len(b"text content")
 
 
 def test_get_workspace_structure_nested(backend, user):

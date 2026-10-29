@@ -67,6 +67,18 @@ def test_create_migration_run_stores_the_plan():
     ]
 
 
+def test_create_migration_run_stores_the_size_the_source_expects():
+    """Each row keeps the size given by the source, None when it gives none."""
+    sized = SourceFile(id="f1", name="a", extension=".txt", download_url="x", size=12)
+
+    run = _run_with_files(sized, _source("f2", "b"))
+
+    assert list(run.files.values_list("path", "expected_size")) == [
+        ("a.txt", 12),
+        ("b.txt", None),
+    ]
+
+
 def test_create_migration_run_stores_refused_files_as_failed():
     """A file refused by the plan gets a failed row, and is not left to
     download."""

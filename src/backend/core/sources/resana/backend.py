@@ -389,6 +389,8 @@ class ResanaSourceBackend(AbstractSourceBackend):
                     extension=extension,
                     download_url=raw_file["uuid"],
                     raw_data=raw_file,
+                    # Rounded to 0.01 MiB by Resana.
+                    size=raw_file.get("size"),
                 )
             )
         return folder

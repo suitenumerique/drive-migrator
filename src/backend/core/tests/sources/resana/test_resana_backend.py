@@ -651,6 +651,7 @@ def test_get_workspace_structure_stores_migration_user(settings):
 
 
 def test_get_workspace_structure_flat_folder(settings):
+    """Each file keeps its id, name, extension and the size explore gives."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     workspace = _make_workspace()
 
@@ -660,7 +661,12 @@ def test_get_workspace_structure_flat_folder(settings):
                 {
                     "folders": [{"uuid": "folder-1", "name": "Documents"}],
                     "files": [
-                        {"uuid": "file-1", "name": "readme", "extension": ".txt"}
+                        {
+                            "uuid": "file-1",
+                            "name": "readme",
+                            "extension": ".txt",
+                            "size": 10486,
+                        }
                     ],
                 }
             ]
@@ -681,6 +687,7 @@ def test_get_workspace_structure_flat_folder(settings):
     assert f.name == "readme"
     assert f.extension == ".txt"
     assert f.download_url == "file-1"
+    assert f.size == 10486
 
 
 def test_get_workspace_structure_unescapes_html_entities_in_names(settings):
@@ -751,6 +758,8 @@ def test_get_workspace_structure_normalises_extension_without_dot(settings):
             result = ResanaSourceBackend().get_workspace_structure(workspace)
 
     assert result.files[0].extension == ".jpg"
+    # No size given by explore.
+    assert result.files[0].size is None
 
 
 def test_get_workspace_structure_recurses_into_subfolders(settings):

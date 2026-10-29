@@ -23,6 +23,8 @@ class SourceFile:
     extension: str  # With leading dot, e.g. ".pdf", or ""
     download_url: str  # Opaque URL or path — passed back to backend.download_file()
     raw_data: dict = field(default_factory=dict)
+    # In bytes as the source announces it, maybe approximate; None when unknown.
+    size: int | None = None
 
     @property
     def name_with_extension(self) -> str:

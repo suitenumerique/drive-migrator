@@ -292,6 +292,8 @@ class MigrationFile(BaseModel):
         max_length=20, choices=Status.choices, default=Status.PENDING
     )
     size = models.BigIntegerField(null=True, blank=True)
+    # Announced by the source before the download, see SourceFile.size.
+    expected_size = models.BigIntegerField(null=True, blank=True)
     # Detected from the downloaded content, for the analytics.
     mime_type = models.CharField(max_length=255, blank=True, default="")
     error = models.TextField(blank=True, default="")

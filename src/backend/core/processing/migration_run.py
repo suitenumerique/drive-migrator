@@ -41,6 +41,7 @@ def create_migration_run(
             position=position,
             source=planned.source.to_dict(),
             path=planned.path,
+            expected_size=planned.source.size,
         )
         for position, planned in enumerate(plan.files)
     )
