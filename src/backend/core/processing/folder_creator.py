@@ -1,6 +1,5 @@
 import os
 import shutil
-from typing import Callable
 
 from django.conf import settings
 
@@ -17,41 +16,37 @@ logger = get_task_logger(__name__)
 class FolderCreator:
     def __init__(self):
         self.bytes_written = 0
-        self.workspace = None
 
-    def create_folder(
-        self,
-        workspace: Workspace,
-        run: MigrationRun,
-        source_backend: AbstractSourceBackend,
-        after_download: Callable[[MigrationFile, str], None] | None = None,
-    ) -> str:
-        """
-        Download every file of the run into the local folder. after_download, if
-        given, gets each downloaded file with its local path.
-        """
-        self.workspace = workspace
-        files_count = run.files.count()
+    def prepare_folder(self, workspace: Workspace, run: MigrationRun) -> str:
+        """Create the empty local folder of the run, with its planned folders,
+        and return its path."""
         self.delete_folder(workspace)
 
         path = self.get_workspace_path(workspace)
         os.makedirs(path, exist_ok=True)
         for directory in run.dirs:
             os.makedirs(os.path.join(path, directory), exist_ok=True)
-
-        for index, migration_file in enumerate(run.files.iterator(), start=1):
-            if migration_file.status != MigrationFile.Status.PENDING:
-                # Refused while planning: nothing to download.
-                continue
-            logger.info("Downloading file %s/%s ...", index, files_count)
-            local_path = os.path.join(path, migration_file.path)
-            self.__download_file(migration_file, local_path, source_backend)
-            if migration_file.status != MigrationFile.Status.DOWNLOADED:
-                continue
-            if after_download is not None:
-                after_download(migration_file, local_path)
-
         return path
+
+    def download_file(
+        self,
+        workspace: Workspace,
+        migration_file: MigrationFile,
+        source_backend: AbstractSourceBackend,
+    ) -> str | None:
+        """Download one file of the run into the folder of prepare_folder().
+        Return its local path, or None when it did not reach the disk."""
+        if migration_file.status != MigrationFile.Status.PENDING:
+            # Refused while planning: nothing to download.
+            return None
+        logger.info("Downloading file %s ...", migration_file.position + 1)
+        local_path = os.path.join(
+            self.get_workspace_path(workspace), migration_file.path
+        )
+        self.__download_file(migration_file, local_path, source_backend)
+        if migration_file.status != MigrationFile.Status.DOWNLOADED:
+            return None
+        return local_path
 
     def get_workspace_path(self, workspace):
         return f"{settings.APP_WORK_DIR}/workspace_{workspace.id}"

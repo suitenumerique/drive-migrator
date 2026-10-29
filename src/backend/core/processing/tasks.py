@@ -222,14 +222,15 @@ def _export_workspace(
 
     try:
         file_exports.open()
-        logger.info("Calling create_folder ...")
+        creator.prepare_folder(workspace, run)
+        handover = _file_handover(file_exports, destinations)
         try:
-            creator.create_folder(
-                workspace,
-                run,
-                source_backend,
-                after_download=_file_handover(file_exports, destinations),
-            )
+            for migration_file in run.files.iterator():
+                downloaded_path = creator.download_file(
+                    workspace, migration_file, source_backend
+                )
+                if downloaded_path is not None and handover is not None:
+                    handover(migration_file, downloaded_path)
         except SourceTokenExpired:
             # Also keep the files that failed before the token expired.
             _save_download_errors(workspace, run)
