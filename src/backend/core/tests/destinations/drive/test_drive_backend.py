@@ -19,6 +19,8 @@ from core.destinations.drive.drive_backend import (
     user_has_usable_drive_token,
 )
 from core.encryption import decrypt_token, encrypt_token
+from core.factories import UserFactory
+from core.models import User
 from core.tests.destinations.drive.drive_http_mock import patch_drive_http
 
 TEST_KEY = Fernet.generate_key().decode()
@@ -575,6 +577,82 @@ def test_user_token_refresh_keeps_old_refresh_token_when_none_returned(settings)
         DriveUserTokenBackend(user)._get_token()
 
     assert decrypt_token(user.oidc_refresh_token) == "keep-this-refresh"
+
+
+def _oidc_settings(settings):
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.OIDC_RP_CLIENT_ID = "osmose-client"
+    settings.OIDC_RP_CLIENT_SECRET = "osmose-secret"
+
+
+def _store_tokens(user, access_token, refresh_token, expires_at):
+    user.oidc_access_token = encrypt_token(access_token)
+    user.oidc_refresh_token = encrypt_token(refresh_token)
+    user.oidc_token_expires_at = expires_at
+    user.save()
+
+
+def _token_response(access_token, refresh_token):
+    response = MagicMock()
+    response.json.return_value = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_in": 60,
+    }
+    return response
+
+
+@pytest.mark.django_db
+def test_user_token_reuses_the_token_another_process_refreshed(settings):
+    """Two processes holding the same expired token: the second one takes the
+    token the first stored, instead of spending the refresh token again."""
+    _oidc_settings(settings)
+    user = UserFactory()
+    _store_tokens(user, "expired", "r1", timezone.now() - timedelta(seconds=1))
+    first = DriveUserTokenBackend(User.objects.get(pk=user.pk))
+    second = DriveUserTokenBackend(User.objects.get(pk=user.pk))
+
+    with patch_drive_http() as mock_requests:
+        mock_requests.post.return_value = _token_response("new", "r2")
+        assert first._get_token() == "new"
+        assert second._get_token() == "new"
+
+    mock_requests.post.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_user_token_refreshes_with_the_refresh_token_stored_meanwhile(settings):
+    """A refresh token another process replaced is never sent: the provider
+    may have revoked it."""
+    _oidc_settings(settings)
+    user = UserFactory()
+    _store_tokens(user, "expired", "r1", timezone.now() - timedelta(seconds=1))
+    backend = DriveUserTokenBackend(User.objects.get(pk=user.pk))
+    _store_tokens(user, "expired-too", "r2", timezone.now() - timedelta(seconds=1))
+
+    with patch_drive_http() as mock_requests:
+        mock_requests.post.return_value = _token_response("new", "r3")
+        assert backend._get_token() == "new"
+
+    assert mock_requests.post.call_args.kwargs["data"]["refresh_token"] == "r2"
+
+
+@pytest.mark.django_db
+def test_user_token_refused_by_drive_is_refreshed_even_if_not_expired(settings):
+    """A token Drive refused (401) is refreshed, though its expiry is ahead."""
+    _oidc_settings(settings)
+    user = UserFactory()
+    _store_tokens(user, "revoked", "r1", timezone.now() + timedelta(hours=1))
+    backend = DriveUserTokenBackend(User.objects.get(pk=user.pk))
+    refused, accepted = MagicMock(status_code=401), MagicMock(status_code=200)
+    accepted.json.return_value = {"id": "me"}
+
+    with patch_drive_http() as mock_requests:
+        mock_requests.get.side_effect = [refused, accepted]
+        mock_requests.post.return_value = _token_response("new", "r2")
+        assert backend.get_me() == {"id": "me"}
+
+    mock_requests.post.assert_called_once()
 
 
 def test_user_token_raises_when_no_refresh_token():

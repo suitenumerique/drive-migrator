@@ -8,6 +8,7 @@ from datetime import timedelta
 from enum import StrEnum
 
 from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 
 from celery.utils.log import get_task_logger
@@ -247,15 +248,18 @@ class DriveBackend:
 
     def _get_token(self) -> str:
         """Return a valid access token, refreshing proactively if near expiry."""
-        buffer = timedelta(seconds=10)
-        if (
-            self._access_token is None
-            or self._token_expires_at is None
-            or timezone.now() >= self._token_expires_at - buffer
-        ):
+        if not self._token_is_fresh():
             self._refresh()
             self._token_refreshed = True
         return self._access_token
+
+    def _token_is_fresh(self) -> bool:
+        buffer = timedelta(seconds=10)
+        return (
+            self._access_token is not None
+            and self._token_expires_at is not None
+            and timezone.now() < self._token_expires_at - buffer
+        )
 
     def _refresh(self):
         raise NotImplementedError
@@ -578,6 +582,15 @@ class DriveServiceAccountBackend(DriveBackend):
         )
 
 
+# A lock left by a killed process expires after this delay, as for Resana.
+REFRESH_LOCK_TIMEOUT_SECONDS = 90
+DRIVE_TOKEN_FIELDS = [
+    "oidc_access_token",
+    "oidc_refresh_token",
+    "oidc_token_expires_at",
+]
+
+
 class DriveUserTokenBackend(DriveBackend):
     """Uses the authenticated user's ProConnect token. Targets /external_api/v1.0/.
 
@@ -596,6 +609,21 @@ class DriveUserTokenBackend(DriveBackend):
         return bool(self._user.oidc_refresh_token)
 
     def _refresh(self):
+        """Refresh the token, one process at a time per user: the provider may
+        revoke a refresh token once used, so it must never be sent twice."""
+        stale_token = self._access_token
+        with cache.lock(
+            f"drive:refresh:{self._user.pk}", timeout=REFRESH_LOCK_TIMEOUT_SECONDS
+        ):
+            # Another process (worker or web) may have refreshed meanwhile.
+            self._user.refresh_from_db(fields=DRIVE_TOKEN_FIELDS)
+            self._access_token = decrypt_token(self._user.oidc_access_token) or None
+            self._token_expires_at = self._user.oidc_token_expires_at
+            if self._access_token != stale_token and self._token_is_fresh():
+                return
+            self._refresh_from_provider()
+
+    def _refresh_from_provider(self):
         logger.info(
             "Drive (ProConnect) token refresh for user %s: %s, "
             "refreshing with the refresh token",
