@@ -156,6 +156,17 @@ class AbstractSourceBackend(ABC):
         Default implementation is a no-op.
         """
 
+    def resume_export(self, workspace) -> None:  # noqa: B027
+        """
+        Optional hook called in a task carrying on a run begin_export() began in
+        another task, e.g. a task downloading one file of the run.
+
+        Implementations should set up only what download_file() needs: what
+        begin_export() did to the source workspace holds for the whole run.
+
+        Default implementation is a no-op.
+        """
+
     def finalize_export(self, workspace) -> None:  # noqa: B027
         """
         Optional hook always called after begin_export(), in a `finally` block,

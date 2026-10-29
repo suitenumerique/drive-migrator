@@ -272,6 +272,10 @@ class ResanaSourceBackend(AbstractSourceBackend):
             workspace.save(update_fields=["source_lock_state"])
             lock_client.grant_folder_access(slug, folder_id, user_id)
 
+    def resume_export(self, workspace) -> None:
+        """Download as the migration user, without locking again."""
+        self._user = workspace.migration_user
+
     def finalize_export(self, workspace) -> None:
         """Reverse begin_export(): release only the folders we granted, then unlock
         only if we locked the workspace ourselves (#215).

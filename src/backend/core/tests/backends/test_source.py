@@ -1,6 +1,13 @@
-"""Tests for truncate_folder_files() — generic per-workspace file cap."""
+"""Tests for the source backend contract and truncate_folder_files()."""
 
-from core.backends.source import SourceFile, SourceFolder, truncate_folder_files
+from unittest.mock import MagicMock
+
+from core.backends.source import (
+    AbstractSourceBackend,
+    SourceFile,
+    SourceFolder,
+    truncate_folder_files,
+)
 
 
 def _file(file_id):
@@ -101,3 +108,24 @@ def test_source_file_round_trips_through_a_dict():
     )
 
     assert SourceFile.from_dict(source.to_dict()) == source
+
+
+def test_resume_export_does_nothing_by_default():
+    """A source with nothing to set up for a file task needs no override."""
+
+    class Source(AbstractSourceBackend):
+        """The bare minimum of a source."""
+
+        source_type = "test"
+        label = "Test"
+
+        def get_workspaces(self, user):
+            return []
+
+        def get_workspace_structure(self, workspace):
+            return SourceFolder(name="root")
+
+        def download_file(self, file, destination_path):
+            pass
+
+    Source().resume_export(MagicMock())
