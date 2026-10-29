@@ -308,6 +308,120 @@ def test_download_rejected_files_authenticated_owner():
     get_presigned_url.assert_called_once_with("ws.zip")
 
 
+_REJECTED_MANIFEST_KEY = "rejected/ws/run/drive/manifest.json"
+
+
+def _rejected_workspace(**fields):
+    return factories.WorkspaceFactory(
+        destination_metadata={
+            "drive": {"rejected_files_manifest_key": _REJECTED_MANIFEST_KEY}
+        },
+        **fields,
+    )
+
+
+def _rejected_files_zip_url(workspace, destination="drive"):
+    return (
+        f"/api/v1.0/workspaces/{workspace.id}/rejected_files_zip/"
+        f"?destination={destination}"
+    )
+
+
+@pytest.fixture(name="rejected_bucket")
+def fixture_rejected_bucket(archive_bucket):
+    """The refused files of a run on S3, next to the archive of two files."""
+    objects = {
+        _REJECTED_MANIFEST_KEY: json.dumps(
+            {
+                "dirs": [],
+                "files": [
+                    {"path": "docs/big.iso", "key": "r1", "size": 3},
+                    {"path": "fichiers-non-migres.csv", "key": "r2", "size": 4},
+                ],
+            }
+        ).encode(),
+        "r1": b"iso",
+        "r2": b"csv;",
+    }
+    archive_bucket.read_object.side_effect = lambda key: objects[key]
+    archive_bucket.iter_object.side_effect = lambda key: iter([objects[key]])
+    return archive_bucket
+
+
+def test_download_rejected_files_links_the_streamed_zip_of_a_manifest():
+    """Refused files listed by a manifest are streamed by the backend, behind
+    the user's session."""
+    workspace = _rejected_workspace()
+
+    response = _owner_client(workspace).get(_rejected_files_url(workspace))
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "url": f"http://testserver{_rejected_files_zip_url(workspace)}"
+    }
+
+
+def test_rejected_files_zip_anonymous():
+    """Anonymous users must not download refused files."""
+    workspace = _rejected_workspace()
+
+    response = APIClient().get(_rejected_files_zip_url(workspace))
+
+    assert response.status_code == 401
+
+
+def test_rejected_files_zip_other_user_workspace_not_found():
+    """A workspace not owned by the requesting user must not be accessible."""
+    client = APIClient()
+    client.force_login(factories.UserFactory())
+
+    response = client.get(_rejected_files_zip_url(_rejected_workspace()))
+
+    assert response.status_code == 404
+
+
+def test_rejected_files_zip_requires_a_known_destination():
+    """The destination whose refused files are wanted must be registered."""
+    workspace = _rejected_workspace()
+
+    response = _owner_client(workspace).get(
+        _rejected_files_zip_url(workspace, "unknown")
+    )
+
+    assert response.status_code == 400
+
+
+def test_rejected_files_zip_not_found_without_manifest():
+    """A zip of the former export is served by S3 itself, not streamed."""
+    workspace = factories.WorkspaceFactory(
+        destination_metadata={"drive": {"rejected_files_s3_key": "ws.zip"}}
+    )
+
+    response = _owner_client(workspace).get(_rejected_files_zip_url(workspace))
+
+    assert response.status_code == 404
+
+
+@pytest.mark.usefixtures("rejected_bucket")
+def test_rejected_files_zip_streams_the_refused_files():
+    """The zip of a destination's refused files is streamed like the archive,
+    named after the workspace."""
+    workspace = _rejected_workspace(title="Équipe")
+
+    response = _owner_client(workspace).get(_rejected_files_zip_url(workspace))
+
+    assert response.status_code == 200
+    content = b"".join(response.streaming_content)
+    assert response["Content-Length"] == str(len(content))
+    assert response["X-Accel-Buffering"] == "no"
+    assert response["Content-Disposition"] == (
+        "attachment; filename*=utf-8''%C3%89quipe_fichiers-non-migres_drive.zip"
+    )
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        assert archive.read("docs/big.iso") == b"iso"
+        assert archive.read("fichiers-non-migres.csv") == b"csv;"
+
+
 # ---------------------------------------------------------------------------
 # integrity field
 # ---------------------------------------------------------------------------

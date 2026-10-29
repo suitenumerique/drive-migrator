@@ -4,7 +4,7 @@ from django.db.models.functions import Lower
 from django.forms.fields import UUIDField
 from django.http import StreamingHttpResponse
 from django.urls import reverse
-from django.utils.http import content_disposition_header
+from django.utils.http import content_disposition_header, urlencode
 
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet
 from drf_spectacular.types import OpenApiTypes
@@ -60,6 +60,45 @@ def with_latest_integrity(queryset):
     )
 
 
+_DESTINATION_PARAMETER = OpenApiParameter(
+    "destination",
+    str,
+    required=True,
+    description="Name of the destination whose refused files are wanted.",
+)
+REJECTED_FILES_ZIP_STEM = "fichiers-non-migres"
+
+
+def _requested_destination(request):
+    try:
+        return DestinationRegistry.get(request.query_params.get("destination", ""))
+    except ValueError as error:
+        raise ValidationError({"destination": str(error)}) from error
+
+
+def _zip_response(manifest_key: str, name: str) -> StreamingHttpResponse:
+    """Stream the zip of an S3 manifest, as name.zip."""
+    if not acquire_download_slot():
+        raise Throttled(
+            wait=60, detail="Too many archive downloads at once, retry later."
+        )
+    try:
+        stream = archive_stream(read_manifest(manifest_key))
+    except BaseException:
+        release_download_slot()
+        raise
+
+    response = StreamingHttpResponse(SlotStream(stream), content_type="application/zip")
+    response["Content-Length"] = len(stream)
+    filename = name.replace("/", "_").replace("\\", "_")
+    response["Content-Disposition"] = content_disposition_header(
+        True, f"{filename}.zip"
+    )
+    # A buffering proxy would hold the whole zip on its disk.
+    response["X-Accel-Buffering"] = "no"
+    return response
+
+
 class WorkspacesViewset(viewsets.ReadOnlyModelViewSet):  # pylint: disable=too-many-ancestors
     """Viewset for Workspaces."""
 
@@ -93,51 +132,41 @@ class WorkspacesViewset(viewsets.ReadOnlyModelViewSet):  # pylint: disable=too-m
         manifest_key = get_manifest_key(workspace)
         if not manifest_key:
             raise NotFound("This workspace has no archive to stream.")
-        if not acquire_download_slot():
-            raise Throttled(
-                wait=60, detail="Too many archive downloads at once, retry later."
-            )
-        try:
-            stream = archive_stream(read_manifest(manifest_key))
-        except BaseException:
-            release_download_slot()
-            raise
+        return _zip_response(manifest_key, workspace.title)
 
-        response = StreamingHttpResponse(
-            SlotStream(stream), content_type="application/zip"
-        )
-        response["Content-Length"] = len(stream)
-        filename = workspace.title.replace("/", "_").replace("\\", "_")
-        response["Content-Disposition"] = content_disposition_header(
-            True, f"{filename}.zip"
-        )
-        # A buffering proxy would hold the whole zip on its disk.
-        response["X-Accel-Buffering"] = "no"
-        return response
-
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(
-                "destination",
-                str,
-                required=True,
-                description="Name of the destination whose refused files are wanted.",
-            )
-        ]
-    )
+    @extend_schema(parameters=[_DESTINATION_PARAMETER])
     @action(detail=True)
     def download_rejected_files(self, request, *args, **kwargs):
         workspace = self.get_object()
-        try:
-            destination = DestinationRegistry.get(
-                request.query_params.get("destination", "")
-            )
-        except ValueError as error:
-            raise ValidationError({"destination": str(error)}) from error
-        url = RejectedFilesArchive(workspace, destination).get_download_url()
+        destination = _requested_destination(request)
+        rejected_files = RejectedFilesArchive(workspace, destination)
+        if rejected_files.manifest_key:
+            url = reverse("workspaces-rejected-files-zip", kwargs={"pk": workspace.pk})
+            query = urlencode({"destination": destination.name})
+            return Response({"url": request.build_absolute_uri(f"{url}?{query}")})
+        # Zip built by the former export, served by S3 itself.
+        url = rejected_files.get_download_url()
         if url is None:
             raise NotFound("This destination refused no file in the last migration.")
         return Response({"url": url})
+
+    @extend_schema(
+        parameters=[_DESTINATION_PARAMETER],
+        responses={(200, "application/zip"): OpenApiTypes.BINARY},
+    )
+    @action(detail=True)
+    def rejected_files_zip(self, request, *args, **kwargs):
+        """Stream the zip of the files a destination refused, built from their
+        S3 manifest."""
+        workspace = self.get_object()
+        destination = _requested_destination(request)
+        manifest_key = RejectedFilesArchive(workspace, destination).manifest_key
+        if not manifest_key:
+            raise NotFound("This destination has no refused files to stream.")
+        return _zip_response(
+            manifest_key,
+            f"{workspace.title}_{REJECTED_FILES_ZIP_STEM}_{destination.name}",
+        )
 
     @action(detail=True)
     def resana_error_details(self, request, *args, **kwargs):

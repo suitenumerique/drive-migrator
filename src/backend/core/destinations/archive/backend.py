@@ -20,7 +20,6 @@ from core.backends.destination import (
 )
 from core.mails_manager import MailsManager
 from core.models import MigrationRun, Workspace
-from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.processing.rejected_files import RejectedFilesArchive
 
@@ -101,7 +100,7 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
             # One event per run, without paths: file names may be personal data.
             logger.error("%s file(s) not stored in the archive", len(lost))
             if not entries:
-                self._hand_back(workspace, lost)
+                self._hand_back(run, lost)
                 raise RuntimeError(
                     f"All {len(lost)} file(s) failed to be stored in the archive "
                     f"for workspace {workspace.id}"
@@ -117,7 +116,7 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
         previous = workspace.get_destination_metadata(self.name)
         workspace.set_destination_metadata(self.name, {MANIFEST_KEY: manifest_key})
         # Saves the metadata, after the zip of the refused files is linked.
-        self._hand_back(workspace, lost)
+        self._hand_back(run, lost)
         self._delete_archive(manager, previous)
 
         title = _(f"Votre archive de l'espace {workspace.title} est prête !")
@@ -155,12 +154,9 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
             destinations_state=run.destinations_state
         )
 
-    def _hand_back(self, workspace, lost: list[RejectedFile]) -> None:
-        """Give the files S3 did not store back to the user, from the local
-        folder that kept them."""
-        RejectedFilesArchive(workspace, self).build(
-            FolderCreator().get_workspace_path(workspace), lost
-        )
+    def _hand_back(self, run, lost: list[RejectedFile]) -> None:
+        """Give the files S3 did not store back to the user."""
+        RejectedFilesArchive(run.workspace, self).build(run, lost)
 
     @staticmethod
     def _put_members_csv(manager, workspace, prefix: str) -> dict:

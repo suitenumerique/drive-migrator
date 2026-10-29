@@ -22,17 +22,27 @@ def work_directory(settings, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _rejected_files_bucket():
+    """Keep the rejected files cleanup away from S3."""
+    with patch("core.processing.rejected_files.ArchiveManager"):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def migration_run():
     """Keep the run's working rows out of the database: workspaces are mocks here."""
     with (
         patch("core.processing.tasks.create_migration_run") as create,
         patch("core.processing.tasks.delete_migration_run") as delete,
         patch("core.processing.tasks.save_run_files_stats") as save_stats,
+        patch("core.processing.tasks.drop_unlinked_kept_files") as drop_kept,
     ):
         create.side_effect = lambda workspace, task_id, plan: SimpleNamespace(
             workspace=workspace, exports_state={}
         )
-        yield SimpleNamespace(create=create, delete=delete, save_stats=save_stats)
+        yield SimpleNamespace(
+            create=create, delete=delete, save_stats=save_stats, drop_kept=drop_kept
+        )
 
 
 @pytest.fixture()
@@ -202,6 +212,28 @@ def test_export_keeps_the_files_stats_before_purging_the_run(
     task_id = migration_run.create.call_args.args[1]
     assert calls == [("stats", task_id, ANY), ("delete",)]
     assert calls[0][2].workspace is workspace
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+def test_export_drops_the_unlinked_kept_files_before_purging_the_run(
+    workspace, user, migration_run, fails
+):
+    """The files kept for a destination that failed are deleted, while the
+    run's rows still tell which ones it kept."""
+    calls = []
+    migration_run.drop_kept.side_effect = lambda run: calls.append(("drop", run))
+    migration_run.delete.side_effect = lambda task_id: calls.append(("delete",))
+    destination = _destination("archive")
+    if fails:
+        destination.export.side_effect = RuntimeError("down")
+
+    try:
+        _run_export(workspace, user, dest_backends=[destination])
+    except RuntimeError:
+        assert fails
+
+    assert calls == [("drop", ANY), ("delete",)]
+    assert calls[0][1].workspace is workspace
 
 
 def test_export_calls_prepare_export_before_downloading(workspace, user):
@@ -520,8 +552,9 @@ def test_export_streams_files_to_file_by_file_destinations(workspace, user, tmp_
 def test_export_keeps_the_files_a_destination_did_not_take(
     workspace, user, tmp_path, status
 ):
-    """A file a destination refused or failed to receive is kept on S3 and on
-    the disk, for the destination to hand it back to the user once it closes."""
+    """A file a destination refused or failed to receive is kept on S3, for
+    the destination to hand it back to the user once it closes: the disk only
+    holds the file being sent."""
     exports_cls, creator = _run_file_by_file_export(
         workspace, user, [_file_by_file_destination("drive")]
     )
@@ -533,7 +566,7 @@ def test_export_keeps_the_files_a_destination_did_not_take(
     with patch("core.processing.tasks.keep_refused_file") as keep:
         on_downloaded(row, str(local_file))
     keep.assert_called_once_with(exports_cls.return_value.run, row, str(local_file))
-    assert local_file.exists()
+    assert not local_file.exists()
 
 
 def test_export_keeps_local_files_for_legacy_destinations(workspace, user):

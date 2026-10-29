@@ -19,7 +19,6 @@ from core.destinations.drive.backend import DriveDestinationBackend
 from core.destinations.drive.drive_backend import FileRejection
 from core.factories import UserFactory
 from core.models import Workspace
-from core.processing.folder_creator import FolderCreator
 
 pytestmark = pytest.mark.django_db
 
@@ -579,8 +578,7 @@ def _recorded(rejected_files_archive):
 def test_rejected_files_are_handed_to_the_archive(
     drive_client, make_run, migrate, rejected_files_archive
 ):
-    """The files Drive refused are archived from the workspace's local folder,
-    which still holds them."""
+    """The files Drive refused are handed to the archive of the run."""
     ids = _refuse(drive_client, "a.txt")
     run = make_run(paths=["a.txt", "b.txt"])
     destination = DriveDestinationBackend()
@@ -590,7 +588,7 @@ def test_rejected_files_are_handed_to_the_archive(
     (workspace, archived_for), _ = rejected_files_archive.call_args
     assert (workspace.pk, archived_for) == (run.workspace.pk, destination)
     rejected_files_archive.return_value.build.assert_called_once_with(
-        FolderCreator().get_workspace_path(run.workspace),
+        run,
         [RejectedFile("a.txt", "file_type_not_allowed", ids["a.txt"])],
     )
 

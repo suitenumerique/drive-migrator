@@ -236,8 +236,7 @@ def test_close_creates_the_import_job(resana, make_run, export_run):
 def test_close_hands_the_failed_files_back_to_the_user(
     bucket, make_run, export_run, rejected_files_archive
 ):
-    """A file S3 did not store goes to the rejected files archive, from the
-    local folder that kept it."""
+    """A file S3 did not store goes to the rejected files archive of the run."""
     run = make_run(paths=("a.txt", "b.txt"))
     upload_file = bucket.upload_file.side_effect
 
@@ -250,7 +249,8 @@ def test_close_hands_the_failed_files_back_to_the_user(
 
     assert export_run(run) == {}
 
-    _, lost = rejected_files_archive.return_value.build.call_args.args
+    handed_run, lost = rejected_files_archive.return_value.build.call_args.args
+    assert handed_run.pk == run.pk
     assert lost == [RejectedFile("b.txt", "upload_failed")]
 
 

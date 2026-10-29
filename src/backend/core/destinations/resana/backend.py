@@ -16,7 +16,6 @@ from core.destinations.resana.paths import resana_dir_renames, resana_path
 from core.destinations.resana.resana_backend import ResanaBackend
 from core.destinations.resana.s3_resana_manager import S3ResanaManager
 from core.models import MigrationRun, Workspace
-from core.processing.folder_creator import FolderCreator
 from core.processing.rejected_files import RejectedFilesArchive
 
 logger = get_task_logger(__name__)
@@ -92,9 +91,7 @@ class ResanaDestinationBackend(AbstractDestinationBackend):
                 sent += 1
             else:
                 lost.append(RejectedFile(row.path, _UPLOAD_FAILED))
-        RejectedFilesArchive(workspace, self).build(
-            FolderCreator().get_workspace_path(workspace), lost
-        )
+        RejectedFilesArchive(workspace, self).build(run, lost)
         if lost:
             # One event per run, without paths: file names may be personal data.
             logger.error("%s file(s) not sent to Resana", len(lost))

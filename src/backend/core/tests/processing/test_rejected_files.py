@@ -2,7 +2,7 @@
 
 import csv
 import io
-import zipfile
+import json
 from unittest.mock import patch
 
 import pytest
@@ -20,6 +20,7 @@ from core.processing.plan import build_plan
 from core.processing.rejected_files import (
     REJECTED_FILES_CSV_NAME,
     RejectedFilesArchive,
+    drop_unlinked_kept_files,
     keep_refused_file,
 )
 
@@ -55,49 +56,58 @@ def _destinations(settings):
     DestinationRegistry.clear_cache()
 
 
-@pytest.fixture(name="uploaded")
-def fixture_uploaded():
-    """Capture what is sent to S3: {s3_key: {zip entry name: bytes}}."""
-    uploaded = {}
-
-    def upload_file(path, s3_key):
-        with zipfile.ZipFile(path) as zip_file:
-            uploaded[s3_key] = {
-                info.filename: zip_file.read(info) for info in zip_file.infolist()
-            }
-
+@pytest.fixture(name="stored")
+def fixture_stored():
+    """Capture what is put on S3: {s3_key: bytes}."""
+    stored = {}
     with patch(
-        "core.processing.rejected_files.ArchiveManager.upload_file",
-        side_effect=upload_file,
+        "core.processing.rejected_files.ArchiveManager.put_object",
+        side_effect=stored.__setitem__,
     ):
-        yield uploaded
+        yield stored
 
 
-@pytest.fixture(name="local_folder")
-def fixture_local_folder(tmp_path):
-    """A local workspace folder holding two files, one of them in a subfolder."""
-    folder = tmp_path / "workspace"
-    (folder / "Hébergement").mkdir(parents=True)
-    (folder / "Hébergement" / "plan.exe").write_bytes(b"exe")
-    (folder / "big.iso").write_bytes(b"iso")
-    (folder / "kept.txt").write_bytes(b"kept")
-    return folder
+@pytest.fixture(name="run")
+def fixture_run():
+    """A run of three files, the two refused ones kept on S3."""
+    files = [
+        SourceFile(id="f1", name="big", extension=".iso", download_url="x"),
+        SourceFile(id="f2", name="kept", extension=".txt", download_url="x"),
+    ]
+    sub = SourceFolder(
+        name="Hébergement",
+        files=[SourceFile(id="f3", name="plan", extension=".exe", download_url="x")],
+    )
+    plan = build_plan(SourceFolder(name="root", files=files, children=[sub]))
+    run = create_migration_run(WorkspaceFactory(), "task-1", plan)
+    for path, size in (("big.iso", 3), ("Hébergement/plan.exe", 5)):
+        run.files.filter(path=path).update(kept_key=f"kept/{path}", size=size)
+    return run
 
 
-def test_build_records_the_rejections_in_upload_errors(local_folder, uploaded):  # pylint: disable=unused-argument
+def _manifest(stored, run, destination="fake"):
+    key = f"rejected/{run.workspace_id}/{run.id}/{destination}/manifest.json"
+    return json.loads(stored[key])
+
+
+def _build(run, rejected, destination=None):
+    RejectedFilesArchive(run.workspace, destination or FakeDestination()).build(
+        run, rejected
+    )
+    run.workspace.refresh_from_db()
+
+
+def test_build_records_the_rejections_in_upload_errors(run, stored):  # pylint: disable=unused-argument
     """Each refused file is recorded with the destination that refused it."""
-    workspace = WorkspaceFactory()
-
-    RejectedFilesArchive(workspace, FakeDestination()).build(
-        str(local_folder),
+    _build(
+        run,
         [
             RejectedFile(path="big.iso", code="too_big", item_id="item-1"),
             RejectedFile(path="Hébergement/plan.exe", code="bad_ext"),
         ],
     )
 
-    workspace.refresh_from_db()
-    assert workspace.upload_errors == [
+    assert run.workspace.upload_errors == [
         {
             "destination": "fake",
             "path": "big.iso",
@@ -108,232 +118,158 @@ def test_build_records_the_rejections_in_upload_errors(local_folder, uploaded): 
     ]
 
 
-def test_build_keeps_the_rejections_of_other_destinations(local_folder, uploaded):  # pylint: disable=unused-argument
+def test_build_keeps_the_rejections_of_other_destinations(run, stored):  # pylint: disable=unused-argument
     """Only the entries of this destination are replaced."""
     other = {"destination": "other", "path": "a.txt", "error": "nope"}
-    workspace = WorkspaceFactory(
-        upload_errors=[
-            other,
-            {"destination": "fake", "path": "old.txt", "error": "old"},
-        ]
-    )
+    run.workspace.upload_errors = [
+        other,
+        {"destination": "fake", "path": "old.txt", "error": "old"},
+    ]
+    run.workspace.save()
 
-    RejectedFilesArchive(workspace, FakeDestination()).build(
-        str(local_folder), [RejectedFile(path="big.iso", code="too_big")]
-    )
+    _build(run, [RejectedFile(path="big.iso", code="too_big")])
 
-    workspace.refresh_from_db()
-    assert workspace.upload_errors == [
+    assert run.workspace.upload_errors == [
         other,
         {"destination": "fake", "path": "big.iso", "error": "too_big"},
     ]
 
 
-def test_build_uploads_a_zip_of_the_refused_files(local_folder, uploaded):
-    """The zip holds the refused files at their path, but not the accepted ones."""
-    workspace = WorkspaceFactory()
-
-    RejectedFilesArchive(workspace, FakeDestination()).build(
-        str(local_folder),
+def test_build_lists_the_kept_copies_of_the_refused_files(run, stored):
+    """The manifest the zip is streamed from lists the refused files at their
+    path, from their copy on S3, but not the accepted ones."""
+    _build(
+        run,
         [
             RejectedFile(path="big.iso", code="too_big"),
             RejectedFile(path="Hébergement/plan.exe", code="bad_ext"),
         ],
     )
 
-    key = f"workspace_{workspace.id}_rejected_fake.zip"
-    entries = uploaded[key]
-    assert entries["big.iso"] == b"iso"
-    assert entries["Hébergement/plan.exe"] == b"exe"
-    assert "kept.txt" not in entries
+    manifest = _manifest(stored, run)
+    assert manifest["dirs"] == []
+    assert manifest["files"][:2] == [
+        {"path": "big.iso", "key": "kept/big.iso", "size": 3},
+        {"path": "Hébergement/plan.exe", "key": "kept/Hébergement/plan.exe", "size": 5},
+    ]
 
 
-def test_build_adds_the_failed_files_csv_to_the_zip(local_folder, uploaded):
+def test_build_adds_the_failed_files_csv(run, stored):
     """The zip carries the CSV listing every file the migration left behind."""
-    workspace = WorkspaceFactory(
-        download_errors=[
-            {"id": "1", "name": "lost.pdf", "path": "lost.pdf", "error": "boom"}
-        ]
-    )
+    run.workspace.download_errors = [
+        {"id": "1", "name": "lost.pdf", "path": "lost.pdf", "error": "boom"}
+    ]
+    run.workspace.save()
 
-    RejectedFilesArchive(workspace, FakeDestination()).build(
-        str(local_folder), [RejectedFile(path="big.iso", code="too_big")]
-    )
+    _build(run, [RejectedFile(path="big.iso", code="too_big")])
 
-    entries = uploaded[f"workspace_{workspace.id}_rejected_fake.zip"]
+    entry = _manifest(stored, run)["files"][-1]
     assert REJECTED_FILES_CSV_NAME == "fichiers-non-migres.csv"
-    content = entries[REJECTED_FILES_CSV_NAME].decode("utf-8-sig")
+    assert entry["path"] == REJECTED_FILES_CSV_NAME
+    body = stored[entry["key"]]
+    assert entry["size"] == len(body)
+    content = body.decode("utf-8-sig")
     paths = [row[0] for row in csv.reader(io.StringIO(content), delimiter=";")]
     assert paths == ["Chemin", "lost.pdf", "big.iso"]
 
 
-def test_build_stores_the_files_without_recompressing(local_folder):
-    """Refused files are often big and already compressed (pdf, docx, media):
-    deflating them again would only cost time and disk."""
-    workspace = WorkspaceFactory()
-    compress_types = {}
-
-    def upload_file(path, s3_key):  # pylint: disable=unused-argument
-        with zipfile.ZipFile(path) as zip_file:
-            compress_types.update(
-                {info.filename: info.compress_type for info in zip_file.infolist()}
-            )
-
-    with patch(
-        "core.processing.rejected_files.ArchiveManager.upload_file",
-        side_effect=upload_file,
-    ):
-        RejectedFilesArchive(workspace, FakeDestination()).build(
-            str(local_folder), [RejectedFile(path="big.iso", code="too_big")]
-        )
-
-    assert compress_types["big.iso"] == zipfile.ZIP_STORED
-
-
-def test_build_leaves_out_the_members_csv(local_folder, uploaded):
+def test_build_leaves_out_the_members_csv(run, stored):
     """The members listing is a migrator file, not one of the user's: a refusal
     of it is neither listed nor archived."""
-    (local_folder / MEMBERS_CSV_FILENAME).write_bytes(b"members")
-    workspace = WorkspaceFactory()
+    _build(run, [RejectedFile(path=MEMBERS_CSV_FILENAME, code="bad_ext")])
 
-    RejectedFilesArchive(workspace, FakeDestination()).build(
-        str(local_folder), [RejectedFile(path=MEMBERS_CSV_FILENAME, code="bad_ext")]
-    )
-
-    workspace.refresh_from_db()
-    assert workspace.upload_errors == []
-    assert not uploaded
+    assert run.workspace.upload_errors == []
+    assert not stored
 
 
-def test_build_skips_refused_files_missing_locally(local_folder, uploaded):
-    """A refused file no longer on disk is still recorded but left out of the zip."""
-    workspace = WorkspaceFactory()
-
-    RejectedFilesArchive(workspace, FakeDestination()).build(
-        str(local_folder),
+def test_build_leaves_out_the_refused_files_not_kept(run, stored):
+    """A refused file S3 could not keep is still recorded, but left out of the zip."""
+    _build(
+        run,
         [
             RejectedFile(path="big.iso", code="too_big"),
-            RejectedFile(path="gone.txt", code="too_big"),
+            RejectedFile(path="kept.txt", code="too_big"),
         ],
     )
 
-    workspace.refresh_from_db()
-    assert [error["path"] for error in workspace.upload_errors] == [
+    assert [error["path"] for error in run.workspace.upload_errors] == [
         "big.iso",
-        "gone.txt",
+        "kept.txt",
     ]
-    entries = uploaded[f"workspace_{workspace.id}_rejected_fake.zip"]
-    assert "gone.txt" not in entries
+    paths = [entry["path"] for entry in _manifest(stored, run)["files"]]
+    assert paths == ["big.iso", REJECTED_FILES_CSV_NAME]
 
 
-def test_build_stores_the_s3_key_next_to_the_destination_metadata(
-    local_folder,
-    uploaded,  # pylint: disable=unused-argument
-):
-    """The key is added to the destination metadata, without dropping the rest."""
-    workspace = WorkspaceFactory(destination_metadata={"fake": {"root_id": "r-1"}})
+def test_build_stores_the_manifest_key_next_to_the_destination_metadata(run, stored):  # pylint: disable=unused-argument
+    """The key is added to the destination metadata, without dropping the rest,
+    and replaces a zip of the former export."""
+    run.workspace.destination_metadata = {
+        "fake": {"root_id": "r-1", "rejected_files_s3_key": "old.zip"}
+    }
+    run.workspace.save()
 
-    RejectedFilesArchive(workspace, FakeDestination()).build(
-        str(local_folder), [RejectedFile(path="big.iso", code="too_big")]
-    )
+    _build(run, [RejectedFile(path="big.iso", code="too_big")])
 
-    workspace.refresh_from_db()
-    assert workspace.get_destination_metadata("fake") == {
+    assert run.workspace.get_destination_metadata("fake") == {
         "root_id": "r-1",
-        "rejected_files_s3_key": f"workspace_{workspace.id}_rejected_fake.zip",
+        "rejected_files_manifest_key": (
+            f"rejected/{run.workspace_id}/{run.id}/fake/manifest.json"
+        ),
     }
 
 
-def test_build_removes_the_local_zip(local_folder, uploaded, settings, tmp_path):  # pylint: disable=unused-argument
-    """The zip is only kept on S3, not in the work dir."""
-    settings.APP_WORK_DIR = str(tmp_path / "work")
-    workspace = WorkspaceFactory()
+def test_build_without_rejection_stores_nothing(run, stored):
+    """No manifest and no key when the destination accepted every file."""
+    run.workspace.destination_metadata = {
+        "fake": {"root_id": "r-1", "rejected_files_manifest_key": "stale.json"}
+    }
+    run.workspace.upload_errors = [
+        {"destination": "fake", "path": "old.txt", "error": "old"}
+    ]
+    run.workspace.save()
 
-    RejectedFilesArchive(workspace, FakeDestination()).build(
-        str(local_folder), [RejectedFile(path="big.iso", code="too_big")]
-    )
+    _build(run, [])
 
-    assert not list((tmp_path / "work").glob("*.zip"))
-
-
-def test_build_without_rejection_uploads_nothing(local_folder, uploaded):
-    """No zip and no key when the destination accepted every file."""
-    workspace = WorkspaceFactory(
-        destination_metadata={
-            "fake": {"root_id": "r-1", "rejected_files_s3_key": "stale.zip"}
-        },
-        upload_errors=[{"destination": "fake", "path": "old.txt", "error": "old"}],
-    )
-
-    RejectedFilesArchive(workspace, FakeDestination()).build(str(local_folder), [])
-
-    workspace.refresh_from_db()
-    assert not uploaded
-    assert workspace.upload_errors == []
-    assert workspace.get_destination_metadata("fake") == {"root_id": "r-1"}
+    assert not stored
+    assert run.workspace.upload_errors == []
+    assert run.workspace.get_destination_metadata("fake") == {"root_id": "r-1"}
 
 
-def test_build_still_records_the_rejections_when_s3_fails(
-    local_folder, settings, tmp_path
-):
+def test_build_still_records_the_rejections_when_s3_fails(run):
     """S3 being down only costs the zip: the migration and its listing go on."""
-    settings.APP_WORK_DIR = str(tmp_path / "work")
-    workspace = WorkspaceFactory()
-
     with patch(
-        "core.processing.rejected_files.ArchiveManager.upload_file",
+        "core.processing.rejected_files.ArchiveManager.put_object",
         side_effect=RuntimeError("S3 down"),
     ):
-        RejectedFilesArchive(workspace, FakeDestination()).build(
-            str(local_folder), [RejectedFile(path="big.iso", code="too_big")]
-        )
+        _build(run, [RejectedFile(path="big.iso", code="too_big")])
 
-    workspace.refresh_from_db()
-    assert workspace.upload_errors == [
+    assert run.workspace.upload_errors == [
         {"destination": "fake", "path": "big.iso", "error": "too_big"}
     ]
-    assert workspace.get_destination_metadata("fake") == {}
-    assert not list((tmp_path / "work").glob("*.zip"))
+    assert run.workspace.get_destination_metadata("fake") == {}
 
 
-def test_build_still_records_the_rejections_when_the_work_dir_fails(local_folder):
-    """A full or read-only disk only costs the zip, like S3 being down."""
-    workspace = WorkspaceFactory()
-
-    with patch(
-        "core.processing.rejected_files.os.makedirs",
-        side_effect=OSError("Read-only file system"),
-    ):
-        RejectedFilesArchive(workspace, FakeDestination()).build(
-            str(local_folder), [RejectedFile(path="big.iso", code="too_big")]
-        )
-
-    workspace.refresh_from_db()
-    assert workspace.upload_errors == [
-        {"destination": "fake", "path": "big.iso", "error": "too_big"}
-    ]
-    assert workspace.get_destination_metadata("fake") == {}
+@pytest.fixture(name="archive_manager")
+def fixture_archive_manager():
+    with patch("core.processing.rejected_files.ArchiveManager") as manager_cls:
+        yield manager_cls.return_value
 
 
-def test_clear_deletes_the_zips_of_the_previous_run():
-    """Every destination's zip is deleted from S3 and unlinked from the workspace."""
+def test_clear_deletes_the_zips_of_the_previous_run(archive_manager):
+    """Every destination's zip is deleted from S3 and unlinked from the
+    workspace, along with the files the previous runs kept."""
     workspace = WorkspaceFactory(
         destination_metadata={
             "fake": {"root_id": "r-1", "rejected_files_s3_key": "fake.zip"},
-            "other": {"rejected_files_s3_key": "other.zip"},
+            "other": {"rejected_files_manifest_key": "rejected/x/manifest.json"},
             "archive": {"s3_key": "workspace.zip"},
         }
     )
 
-    with patch(
-        "core.processing.rejected_files.ArchiveManager.delete_file"
-    ) as delete_file:
-        RejectedFilesArchive.clear(workspace)
+    RejectedFilesArchive.clear(workspace)
 
-    assert sorted(call.args[0] for call in delete_file.call_args_list) == [
-        "fake.zip",
-        "other.zip",
-    ]
+    archive_manager.delete_file.assert_called_once_with("fake.zip")
+    archive_manager.delete_prefix.assert_called_once_with(f"rejected/{workspace.id}")
     workspace.refresh_from_db()
     assert workspace.destination_metadata == {
         "fake": {"root_id": "r-1"},
@@ -342,32 +278,70 @@ def test_clear_deletes_the_zips_of_the_previous_run():
     }
 
 
-def test_clear_still_unlinks_the_zips_when_s3_fails():
+def test_clear_still_unlinks_the_zips_when_s3_fails(archive_manager):
     """S3 being down must not stop a new run from starting."""
+    archive_manager.delete_file.side_effect = RuntimeError("S3 down")
+    archive_manager.delete_prefix.side_effect = RuntimeError("S3 down")
     workspace = WorkspaceFactory(
         destination_metadata={"fake": {"rejected_files_s3_key": "fake.zip"}}
     )
 
-    with patch(
-        "core.processing.rejected_files.ArchiveManager.delete_file",
-        side_effect=RuntimeError("S3 down"),
-    ):
-        RejectedFilesArchive.clear(workspace)
+    RejectedFilesArchive.clear(workspace)
 
     workspace.refresh_from_db()
     assert workspace.destination_metadata == {"fake": {}}
 
 
-def test_clear_without_zip_touches_nothing():
-    """No S3 call when no previous run left a zip."""
+def test_clear_deletes_the_files_a_run_kept_without_linking_them(archive_manager):
+    """A run that stopped before its end kept files that no zip links."""
     workspace = WorkspaceFactory(destination_metadata={"fake": {"root_id": "r-1"}})
 
-    with patch(
-        "core.processing.rejected_files.ArchiveManager.delete_file"
-    ) as delete_file:
-        RejectedFilesArchive.clear(workspace)
+    RejectedFilesArchive.clear(workspace)
 
-    delete_file.assert_not_called()
+    archive_manager.delete_file.assert_not_called()
+    archive_manager.delete_prefix.assert_called_once_with(f"rejected/{workspace.id}")
+
+
+def test_drop_unlinked_kept_files_deletes_the_copies_no_zip_lists(run, archive_manager):
+    """A destination that failed lists none of the files the run kept for it."""
+    drop_unlinked_kept_files(run)
+
+    archive_manager.delete_prefix.assert_called_once_with(
+        f"rejected/{run.workspace_id}/{run.id}"
+    )
+
+
+def test_drop_unlinked_kept_files_keeps_the_copies_a_zip_lists(run, archive_manager):
+    """The copies stay as long as a destination's zip lists them."""
+    run.workspace.set_destination_metadata(
+        "fake",
+        {
+            "rejected_files_manifest_key": (
+                f"rejected/{run.workspace_id}/{run.id}/fake/manifest.json"
+            )
+        },
+    )
+    run.workspace.save()
+
+    drop_unlinked_kept_files(run)
+
+    archive_manager.delete_prefix.assert_not_called()
+
+
+def test_drop_unlinked_kept_files_without_copies_calls_no_s3(run, archive_manager):
+    """No S3 call for the usual run, where every file was taken."""
+    run.files.update(kept_key="")
+
+    drop_unlinked_kept_files(run)
+
+    archive_manager.delete_prefix.assert_not_called()
+
+
+def test_drop_unlinked_kept_files_swallows_s3_errors(run, archive_manager):
+    """It runs as the run ends: S3 being down must not hide how it ended."""
+    archive_manager.delete_prefix.side_effect = RuntimeError("S3 down")
+
+    drop_unlinked_kept_files(run)
 
 
 def test_get_download_url_signs_the_destination_zip():
@@ -396,24 +370,12 @@ def test_get_download_url_is_none_without_zip():
     assert RejectedFilesArchive(workspace, FakeDestination()).get_download_url() is None
 
 
-@pytest.fixture(name="run")
-def fixture_run():
-    """A run of one file."""
-    plan = build_plan(
-        SourceFolder(
-            name="root",
-            files=[SourceFile(id="f1", name="big", extension=".iso", download_url="x")],
-        )
-    )
-    return create_migration_run(WorkspaceFactory(), "task-1", plan)
-
-
 def test_keep_refused_file_stores_a_copy_under_the_run(run, tmp_path):
     """A file a destination did not take is kept on S3, so that the user gets
     it back even when the run ends on another worker."""
-    local_path = tmp_path / "big.iso"
-    local_path.write_bytes(b"iso")
-    migration_file = run.files.get()
+    local_path = tmp_path / "kept.txt"
+    local_path.write_bytes(b"kept")
+    migration_file = run.files.get(path="kept.txt")
 
     with patch(
         "core.processing.rejected_files.ArchiveManager.upload_file"
@@ -428,9 +390,9 @@ def test_keep_refused_file_stores_a_copy_under_the_run(run, tmp_path):
 
 def test_keep_refused_file_keeps_no_key_when_s3_fails(run, tmp_path):
     """S3 being down only leaves the file out of the user's zip."""
-    local_path = tmp_path / "big.iso"
-    local_path.write_bytes(b"iso")
-    migration_file = run.files.get()
+    local_path = tmp_path / "kept.txt"
+    local_path.write_bytes(b"kept")
+    migration_file = run.files.get(path="kept.txt")
 
     with patch(
         "core.processing.rejected_files.ArchiveManager.upload_file",

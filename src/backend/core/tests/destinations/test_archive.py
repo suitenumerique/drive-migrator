@@ -196,7 +196,7 @@ def test_close_hands_the_failed_files_back_to_the_user(
     bucket, make_run, export_run, rejected_files_archive
 ):
     """A file S3 did not store is left out of the manifest and goes to the
-    rejected files archive, from the local folder that kept it."""
+    rejected files archive of the run."""
     run = make_run(paths=("a.txt", "b.txt"))
     upload_file = bucket.upload_file.side_effect
 
@@ -212,7 +212,8 @@ def test_close_hands_the_failed_files_back_to_the_user(
     paths = [entry["path"] for entry in _manifest(bucket, run.workspace)["files"]]
     assert paths == ["a.txt"]
     rejected_files_archive.return_value.build.assert_called_once()
-    _, lost = rejected_files_archive.return_value.build.call_args.args
+    handed_run, lost = rejected_files_archive.return_value.build.call_args.args
+    assert handed_run.pk == run.pk
     assert lost == [RejectedFile("b.txt", "upload_failed")]
 
 

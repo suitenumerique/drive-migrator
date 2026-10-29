@@ -46,8 +46,11 @@ function DownloadRejectedFilesContent() {
   const isLoading = !!workspaceId && workspaces === undefined;
   const workspace = workspaces?.[0];
   // A newer migration of the workspace deletes the zip a mail may still link.
+  const metadata = workspace?.destination_metadata?.[destination];
+  // The manifest of a streamed zip, or a zip of the former export.
   const isAvailable =
-    !!workspace?.destination_metadata?.[destination]?.['rejected_files_s3_key'];
+    !!metadata?.['rejected_files_manifest_key'] ||
+    !!metadata?.['rejected_files_s3_key'];
   const destinationLabel =
     destinations?.find((dest) => dest.name === destination)?.label ??
     destination;

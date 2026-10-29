@@ -28,7 +28,6 @@ from core.destinations.drive.drive_backend import (
 )
 from core.mails_manager import MailsManager
 from core.models import MigrationRun, Workspace
-from core.processing.folder_creator import FolderCreator
 from core.processing.integrity import Stage
 from core.processing.rejected_files import RejectedFilesArchive
 
@@ -222,7 +221,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
     def _archive_lost_files(self, run, file_results: list[tuple[str, dict]]) -> None:
         """Hand the files Drive refused or failed to receive to the rejected files
-        archive, from the local folder that kept them, members listing included."""
+        archive, members listing included."""
         members_csv = run.destinations_state[self.name].get("members_csv")
         if members_csv:
             file_results = [*file_results, (MEMBERS_CSV_FILENAME, members_csv)]
@@ -238,9 +237,7 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             if result["status"] != FileExportStatus.SENT
         ]
         workspace = run.workspace
-        RejectedFilesArchive(workspace, self).build(
-            FolderCreator().get_workspace_path(workspace), lost
-        )
+        RejectedFilesArchive(workspace, self).build(run, lost)
         # One event per run, without paths nor error messages (they may hold
         # URLs): file names may be personal data.
         if lost:
