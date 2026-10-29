@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [v0.12.0] - 2026-10-29
+
 ### Changed
 
 - Show the linked workspace and migration user in the Celery task result
@@ -174,7 +176,8 @@ and this project adheres to
 
 - delete unused var in Makefile
 
-[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.11.0...main
+[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.12.0...main
+[v0.12.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.12.0
 [v0.11.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.11.0
 [v0.10.1]: https://github.com/suitenumerique/drive-migrator/releases/v0.10.1
 [v0.10.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.10.0
