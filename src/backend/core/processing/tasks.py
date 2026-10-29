@@ -27,7 +27,7 @@ from core.processing.folder_creator import FolderCreator
 from core.processing.integrity import IntegrityTracker, Stage
 from core.processing.migration_run import create_migration_run, delete_migration_run
 from core.processing.plan import build_plan
-from core.processing.rejected_files import RejectedFilesArchive
+from core.processing.rejected_files import RejectedFilesArchive, keep_refused_file
 from core.processing.token_status import log_token_status
 from core.utils import get_dir_size, sizeof_fmt
 
@@ -236,7 +236,8 @@ def _export_workspace(run, user, source_backend, integrity_tracker):
 def _file_handover(file_exports, file_by_file, legacy):
     """What to do with each downloaded file: hand it to the file-by-file
     destinations, and drop it unless a legacy destination reads it back, or a
-    destination did not take it and hands it back to the user once it closes."""
+    destination did not take it and hands it back to the user once it closes.
+    Such a file is also kept on S3 for the user."""
     if not file_by_file:
         return None
     if legacy:
@@ -249,6 +250,8 @@ def _file_handover(file_exports, file_by_file, legacy):
             for result in migration_file.results.values()
         ):
             os.remove(local_path)
+        else:
+            keep_refused_file(file_exports.run, migration_file, local_path)
 
     return put_and_drop
 

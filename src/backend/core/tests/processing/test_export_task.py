@@ -509,8 +509,10 @@ def test_export_streams_files_to_file_by_file_destinations(workspace, user, tmp_
     local_file = tmp_path / "doc.txt"
     local_file.write_text("content")
     row = SimpleNamespace(results={"drive": {"status": FileExportStatus.SENT}})
-    on_downloaded(row, str(local_file))
+    with patch("core.processing.tasks.keep_refused_file") as keep:
+        on_downloaded(row, str(local_file))
     exports.put.assert_called_once_with(row, str(local_file))
+    keep.assert_not_called()
     assert not local_file.exists()
 
 
@@ -518,18 +520,19 @@ def test_export_streams_files_to_file_by_file_destinations(workspace, user, tmp_
 def test_export_keeps_the_files_a_destination_did_not_take(
     workspace, user, tmp_path, status
 ):
-    """A file a destination refused or failed to receive stays on the disk, for
-    the destination to hand it back to the user once it closes."""
-    _, creator = _run_file_by_file_export(
+    """A file a destination refused or failed to receive is kept on S3 and on
+    the disk, for the destination to hand it back to the user once it closes."""
+    exports_cls, creator = _run_file_by_file_export(
         workspace, user, [_file_by_file_destination("drive")]
     )
 
     on_downloaded = creator.create_folder.call_args.kwargs["on_downloaded"]
     local_file = tmp_path / "doc.txt"
     local_file.write_text("content")
-    on_downloaded(
-        SimpleNamespace(results={"drive": {"status": status}}), str(local_file)
-    )
+    row = SimpleNamespace(results={"drive": {"status": status}})
+    with patch("core.processing.tasks.keep_refused_file") as keep:
+        on_downloaded(row, str(local_file))
+    keep.assert_called_once_with(exports_cls.return_value.run, row, str(local_file))
     assert local_file.exists()
 
 

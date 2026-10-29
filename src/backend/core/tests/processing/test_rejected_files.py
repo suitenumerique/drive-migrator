@@ -13,10 +13,14 @@ from core.backends.destination import (
     DestinationRegistry,
     RejectedFile,
 )
+from core.backends.source import SourceFile, SourceFolder
 from core.factories import WorkspaceFactory
+from core.processing.migration_run import create_migration_run
+from core.processing.plan import build_plan
 from core.processing.rejected_files import (
     REJECTED_FILES_CSV_NAME,
     RejectedFilesArchive,
+    keep_refused_file,
 )
 
 pytestmark = pytest.mark.django_db
@@ -390,3 +394,49 @@ def test_get_download_url_is_none_without_zip():
     workspace = WorkspaceFactory()
 
     assert RejectedFilesArchive(workspace, FakeDestination()).get_download_url() is None
+
+
+@pytest.fixture(name="run")
+def fixture_run():
+    """A run of one file."""
+    plan = build_plan(
+        SourceFolder(
+            name="root",
+            files=[SourceFile(id="f1", name="big", extension=".iso", download_url="x")],
+        )
+    )
+    return create_migration_run(WorkspaceFactory(), "task-1", plan)
+
+
+def test_keep_refused_file_stores_a_copy_under_the_run(run, tmp_path):
+    """A file a destination did not take is kept on S3, so that the user gets
+    it back even when the run ends on another worker."""
+    local_path = tmp_path / "big.iso"
+    local_path.write_bytes(b"iso")
+    migration_file = run.files.get()
+
+    with patch(
+        "core.processing.rejected_files.ArchiveManager.upload_file"
+    ) as upload_file:
+        keep_refused_file(run, migration_file, str(local_path))
+
+    key = f"rejected/{run.workspace_id}/{run.id}/files/{migration_file.id}"
+    upload_file.assert_called_once_with(str(local_path), key)
+    migration_file.refresh_from_db()
+    assert migration_file.kept_key == key
+
+
+def test_keep_refused_file_keeps_no_key_when_s3_fails(run, tmp_path):
+    """S3 being down only leaves the file out of the user's zip."""
+    local_path = tmp_path / "big.iso"
+    local_path.write_bytes(b"iso")
+    migration_file = run.files.get()
+
+    with patch(
+        "core.processing.rejected_files.ArchiveManager.upload_file",
+        side_effect=RuntimeError("S3 down"),
+    ):
+        keep_refused_file(run, migration_file, str(local_path))
+
+    migration_file.refresh_from_db()
+    assert migration_file.kept_key == ""

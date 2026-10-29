@@ -13,7 +13,7 @@ from core.backends.destination import (
     RejectedFile,
 )
 from core.backends.source import SourceManager
-from core.models import Workspace
+from core.models import MigrationFile, Workspace
 from core.processing.folder_helper import ArchiveManager
 
 logger = get_task_logger(__name__)
@@ -22,6 +22,20 @@ logger = get_task_logger(__name__)
 # TODO: French only until the backend ships translations (.po).
 REJECTED_FILES_CSV_NAME = "fichiers-non-migres.csv"
 REJECTED_FILES_S3_KEY = "rejected_files_s3_key"
+
+
+def keep_refused_file(run, migration_file, local_path: str) -> None:
+    """Keep on S3 a file a destination did not take, for the user to get it
+    back once the run is over, whichever worker ends it."""
+    s3_key = f"rejected/{run.workspace_id}/{run.id}/files/{migration_file.id}"
+    try:
+        ArchiveManager().upload_file(local_path, s3_key)
+    # Broad on purpose: failing to keep the file only leaves it out of the zip.
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("Could not keep a refused file of run %s", run.id)
+        return
+    migration_file.kept_key = s3_key
+    MigrationFile.objects.filter(pk=migration_file.pk).update(kept_key=s3_key)
 
 
 class RejectedFilesArchive:

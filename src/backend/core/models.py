@@ -295,6 +295,8 @@ class MigrationFile(BaseModel):
     error = models.TextField(blank=True, default="")
     # Keyed by destination name: what each destination did with the file.
     results = models.JSONField(default=dict, blank=True)
+    # S3 copy kept for the user when a destination did not take the file.
+    kept_key = models.CharField(blank=True, default="")
     finished_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

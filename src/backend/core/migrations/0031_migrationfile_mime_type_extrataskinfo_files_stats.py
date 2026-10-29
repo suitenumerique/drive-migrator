@@ -25,4 +25,9 @@ class Migration(migrations.Migration):
             name='exports_state',
             field=models.JSONField(blank=True, default=dict),
         ),
+        migrations.AddField(
+            model_name='migrationfile',
+            name='kept_key',
+            field=models.CharField(blank=True, default=''),
+        ),
     ]
