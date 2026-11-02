@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- Drop name columns from the Drive members CSV
+
 ## [v0.12.0] - 2026-10-29
 
 ### Changed

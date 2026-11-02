@@ -381,13 +381,13 @@ def test_sharing_disabled_skips_share_members(mock_cls, tmp_path, settings):
 
 
 # ---------------------------------------------------------------------------
-# users_list_by_migrator.csv (shared users list, mirrors the archive export)
+# users_list_by_migrator.csv (shared users list: one email per line)
 # ---------------------------------------------------------------------------
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
 def test_uploads_users_csv_when_workspace_has_members(mock_cls, tmp_path, settings):
-    """export() uploads a users_list_by_migrator.csv listing the shared members, like the zip export."""
+    """export() uploads a users_list_by_migrator.csv that lists member emails only."""
     settings.DRIVE_AUTH_MODE = "service_account"
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
@@ -395,8 +395,19 @@ def test_uploads_users_csv_when_workspace_has_members(mock_cls, tmp_path, settin
         "id": "file-uuid",
         "policy": "https://s3.example.com/users_list_by_migrator.csv?sig=x",
     }
+    captured = {}
+
+    def capture_csv(_policy, path):
+        if str(path).endswith("users_list_by_migrator.csv"):
+            with open(path, encoding="utf-8") as csv_file:
+                captured["lines"] = csv_file.read().splitlines()
+
+    mock_backend.upload_to_s3.side_effect = capture_csv
     workspace = _make_workspace(
-        members=[{"name": "Doe", "firstName": "Jean", "email": "jean@example.com"}]
+        members=[
+            {"name": "Doe", "firstName": "Jean", "email": "jean@example.com"},
+            {"name": "Martin", "firstName": "Alice", "email": "alice@example.com"},
+        ]
     )
 
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
@@ -408,6 +419,7 @@ def test_uploads_users_csv_when_workspace_has_members(mock_cls, tmp_path, settin
         "https://s3.example.com/users_list_by_migrator.csv?sig=x",
         str(tmp_path / "users_list_by_migrator.csv"),
     )
+    assert captured["lines"] == ["jean@example.com", "alice@example.com"]
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
