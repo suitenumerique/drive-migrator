@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Add the architecture documentation
+
 ## [v0.12.0] - 2026-10-29
 
 ### Changed
