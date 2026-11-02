@@ -9,6 +9,10 @@ and this project adheres to
 ## [Unreleased]
 - Split the backend settings into configuration mixins
 
+### Added
+
+- Add the architecture documentation
+
 ### Fixed
 
 - Refresh the Resana offline token before its 1 h idle timeout, so long
