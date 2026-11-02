@@ -32,10 +32,12 @@ def _make_workspace(user=None):
 
 
 def test_implements_abstract_source_backend():
+    """ResanaSourceBackend satisfies the AbstractSourceBackend interface."""
     assert issubclass(ResanaSourceBackend, AbstractSourceBackend)
 
 
 def test_source_type_is_resana():
+    """source_type class attribute is set to 'resana'."""
     assert ResanaSourceBackend.source_type == "resana"
 
 
@@ -45,6 +47,7 @@ def test_source_type_is_resana():
 
 
 def test_get_client_uses_token_manager(settings):
+    """_get_client() resolves a token via ResanaTokenManager and passes it to InterstisClient."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     user = MagicMock()
     backend = ResanaSourceBackend()
@@ -60,6 +63,7 @@ def test_get_client_uses_token_manager(settings):
 
 
 def test_get_client_raises_when_no_user_set(settings):
+    """_get_client() raises RuntimeError if no user has been set on the backend."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     backend = ResanaSourceBackend()
 
@@ -68,6 +72,7 @@ def test_get_client_raises_when_no_user_set(settings):
 
 
 def test_get_client_propagates_token_expired(settings):
+    """_get_client() lets ResanaTokenExpired bubble up when the token is invalid."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     user = MagicMock()
     backend = ResanaSourceBackend()
@@ -104,6 +109,7 @@ def _patch_get_workspaces_clients(
 
 
 def test_get_workspaces_converts_raw_dicts_to_source_workspaces(settings):
+    """get_workspaces() converts each raw workspace dict into a SourceWorkspace."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     raw_workspaces = [
@@ -184,6 +190,7 @@ def test_get_workspaces_unescapes_html_entities_in_title(settings):
 
 
 def test_get_workspaces_stores_user_on_backend(settings):
+    """get_workspaces() stores the user on the backend so _get_client() can use it later."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     user = MagicMock()
@@ -636,6 +643,7 @@ def test_get_workspaces_keeps_unlocked_workspaces_when_locked_listing_fails(
 
 
 def test_get_workspace_structure_stores_migration_user(settings):
+    """get_workspace_structure() sets _user from workspace.migration_user before fetching."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     user = MagicMock()
     workspace = _make_workspace(user)
@@ -651,6 +659,7 @@ def test_get_workspace_structure_stores_migration_user(settings):
 
 
 def test_get_workspace_structure_flat_folder(settings):
+    """get_workspace_structure() converts a single-level API response into SourceFolder with children and files."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     workspace = _make_workspace()
 
@@ -717,6 +726,7 @@ def test_get_workspace_structure_unescapes_html_entities_in_names(settings):
 
 
 def test_get_workspace_structure_empty_workspace(settings):
+    """get_workspace_structure() returns an empty SourceFolder when the API returns no members."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     workspace = _make_workspace()
 
@@ -731,6 +741,7 @@ def test_get_workspace_structure_empty_workspace(settings):
 
 
 def test_get_workspace_structure_normalises_extension_without_dot(settings):
+    """Extensions returned without a leading dot are normalised to include one."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     workspace = _make_workspace()
 
@@ -848,6 +859,7 @@ def test_get_workspace_structure_empty_subfolder_does_not_crash(settings):
 
 
 def test_download_file_uses_stored_user(settings):
+    """download_file() authenticates with the stored user and delegates to InterstisClient."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     user = MagicMock()
     backend = ResanaSourceBackend()
@@ -868,6 +880,7 @@ def test_download_file_uses_stored_user(settings):
 
 
 def test_download_file_raises_when_no_user_set(settings):
+    """download_file() raises RuntimeError when no user context has been set."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     source_file = SourceFile(
         id="file-uuid", name="doc", extension=".pdf", download_url="file-uuid"
