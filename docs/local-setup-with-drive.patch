@@ -1,0 +1,159 @@
+diff --git a/docker-compose.yml b/docker-compose.yml
+index fd8cb03..5b8d8d8 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -6,17 +6,17 @@ services:
+     env_file:
+       - env.d/development/postgresql
+     ports:
+-      - "15432:5432"
++      - "15433:5432"
+ 
+   redis:
+     image: redis:5
+     ports:
+-      - "16379:6379"
++      - "16380:6379"
+ 
+   mailcatcher:
+     image: sj26/mailcatcher:latest
+     ports:
+-      - "1081:1080"
++      - "1082:1080"
+ 
+   minio:
+     user: ${DOCKER_USER:-1000}
+@@ -25,8 +25,8 @@ services:
+       - MINIO_ROOT_USER=dinum
+       - MINIO_ROOT_PASSWORD=password
+     ports:
+-      - "9000:9000"
+-      - "9001:9001"
++      - "9010:9000"
++      - "9011:9001"
+     entrypoint: ""
+     command: minio server --console-address :9001 /data
+     volumes:
+@@ -57,23 +57,33 @@ services:
+     env_file:
+       - env.d/development/common
+       - env.d/development/postgresql
++    extra_hosts:
++      - "host.docker.internal:host-gateway"
+     ports:
+-      - "8071:8000"
++      - "8072:8000"
+     volumes:
+       - ./src/backend:/app
+       - ./data/static:/data/static
+       - ./data/workdir:/workdir
+       - ./data/demo-data:/demo-data:ro
++    networks:
++      - default
++      - lasuite
+     depends_on:
+       - postgresql
+       - mailcatcher
+       - redis
+       - createbuckets
+-      - nginx
++      - nginx-migration
+ 
+   celery-dev:
+     user: ${DOCKER_USER:-1000}
+     image: osmose-migration:backend-development
++    networks:
++      - default
++      - lasuite
++    extra_hosts:
++      - "host.docker.internal:host-gateway"
+     command:
+       [
+         "uv",
+@@ -150,10 +160,10 @@ services:
+     depends_on:
+       - app
+ 
+-  nginx:
++  nginx-migration:
+     image: nginx:1.25
+     ports:
+-      - "8083:8083"
++      - "8086:8083"
+     volumes:
+       - ./docker/files/etc/nginx/conf.d:/etc/nginx/conf.d:ro
+     depends_on:
+@@ -177,7 +187,7 @@ services:
+       dockerfile: ./src/frontend/Dockerfile
+       target: main-dev
+     ports:
+-      - "3000:3000"
++      - "3010:3000"
+     volumes:
+       - ./src/frontend/apps/main:/home/frontend/apps/main
+       - /home/frontend/node_modules/
+@@ -193,7 +203,7 @@ services:
+       args:
+         NEXT_PUBLIC_API_ORIGIN: http://localhost:8071
+     ports:
+-      - "3000:8080"
++      - "3010:8080"
+     depends_on:
+       - celery-dev
+ 
+@@ -201,7 +211,7 @@ services:
+     image: postgres:14.3
+     platform: linux/amd64
+     ports:
+-      - "5433:5432"
++      - "5434:5432"
+     env_file:
+       - env.d/development/kc_postgresql
+ 
+@@ -213,9 +223,8 @@ services:
+       - start-dev
+       - --features=preview
+       - --import-realm
+-      - --proxy=edge
+-      - --hostname-url=http://localhost:8083
+-      - --hostname-admin-url=http://localhost:8083/
++      - --hostname-url=http://localhost:8085
++      - --hostname-admin-url=http://localhost:8085/
+       - --hostname-strict=false
+       - --hostname-strict-https=false
+     environment:
+@@ -229,6 +238,12 @@ services:
+       KC_DB_SCHEMA: public
+       PROXY_ADDRESS_FORWARDING: "true"
+     ports:
+-      - "8080:8080"
++      - "8085:8080"
+     depends_on:
+       - kc_postgresql
++
++networks:
++  default: {}
++  lasuite:
++    name: lasuite-network
++    external: true
+diff --git a/docker/files/etc/nginx/conf.d/default.conf b/docker/files/etc/nginx/conf.d/default.conf
+index f4886b8..ebaf6fb 100644
+--- a/docker/files/etc/nginx/conf.d/default.conf
++++ b/docker/files/etc/nginx/conf.d/default.conf
+@@ -4,10 +4,15 @@ server {
+     server_name localhost;
+     charset utf-8;
+ 
++    proxy_buffer_size 128k;
++    proxy_buffers 4 256k;
++    proxy_busy_buffers_size 256k;
++
+     location / {
+         proxy_pass http://keycloak:8080;
+-        proxy_set_header Host $host;
++        proxy_set_header Host $http_host;
+         proxy_set_header X-Real-IP $remote_addr;
+         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++        proxy_set_header X-Forwarded-Proto "http";
+     }
+ }

@@ -12,6 +12,7 @@ and this project adheres to
 ### Added
 
 - Add the architecture documentation
+- Add a guide to run the migrator with a local La Suite Drive
 
 ### Fixed
 
