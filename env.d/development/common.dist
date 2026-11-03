@@ -59,3 +59,10 @@ OIDC_AUTH_REQUEST_EXTRA_PARAMS={"acr_values": "eidas1"}
 # Fernet key for OIDC token encryption at rest
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 OIDC_TOKENS_ENCRYPTION_KEY=
+
+# upload-broker (tribu destination): sends the archives to Tribu. To use it,
+# add core.destinations.tribu.backend.TribuDestinationBackend to
+# DESTINATION_BACKENDS. Its tokens come from Menshen (MENSHEN_* settings).
+#UPLOAD_BROKER_URL=
+#UPLOAD_BROKER_AUDIENCE=
+#UPLOAD_BROKER_SCOPE=
