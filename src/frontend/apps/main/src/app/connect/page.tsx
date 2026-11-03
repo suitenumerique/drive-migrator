@@ -329,9 +329,9 @@ function ConnectPageContent() {
     return null;
   }
 
-  const isArchiveZipTarget = target === 'archive-zip';
-  const authToolName = isArchiveZipTarget ? 'ProConnect' : 'Fichiers';
-  const AuthToolLogo = isArchiveZipTarget ? ProConnectLogo : FichiersLogo;
+  const isFichiersTarget = target === 'lasuite-fichiers';
+  const authToolName = isFichiersTarget ? 'Fichiers' : 'ProConnect';
+  const AuthToolLogo = isFichiersTarget ? FichiersLogo : ProConnectLogo;
 
   return (
     <div className="migration-connect container">

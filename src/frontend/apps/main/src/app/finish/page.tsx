@@ -33,7 +33,9 @@ export default function Finish() {
   }, []);
 
   const isArchiveZipTarget = migrationTarget === 'archive-zip';
-  const { driveFrontendUrl } = useMigrationConfig();
+  const isTribuTarget = migrationTarget === 'tribu';
+  const isFichiersTarget = migrationTarget === 'lasuite-fichiers';
+  const { driveFrontendUrl, tribuFrontendUrl } = useMigrationConfig();
 
   return (
     <div className="container">
@@ -63,17 +65,34 @@ export default function Finish() {
           </h1>
 
           <p className="page-finish__description">
-            {isArchiveZipTarget
-              ? t(
-                  'Vos espaces sont en cours de préparation pour être migrés. Vous recevrez un e-mail quand tout sera prêt. Vous pouvez fermer cette page.',
-                )
-              : t(
-                  'Vos espaces sont en cours de migration. Vous recevrez un e-mail quand tout sera prêt.',
-                )}
+            {isArchiveZipTarget &&
+              t(
+                'Vos espaces sont en cours de préparation pour être migrés. Vous recevrez un e-mail quand tout sera prêt. Vous pouvez fermer cette page.',
+              )}
+            {isTribuTarget &&
+              t(
+                'Vos espaces vont être envoyés à Tribu. La migration peut prendre entre quelques heures et 1 à 2 jours.',
+              )}
+            {isFichiersTarget &&
+              t(
+                'Vos espaces sont en cours de migration. Vous recevrez un e-mail quand tout sera prêt.',
+              )}
           </p>
 
           <div className="page-finish__actions">
-            {isArchiveZipTarget ? (
+            {isTribuTarget && tribuFrontendUrl && (
+              <Button
+                variant="secondary"
+                fullWidth
+                color="brand"
+                href={tribuFrontendUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t('Accéder à Tribu')}
+              </Button>
+            )}
+            {isArchiveZipTarget && (
               <Button
                 variant="tertiary"
                 fullWidth
@@ -84,7 +103,8 @@ export default function Finish() {
               >
                 {t('Démarrer avec LaSuite')}
               </Button>
-            ) : (
+            )}
+            {isFichiersTarget && (
               <>
                 <Button
                   variant="secondary"

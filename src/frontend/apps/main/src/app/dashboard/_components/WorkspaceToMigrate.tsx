@@ -62,6 +62,7 @@ export const WorkspacesToMigrate = ({
   }, []);
 
   const isArchiveZipTarget = migrationTarget === 'archive-zip';
+  const isTribuTarget = migrationTarget === 'tribu';
 
   const selectableWorkspaces = workspaces[WorkspaceStatus.NONE];
   const pendingWorkspaces = workspaces[WorkspaceStatus.PENDING];
@@ -164,6 +165,11 @@ export const WorkspacesToMigrate = ({
 
   const openSharedAccessModal = (data: IForm) => {
     setPendingFormData(data);
+    if (isTribuTarget) {
+      setIsConfirmModalOpen(true);
+      return;
+    }
+
     setSharedAccessMode('manual');
     setIsSharedAccessModalOpen(true);
   };
@@ -287,9 +293,11 @@ export const WorkspacesToMigrate = ({
             </Alert>
           ) : (
             <p className="workspaces-to-migrate__description">
-              {t(
-                'Pour chaque espace sélectionné, un dossier partagé reprenant les mêmes membres sera créé dans Fichiers.',
-              )}
+              {isTribuTarget
+                ? t('Chaque espace sélectionné sera envoyé à Tribu.')
+                : t(
+                    'Pour chaque espace sélectionné, un dossier partagé reprenant les mêmes membres sera créé dans Fichiers.',
+                  )}
             </p>
           )}
         </div>

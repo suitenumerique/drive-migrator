@@ -5,9 +5,13 @@ import { useApi } from '@/hooks/useApi';
 interface MigrationConfig {
   file_limit_per_workspace: number;
   drive_frontend_url: string;
+  tribu_frontend_url: string;
   help_documentation_url: string;
   help_contact_email: string;
+  destinations: string[];
 }
+
+const NO_DESTINATIONS: string[] = [];
 
 export const useMigrationConfig = () => {
   const { fetchApi } = useApi();
@@ -26,7 +30,9 @@ export const useMigrationConfig = () => {
   return {
     fileLimitPerWorkspace: config?.file_limit_per_workspace ?? 0,
     driveFrontendUrl: config?.drive_frontend_url,
+    tribuFrontendUrl: config?.tribu_frontend_url,
     helpDocumentationUrl: config?.help_documentation_url,
     helpContactEmail: config?.help_contact_email,
+    destinations: config?.destinations ?? NO_DESTINATIONS,
   };
 };

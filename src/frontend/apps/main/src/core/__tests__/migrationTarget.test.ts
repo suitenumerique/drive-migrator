@@ -6,11 +6,14 @@ import {
 } from '../migrationTarget';
 
 describe('isMigrationTarget', () => {
-  it.each(['lasuite-fichiers', 'archive-zip'])('accepts %s', (value) => {
-    expect(isMigrationTarget(value)).toBe(true);
-  });
+  it.each(['lasuite-fichiers', 'archive-zip', 'tribu'])(
+    'accepts %s',
+    (value) => {
+      expect(isMigrationTarget(value)).toBe(true);
+    },
+  );
 
-  it.each([null, '', 'drive', 'archive'])('rejects %s', (value) => {
+  it.each([null, '', 'drive', 'archive', 'toString'])('rejects %s', (value) => {
     expect(isMigrationTarget(value)).toBe(false);
   });
 });
@@ -41,5 +44,9 @@ describe('getMigrationDestination', () => {
 
   it('maps La Suite Fichiers to Drive', () => {
     expect(getMigrationDestination('lasuite-fichiers')).toBe('drive');
+  });
+
+  it('maps Tribu to the tribu destination', () => {
+    expect(getMigrationDestination('tribu')).toBe('tribu');
   });
 });
