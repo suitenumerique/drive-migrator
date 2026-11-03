@@ -22,7 +22,10 @@
       "api_errors.DriveTokenRequired": "Your LaSuite Drive session has expired, please log in again.",
       "api_errors.SourceUnavailable": "The source tool cannot be reached for now, please try again in a few moments.",
       "Reconnexion nécessaire": "Login required",
-      "Se reconnecter": "Log in again"
+      "Se reconnecter": "Log in again",
+      "Chaque espace sélectionné sera envoyé à Tribu.": "Each selected workspace will be sent to Tribu.",
+      "Vos espaces vont être envoyés à Tribu. La migration peut prendre entre quelques heures et 1 à 2 jours.": "Your workspaces will be sent to Tribu. The migration can take from a few hours to 1 or 2 days.",
+      "Accéder à Tribu": "Go to Tribu"
     }
   },
   "fr": {

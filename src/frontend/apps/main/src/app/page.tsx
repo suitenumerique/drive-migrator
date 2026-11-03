@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import FichiersLogo from '@/assets/icons/fichier-mono.svg';
 import ZipLogo from '@/assets/icons/icon-zip.svg';
 import ResanaLogo from '@/assets/icons/resana-mono.svg';
+import TribuLogo from '@/assets/icons/tribu-logo.svg';
 import MigratorLogo from '@/assets/images/logo.svg';
 import migrationHero from '@/assets/images/migration.png';
 import { ArrowRightIcon } from '@/components/icons/ArrowRightIcon';
@@ -18,6 +19,7 @@ import {
   MigrationTarget,
   getConnectPath,
 } from '@/core/migrationTarget';
+import { useMigrationConfig } from '@/hooks/useMigrationConfig';
 
 import './page.scss';
 
@@ -49,6 +51,7 @@ export default function Home() {
   const { t } = useTranslation();
   const router = useRouter();
   const { isAuthenticated, isAuthPending } = useAuth();
+  const { destinations } = useMigrationConfig();
   const [targetTool, setTargetTool] =
     useState<MigrationTarget>('lasuite-fichiers');
 
@@ -64,8 +67,17 @@ export default function Home() {
         label: t('Archive zip'),
         render: toolOptionRender(ZipLogo, t('Archive zip')),
       },
+      ...(destinations.includes('tribu')
+        ? [
+            {
+              value: 'tribu',
+              label: 'Tribu',
+              render: toolOptionRender(TribuLogo, 'Tribu'),
+            },
+          ]
+        : []),
     ],
-    [t],
+    [t, destinations],
   );
 
   const handleStartMigration = () => {
