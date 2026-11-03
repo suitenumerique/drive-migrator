@@ -274,6 +274,10 @@ class Base(Configuration):
     DRIVE_FRONTEND_URL = values.Value(
         DRIVE_BASE_URL, environ_name="DRIVE_FRONTEND_URL", environ_prefix=None
     )
+    # Tribu link shown at the end of a migration. No link when empty.
+    TRIBU_FRONTEND_URL = values.Value(
+        "", environ_name="TRIBU_FRONTEND_URL", environ_prefix=None
+    )
 
     # Help menu documentation link and contact email, displayed by the frontend.
     HELP_DOCUMENTATION_URL = values.Value(

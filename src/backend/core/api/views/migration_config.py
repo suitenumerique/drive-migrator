@@ -4,6 +4,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.backends.destination import DestinationRegistry
+
 
 class MigrationConfigApiView(APIView):
     """Expose migration-related settings the frontend needs to display to users."""
@@ -15,7 +17,9 @@ class MigrationConfigApiView(APIView):
             {
                 "file_limit_per_workspace": settings.MIGRATION_FILE_LIMIT_PER_WORKSPACE,
                 "drive_frontend_url": settings.DRIVE_FRONTEND_URL,
+                "tribu_frontend_url": settings.TRIBU_FRONTEND_URL,
                 "help_documentation_url": settings.HELP_DOCUMENTATION_URL,
                 "help_contact_email": settings.HELP_CONTACT_EMAIL,
+                "destinations": DestinationRegistry.get_names(),
             }
         )
