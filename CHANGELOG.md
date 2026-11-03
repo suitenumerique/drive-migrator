@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [v0.12.1] - 2026-11-03
+
 - Drop name columns from the Drive members CSV
 - add unit tests for migration helpers
 - Remove unused dependencies in the backend
@@ -180,7 +182,8 @@ and this project adheres to
 
 - delete unused var in Makefile
 
-[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.12.0...main
+[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.12.1...main
+[v0.12.1]: https://github.com/suitenumerique/drive-migrator/releases/v0.12.1
 [v0.12.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.12.0
 [v0.11.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.11.0
 [v0.10.1]: https://github.com/suitenumerique/drive-migrator/releases/v0.10.1
