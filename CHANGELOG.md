@@ -12,6 +12,8 @@ and this project adheres to
 
 - Integrate a new Drive `"user_exchanged_token"` auth mode, exchanging the
   ProConnect token with Menshen
+- Add a `tribu` destination. It sends the workspace archive to Tribu through
+  upload-broker (`UPLOAD_BROKER_*` settings). The token comes from Menshen
 
 ## [v0.12.1] - 2026-11-03
 

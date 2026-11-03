@@ -324,6 +324,17 @@ class Base(Configuration):
     DRIVE_TOKEN_EXCHANGE_SCOPE = values.Value(
         "", environ_name="DRIVE_TOKEN_EXCHANGE_SCOPE", environ_prefix=None
     )
+    # upload-broker (tribu destination): sends the archives to Tribu.
+    # Its tokens come from Menshen, with the MENSHEN_CLIENT_* credentials.
+    UPLOAD_BROKER_URL = values.Value(
+        "", environ_name="UPLOAD_BROKER_URL", environ_prefix=None
+    )
+    UPLOAD_BROKER_AUDIENCE = values.Value(
+        "", environ_name="UPLOAD_BROKER_AUDIENCE", environ_prefix=None
+    )
+    UPLOAD_BROKER_SCOPE = values.Value(
+        "", environ_name="UPLOAD_BROKER_SCOPE", environ_prefix=None
+    )
     # In user token modes, who creates the user's Drive account:
     # "user_created": the user must log in to Drive once before migrating.
     # "auto_created": Drive creates it on the first migration (needs the
