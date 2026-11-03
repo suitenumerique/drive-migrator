@@ -24,17 +24,14 @@ requires-python = ">=3.14"
 dependencies = [
     "Brotli==1.2.1",
     "pyjwt==2.15.1",
-    "WeasyPrint>=60.2",
     "boto3==1.35.64",
     "celery[redis]==5.3.6",
     "django-celery-results==2.5.1",
     "django-configurations==2.5",
     "django-cors-headers==4.3.1",
-    "django-countries==7.5.1",
     "django-debug-toolbar==4.4.2",
     "django-filter==24.2",
     "django-hijack==3.6.1",
-    "django-parler==2.3",
     "django-redis==5.4.0",
     "django-storages[s3]==1.14.2",
     "django-timezone-field>=5.1",
@@ -47,18 +44,16 @@ dependencies = [
     "freezegun==1.5.0",
     "gunicorn==22.0.0",
     "jsonschema==4.20.0",
-    "markdown==3.10.2",
     "mozilla-django-oidc==4.0.0",
     "nested-multipart-parser==1.5.0",
     "posthog==7.12.0",
+    "pillow>=13.0.0",
     "psycopg[binary]==3.3.4",
-    "python-frontmatter==1.0.1",
     "python-magic==0.4.27",
     "redis==5.0.3",
     "requests==2.34.2",
     "sentry-sdk[django]==2.17.0",
     "tenacity==9.1.4",
-    "url-normalize==1.4.3",
     "whitenoise==6.6.0",
 ]
 
@@ -89,12 +84,6 @@ dev = [
 
 [tool.uv]
 package = false
-constraint-dependencies = [
-    # Pin pillow above the versions vulnerable to the image decoder and
-    # encoder advisories fixed in 13.0.0. Pulled transitively via
-    # WeasyPrint, which has no upper bound on pillow.
-    "pillow>=13.0.0",
-]
 
 [tool.uv.build-backend]
 module-root = ""

@@ -466,7 +466,6 @@ class Base(Configuration):
         "dockerflow.django",
         "rest_framework",
         "django_filters",
-        "parler",
         # Third Party apps
         "hijack",
         "hijack.contrib.admin",
@@ -715,20 +714,6 @@ class Base(Configuration):
         Delegate to the module function to enable easier testing.
         """
         return get_release()
-
-    # pylint: disable=invalid-name
-    @property
-    def PARLER_LANGUAGES(self):
-        """
-        Return languages for Parler computed from the LANGUAGES and LANGUAGE_CODE settings.
-        """
-        return {
-            self.SITE_ID: tuple({"code": code} for code, _name in self.LANGUAGES),
-            "default": {
-                "fallbacks": [self.LANGUAGE_CODE],
-                "hide_untranslated": False,
-            },
-        }
 
     @classmethod
     def post_setup(cls):

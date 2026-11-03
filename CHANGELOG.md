@@ -10,6 +10,7 @@ and this project adheres to
 
 - Drop name columns from the Drive members CSV
 - add unit tests for migration helpers
+- Remove unused dependencies in the backend
 
 ## [v0.12.0] - 2026-10-29
 
