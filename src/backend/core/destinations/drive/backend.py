@@ -166,16 +166,13 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         workspace.save()
 
     def _write_users_csv(self, workspace, local_folder_path: str) -> str | None:
-        """Write the shared-users listing into the local folder, like the archive export."""
+        """Write one email per line, with no header, so Drive can parse the file."""
         if not workspace.members:
             return None
         csv_path = os.path.join(local_folder_path, MEMBERS_CSV_FILENAME)
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerows(
-                [m.get("name", ""), m.get("firstName", ""), m.get("email", "")]
-                for m in workspace.members
-            )
+            writer.writerows([m.get("email", "")] for m in workspace.members)
         return csv_path
 
     def _share_members(self, backend, workspace, root_id: str) -> None:
