@@ -71,9 +71,20 @@ def test_is_connected_true_even_when_token_expired():
     """is_connected() only checks presence, not validity."""
     user = _make_user(
         access="some-access",
+        refresh="some-refresh",
         expires_at=timezone.now() - timedelta(hours=1),
     )
     assert ResanaTokenManager(user).is_connected() is True
+
+
+def test_is_connected_false_without_offline_token():
+    """An access token kept for its last minutes can't be renewed: the user is
+    shown as disconnected, to log in again."""
+    user = _make_user(
+        access="some-access",
+        expires_at=timezone.now() + timedelta(hours=1),
+    )
+    assert ResanaTokenManager(user).is_connected() is False
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +141,7 @@ def test_get_valid_token_refreshes_when_expired(settings):
         expires_at=timezone.now() - timedelta(seconds=1),
     )
 
-    def fake_refresh(self):
+    def fake_refresh(self, keep_access_token=False):  # pylint: disable=unused-argument
         self.user.resana_access_token = encrypt_token("new-access")
         self.user.resana_token_expires_at = timezone.now() + timedelta(hours=3)
         self.user.save()
@@ -146,7 +157,7 @@ def test_get_valid_token_refreshes_when_expires_at_is_none(settings):
     settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
     user = _make_user(access="old-access", refresh="my-refresh", expires_at=None)
 
-    def fake_refresh(self):
+    def fake_refresh(self, keep_access_token=False):  # pylint: disable=unused-argument
         self.user.resana_access_token = encrypt_token("refreshed")
         self.user.resana_token_expires_at = timezone.now() + timedelta(hours=3)
         self.user.save()
@@ -590,6 +601,25 @@ def test_refresh_raises_token_expired_when_bridge_response_is_malformed(settings
     assert user.resana_access_token == ""
 
 
+def test_refresh_keeps_the_tokens_on_a_bridge_server_error(settings):
+    """A bridge 5xx is a transient failure, not a rejection: it is raised as a
+    request error and the tokens are kept for a later retry."""
+    user = _make_user_with_migrator_tokens(settings)
+    server_error = requests.HTTPError("503 Service Unavailable")
+    server_error.response = MagicMock(status_code=503)
+
+    _refresh_with(
+        user,
+        keycloak_response={"access_token": "kc", "refresh_token": "new-off"},
+        bridge=server_error,
+        raises=requests.HTTPError,
+    )
+
+    user.refresh_from_db()
+    assert decrypt_token(user.resana_refresh_token) == "old-off"
+    assert ResanaTokenManager(user).is_connected()
+
+
 # ---------------------------------------------------------------------------
 # get_valid_token() — concurrent refreshes for the same user
 # ---------------------------------------------------------------------------
@@ -758,9 +788,11 @@ def test_refresh_logs_the_expired_token_and_the_new_lifetime(settings):
 
     assert _rendered(mock_logger.info) == [
         f"Resana token refresh for user {user.id}: access token expired since "
-        "2026-10-15T15:18:07+00:00 (1s ago), refreshing with the offline token",
+        "2026-10-15T15:18:07+00:00 (1s ago), offline token expiry unreadable, "
+        "refreshing with the offline token",
         f"Resana token refresh succeeded for user {user.id}: new access token "
-        "expires at 2026-10-15T18:18:08+00:00 (in 10800s), offline token rotated",
+        "expires at 2026-10-15T18:18:08+00:00 (in 10800s), offline token rotated, "
+        "expiry unreadable",
     ]
     mock_logger.warning.assert_not_called()
 
@@ -772,7 +804,7 @@ def test_refresh_logs_an_offline_token_kept_by_keycloak(settings):
 
     mock_logger = _refresh_with(user, keycloak_response={"access_token": "kc"})
 
-    assert _rendered(mock_logger.info)[-1].endswith("offline token unchanged")
+    assert "offline token unchanged, " in _rendered(mock_logger.info)[-1]
 
 
 def test_refresh_logs_the_keycloak_error_when_the_offline_token_is_refused(settings):
@@ -922,5 +954,6 @@ def test_refresh_logs_an_access_token_without_expiry(settings):
 
     assert _rendered(mock_logger.info)[0] == (
         f"Resana token refresh for user {user.id}: access token expiry unknown "
-        "(will be refreshed), refreshing with the offline token"
+        "(will be refreshed), offline token expiry unreadable, refreshing with "
+        "the offline token"
     )

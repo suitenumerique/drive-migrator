@@ -10,7 +10,7 @@ from django.utils import timezone
 import pytest
 from django_celery_results.models import TaskResult
 
-from core.backends.source import SourceFolder
+from core.backends.source import SourceFile, SourceFolder
 from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.tasks import (
     cleanup_workspace_dir,
@@ -26,6 +26,7 @@ from core.processing.tasks import (
 from core.processing.tasks import (
     task_success as task_success_handler,
 )
+from core.sources.resana.token_manager import ResanaTokenExpired
 
 
 @pytest.fixture(autouse=True)
@@ -183,6 +184,42 @@ def test_export_persists_download_errors_on_workspace(workspace, user):
 
     assert workspace.download_errors == failed_files
     workspace.save.assert_called()
+
+
+def test_export_keeps_earlier_download_errors_when_the_source_token_expires(
+    workspace, user
+):
+    """An expired source token stops the run with that error, so the user is
+    asked to log in again, and keeps the files that failed before it."""
+    files = [
+        SourceFile(id=f"f{i}", name=f"doc{i}", extension=".pdf", download_url="")
+        for i in range(3)
+    ]
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.IntegrityTracker"),
+        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
+    ):
+        source_backend = mock_sm.return_value.get_backend.return_value
+        source_backend.get_workspace_structure.return_value = SourceFolder(
+            name="root", files=files
+        )
+        source_backend.download_file.side_effect = [
+            RuntimeError("504 Gateway Timeout"),
+            ResanaTokenExpired("Resana offline token is no longer valid."),
+        ]
+        mock_dr.get_all.return_value = []
+
+        with pytest.raises(ResanaTokenExpired):
+            export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+
+    assert source_backend.download_file.call_count == 2
+    assert [error["name"] for error in workspace.download_errors] == [
+        "doc0.pdf",
+        "doc1.pdf",
+    ]
 
 
 def test_export_resets_previous_run_errors_before_starting(workspace, user):
@@ -703,7 +740,38 @@ def test_task_failure_handler_sends_fail_mail():
         task_failure_handler(sender=mock_sender)
 
     mock_mails_cls.return_value.send_fail_mail.assert_called_once_with(
-        mock_extra_task.user, mock_workspace
+        mock_extra_task.user, mock_workspace, source_token_expired=False
+    )
+
+
+def test_task_failure_handler_asks_to_log_in_again_on_expired_source_token():
+    """A run that failed on an expired source token tells the user to log in
+    to the source again before relaunching."""
+    mock_sender = MagicMock()
+    mock_sender.request.id = "task-id-4"
+    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
+    mock_workspace = MagicMock(spec=Workspace)
+    mock_workspace.destination_statuses = {}
+    mock_extra_task.workspace = mock_workspace
+
+    with (
+        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
+        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.MailsManager") as mock_mails_cls,
+    ):
+        mock_tr_cls.objects.filter.return_value.first.return_value = MagicMock(
+            spec=TaskResult
+        )
+        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
+
+        task_failure_handler(
+            sender=mock_sender,
+            exception=ResanaTokenExpired("Resana offline token is no longer valid."),
+        )
+
+    mock_mails_cls.return_value.send_fail_mail.assert_called_once_with(
+        mock_extra_task.user, mock_workspace, source_token_expired=True
     )
 
 

@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.backends.source import AbstractSourceBackend, SourceFile, SourceFolder
+from core.backends.source import (
+    AbstractSourceBackend,
+    SourceFile,
+    SourceFolder,
+    SourceTokenExpired,
+)
 from core.models import Workspace
 from core.processing.folder_creator import FolderCreator
 
@@ -420,6 +425,29 @@ def test_create_folder_continues_after_one_file_download_fails(tmp_path, setting
     creator.create_folder(workspace, folder, backend)  # must not raise
 
     assert backend.download_file.call_count == 2
+
+
+def test_create_folder_stops_when_the_source_token_expired(tmp_path, settings):
+    """An expired source token would fail every remaining file the same way:
+    the download stops, so the run fails and asks the user to log in again."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws15")
+    file_a = SourceFile(
+        id="f1", name="first", extension=".pdf", download_url="http://x/first.pdf"
+    )
+    file_b = SourceFile(
+        id="f2", name="second", extension=".pdf", download_url="http://x/second.pdf"
+    )
+    folder = SourceFolder(name="root", files=[file_a, file_b])
+    backend = _make_backend()
+    backend.download_file.side_effect = SourceTokenExpired("token expired")
+
+    creator = FolderCreator()
+    with pytest.raises(SourceTokenExpired):
+        creator.create_folder(workspace, folder, backend)
+
+    assert backend.download_file.call_count == 1
+    assert [failed["name"] for failed in creator.failed_files] == ["first.pdf"]
 
 
 def test_create_folder_records_failed_downloads(tmp_path, settings):

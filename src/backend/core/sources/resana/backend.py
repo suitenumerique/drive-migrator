@@ -60,19 +60,25 @@ class ResanaSourceBackend(AbstractSourceBackend):
         token = ResanaTokenManager(self._user).get_valid_token()
         return InterstisClient(token)
 
-    def _get_members_client(self) -> ResanaMembersClient:
+    def _get_members_client(
+        self, access_token: str | None = None
+    ) -> ResanaMembersClient:
         manager = ResanaTokenManager(self._user)
         return ResanaMembersClient(
-            access_token=manager.get_valid_token(),
+            access_token=(
+                manager.get_valid_token() if access_token is None else access_token
+            ),
             session_id=manager.get_session_id(),
             csrf_token=manager.get_csrf_token(),
             base_url=settings.RESANA_WEB_ENDPOINT,
         )
 
-    def _get_lock_client(self) -> ResanaLockClient:
+    def _get_lock_client(self, access_token: str | None = None) -> ResanaLockClient:
         manager = ResanaTokenManager(self._user)
         return ResanaLockClient(
-            access_token=manager.get_valid_token(),
+            access_token=(
+                manager.get_valid_token() if access_token is None else access_token
+            ),
             session_id=manager.get_session_id(),
             csrf_token=manager.get_csrf_token(),
             base_url=settings.RESANA_WEB_ENDPOINT,
@@ -214,6 +220,9 @@ class ResanaSourceBackend(AbstractSourceBackend):
         reverses that.
         """
         self._user = workspace.migration_user
+        # A task that waited in the queue past the offline token idle timeout
+        # must fail here, not hours later with the workspace left locked.
+        ResanaTokenManager(self._user).ensure_offline_token()
         members_client = self._get_members_client()
         slug = members_client.find_slug_by_workspace_uuid(workspace.source_id)
         if slug is None:
@@ -279,8 +288,11 @@ class ResanaSourceBackend(AbstractSourceBackend):
 
         self._user = workspace.migration_user
         try:
-            lock_client = self._get_lock_client()
-            members_client = self._get_members_client()
+            # Fetched once: in the last minute of the access token, a second
+            # Keycloak timeout would outlast it.
+            token = ResanaTokenManager(self._user).get_token_for_cleanup()
+            lock_client = self._get_lock_client(access_token=token)
+            members_client = self._get_members_client(access_token=token)
         except _FINALIZE_EXPORT_EXCEPTIONS:
             logger.error(
                 "Could not build clients to finalize export for workspace %s, "

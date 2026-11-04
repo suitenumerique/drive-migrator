@@ -10,7 +10,12 @@ from django_celery_results.models import TaskResult
 
 from core.analytics import local_files_stats, posthog_capture, workspaces_counts
 from core.backends.destination import DestinationRegistry
-from core.backends.source import SourceFolder, SourceManager, truncate_folder_files
+from core.backends.source import (
+    SourceFolder,
+    SourceManager,
+    SourceTokenExpired,
+    truncate_folder_files,
+)
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.folder_creator import FolderCreator
@@ -175,16 +180,18 @@ def _export_workspace(workspace, user, folder, source_backend, integrity_tracker
     logger.info("Calling create_folder ...")
     creator = FolderCreator()
     integrity_tracker.set_retrieval(creator, creator.get_workspace_path(workspace))
-    local_path = creator.create_folder(workspace, folder, source_backend)
-
-    if creator.failed_files:
-        workspace.download_errors = creator.failed_files
-        workspace.save(update_fields=["download_errors"])
-        logger.warning(
-            "%s file(s) failed to download: %s",
-            len(creator.failed_files),
-            creator.failed_files,
-        )
+    try:
+        local_path = creator.create_folder(workspace, folder, source_backend)
+    finally:
+        # Also when an expired source token stopped the downloads midway.
+        if creator.failed_files:
+            workspace.download_errors = creator.failed_files
+            workspace.save(update_fields=["download_errors"])
+            logger.warning(
+                "%s file(s) failed to download: %s",
+                len(creator.failed_files),
+                creator.failed_files,
+            )
 
     if creator.files_count and creator.files_success == 0:
         raise RuntimeError(
@@ -261,4 +268,8 @@ def task_failure(sender=None, **kwargs):
     cleanup_workspace_dir(workspace)
 
     mail_manager = MailsManager()
-    mail_manager.send_fail_mail(extra_task.user, workspace)
+    mail_manager.send_fail_mail(
+        extra_task.user,
+        workspace,
+        source_token_expired=isinstance(kwargs.get("exception"), SourceTokenExpired),
+    )
