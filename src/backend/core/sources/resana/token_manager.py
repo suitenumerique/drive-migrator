@@ -30,6 +30,9 @@ from core.utils import (
 logger = logging.getLogger(__name__)
 
 REFRESH_BUFFER_SECONDS = 60
+# Without an offline token nothing can renew the access token: stop the run
+# early enough for its cleanup to unlock the workspace with what is left.
+NO_OFFLINE_TOKEN_BUFFER_SECONDS = 10 * 60
 # Keycloak ends an offline session left unused for its idle timeout (1 h for the
 # DINUM client), long before the access token (3 h) needs a refresh. Wide, so a
 # single long download can't step over the whole refresh window.
@@ -174,8 +177,9 @@ class ResanaTokenManager:
     def get_valid_token(self, strict: bool = False) -> str:
         """Return a valid decrypted access token, refreshing proactively if near expiry.
 
-        Raises ResanaTokenExpired (and clears the stored tokens) if the token
-        cannot be renewed or decrypted.
+        Raises ResanaTokenExpired (and clears the stored tokens, except an
+        access token that still works, kept for get_token_for_cleanup) if the
+        token cannot be renewed or decrypted.
 
         Refreshes are serialized per user: concurrent workers (e.g. several
         workspace exports) would otherwise each submit the same offline token,
@@ -207,12 +211,16 @@ class ResanaTokenManager:
                 self.clear_tokens()
                 raise ResanaTokenExpired("No Resana offline token is stored.")
             if not self._token_is_fresh():
+                # In its last minute the access token still works: keep it for
+                # the cleanup that follows the run this failure stops.
+                keep_access_token = not strict and self._access_token_works()
                 if not self.user.resana_refresh_token:
-                    self.clear_tokens()
+                    if not keep_access_token:
+                        self.clear_tokens()
                     raise ResanaTokenExpired(
                         "Resana access token expired and no refresh token is stored."
                     )
-                self._refresh()
+                self._refresh(keep_access_token=keep_access_token)
             elif not self._offline_token_is_fresh():
                 if strict:
                     self._refresh()
@@ -221,9 +229,28 @@ class ResanaTokenManager:
 
         return decrypt_token(self.user.resana_access_token)
 
+    def get_token_for_cleanup(self) -> str:
+        """After a failed run: a refreshed access token if possible, else the
+        last minute of the stored one, so the workspace can still be unlocked."""
+        try:
+            return self.get_valid_token()
+        except (ResanaTokenExpired, requests.RequestException):
+            self.user.refresh_from_db(fields=RESANA_TOKEN_FIELDS)
+            if self.user.resana_access_token and self._access_token_works():
+                return decrypt_token(self.user.resana_access_token)
+            raise
+
+    def _access_token_works(self) -> bool:
+        expires_at = self.user.resana_token_expires_at
+        return expires_at is not None and timezone.now() < expires_at
+
     def _token_is_fresh(self) -> bool:
         expires_at = self.user.resana_token_expires_at
-        buffer = timedelta(seconds=REFRESH_BUFFER_SECONDS)
+        buffer = timedelta(
+            seconds=REFRESH_BUFFER_SECONDS
+            if self.user.resana_refresh_token
+            else NO_OFFLINE_TOKEN_BUFFER_SECONDS
+        )
         return expires_at is not None and timezone.now() < expires_at - buffer
 
     def _offline_token_is_fresh(self) -> bool:
