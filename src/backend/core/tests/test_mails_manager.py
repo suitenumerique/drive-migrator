@@ -257,3 +257,24 @@ def test_send_migration_mail_has_no_archive_link_without_zip(template_name):
     sent = mail.outbox[0]
     for body in (sent.body, sent.alternatives[0][0]):
         assert "download-rejected-files" not in body
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("source_token_expired", [True, False])
+def test_send_fail_mail_asks_to_log_in_again_when_the_source_token_expired(
+    source_token_expired,
+):
+    """The fail mail tells the user to log in to the source again and relaunch,
+    only when the run failed on an expired source token."""
+    workspace = Workspace(title="Équipe projet", download_errors=[], upload_errors=[])
+    user = MagicMock()
+    user.email = "user@example.com"
+    label = SourceManager().get_backend().label
+
+    MailsManager().send_fail_mail(
+        user, workspace, source_token_expired=source_token_expired
+    )
+
+    sent = mail.outbox[0]
+    for body in (sent.body, sent.alternatives[0][0]):
+        assert (f"Reconnectez-vous à {label}" in body) is source_token_expired

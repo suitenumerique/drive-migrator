@@ -9,6 +9,11 @@ from django.utils.module_loading import import_string
 from core.models import Workspace
 
 
+class SourceTokenExpired(Exception):
+    """The user's token for the source can no longer be used or refreshed:
+    they must log in again."""
+
+
 @dataclass
 class SourceFile:
     """A file available for download from a source backend."""
