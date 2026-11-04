@@ -208,7 +208,8 @@ def test_get_valid_token_refreshes_a_short_lived_offline_token_at_half_life(
 
 def test_refused_refresh_ahead_keeps_the_access_token(settings):
     """A refused refresh ahead must not end the run: the still valid access
-    token and the bridge session stay stored, only the offline token goes."""
+    token and the bridge session stay stored, only the offline token goes, so
+    the user is asked to log in again."""
     user = _make_user_with_idle_offline_token(settings, timedelta(minutes=5))
 
     token, _ = _get_valid_token_with(user, keycloak_error=_keycloak_refusal())
@@ -218,7 +219,7 @@ def test_refused_refresh_ahead_keeps_the_access_token(settings):
     assert decrypt_token(user.resana_access_token) == "current-access"
     assert decrypt_token(user.resana_session_id) == "old-sess"
     assert user.resana_refresh_token == ""
-    assert ResanaTokenManager(user).is_connected()
+    assert not ResanaTokenManager(user).is_connected()
 
 
 def test_refused_refresh_ahead_is_not_retried(settings):
@@ -260,7 +261,7 @@ def test_refresh_ahead_network_error_keeps_the_tokens(settings):
 
 
 def test_bridge_rejecting_a_refresh_ahead_keeps_the_access_token(settings):
-    """A bridge rejection during a refresh ahead doesn't disconnect the user."""
+    """A bridge rejection during a refresh ahead doesn't end the run."""
     user = _make_user_with_idle_offline_token(settings, timedelta(minutes=5))
 
     token, _ = _get_valid_token_with(
@@ -270,7 +271,6 @@ def test_bridge_rejecting_a_refresh_ahead_keeps_the_access_token(settings):
     assert token == "current-access"
     user.refresh_from_db()
     assert decrypt_token(user.resana_access_token) == "current-access"
-    assert ResanaTokenManager(user).is_connected()
 
 
 def test_bridge_server_error_during_a_refresh_ahead_keeps_the_offline_token(
@@ -367,7 +367,8 @@ def _ensure_offline_token_with(user, keycloak_error=None):
 
 def test_ensure_offline_token_raises_when_the_offline_token_is_refused(settings):
     """A task that waited past the idle timeout fails before locking anything,
-    even though the access token would still work for a while."""
+    even though the access token would still work for a while. That access
+    token stays stored, for another run of the user to clean up with."""
     user = _make_user_with_idle_offline_token(settings, timedelta(minutes=-30))
 
     with pytest.raises(ResanaTokenExpired):
@@ -375,6 +376,7 @@ def test_ensure_offline_token_raises_when_the_offline_token_is_refused(settings)
 
     user.refresh_from_db()
     assert not ResanaTokenManager(user).is_connected()
+    assert decrypt_token(user.resana_access_token) == "current-access"
 
 
 def test_ensure_offline_token_refreshes_an_offline_token_close_to_its_deadline(
@@ -413,6 +415,7 @@ def test_ensure_offline_token_raises_without_offline_token(settings):
 
     user.refresh_from_db()
     assert not ResanaTokenManager(user).is_connected()
+    assert decrypt_token(user.resana_access_token) == "current-access"
 
 
 def test_ensure_offline_token_does_not_refresh_again_after_another_worker(settings):

@@ -71,9 +71,20 @@ def test_is_connected_true_even_when_token_expired():
     """is_connected() only checks presence, not validity."""
     user = _make_user(
         access="some-access",
+        refresh="some-refresh",
         expires_at=timezone.now() - timedelta(hours=1),
     )
     assert ResanaTokenManager(user).is_connected() is True
+
+
+def test_is_connected_false_without_offline_token():
+    """An access token kept for its last minutes can't be renewed: the user is
+    shown as disconnected, to log in again."""
+    user = _make_user(
+        access="some-access",
+        expires_at=timezone.now() + timedelta(hours=1),
+    )
+    assert ResanaTokenManager(user).is_connected() is False
 
 
 # ---------------------------------------------------------------------------
