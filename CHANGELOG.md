@@ -18,6 +18,8 @@ and this project adheres to
   every remaining file #304
 - Unlock the Resana workspace with the last minute of the access token when
   it can no longer be refreshed at the end of a run #304
+- Ask to log in to Resana again as soon as its offline token is refused,
+  instead of showing the user as connected #304
 
 ## [v0.12.1] - 2026-11-03
 

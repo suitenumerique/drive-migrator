@@ -99,16 +99,29 @@ def test_status_returns_not_connected_when_no_token():
 
 
 def test_status_returns_connected_when_token_present():
-    """A user with a stored access token and expiry is reported as connected."""
+    """A user with a stored access token, its offline token and expiry is
+    reported as connected."""
     expires = timezone.now() + timedelta(hours=2)
     user = UserFactory(
         resana_access_token=encrypt_token("some-token"),
+        resana_refresh_token=encrypt_token("some-offline-token"),
         resana_token_expires_at=expires,
     )
     response = _auth_client(user).get(STATUS_URL)
     assert response.status_code == 200
     assert response.data["connected"] is True
     assert response.data["expires_at"] is not None
+
+
+def test_status_returns_disconnected_without_offline_token():
+    """An access token kept alone after its offline token was refused can't be
+    renewed: the frontend must send the user to log in again."""
+    user = UserFactory(
+        resana_access_token=encrypt_token("some-token"),
+        resana_token_expires_at=timezone.now() + timedelta(hours=2),
+    )
+    response = _auth_client(user).get(STATUS_URL)
+    assert response.data["connected"] is False
 
 
 # ---------------------------------------------------------------------------

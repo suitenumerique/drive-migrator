@@ -128,8 +128,10 @@ class ResanaTokenManager:
             return "expiry unreadable"
 
     def is_connected(self) -> bool:
-        """Return True if an access token is stored (regardless of validity)."""
-        return bool(self.user.resana_access_token)
+        """Return True if an access token and the offline token renewing it are
+        stored (regardless of validity). An access token kept alone for its
+        last minutes can't be renewed: the user must log in again."""
+        return bool(self.user.resana_access_token and self.user.resana_refresh_token)
 
     def clear_tokens(self) -> None:
         """Remove all stored Resana tokens, marking the user as disconnected."""
@@ -207,13 +209,14 @@ class ResanaTokenManager:
         ):
             # Another worker may have refreshed while we waited for the lock.
             self.user.refresh_from_db(fields=RESANA_TOKEN_FIELDS)
+            # An access token that still works is kept, for the cleanup of the
+            # run this failure stops, or of another run of the same user.
+            keep_access_token = self._access_token_works()
             if strict and not self.user.resana_refresh_token:
-                self.clear_tokens()
+                if not keep_access_token:
+                    self.clear_tokens()
                 raise ResanaTokenExpired("No Resana offline token is stored.")
             if not self._token_is_fresh():
-                # In its last minute the access token still works: keep it for
-                # the cleanup that follows the run this failure stops.
-                keep_access_token = not strict and self._access_token_works()
                 if not self.user.resana_refresh_token:
                     if not keep_access_token:
                         self.clear_tokens()
@@ -223,7 +226,7 @@ class ResanaTokenManager:
                 self._refresh(keep_access_token=keep_access_token)
             elif not self._offline_token_is_fresh():
                 if strict:
-                    self._refresh()
+                    self._refresh(keep_access_token=keep_access_token)
                 else:
                     self._refresh_ahead()
 
