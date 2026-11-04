@@ -226,7 +226,7 @@ class ResanaTokenManager:
                 self._refresh(keep_access_token=keep_access_token)
             elif not self._offline_token_is_fresh():
                 if strict:
-                    self._refresh(keep_access_token=keep_access_token)
+                    self._refresh_before_task(keep_access_token)
                 else:
                     self._refresh_ahead()
 
@@ -286,6 +286,22 @@ class ResanaTokenManager:
                 "access token, which %s",
                 self.user.id,
                 describe_access_expiry(self.user.resana_token_expires_at),
+            )
+
+    def _refresh_before_task(self, keep_access_token: bool) -> None:
+        """A refused or missing offline token fails the task start, but a
+        network failure doesn't while the offline token is still alive."""
+        try:
+            self._refresh(keep_access_token=keep_access_token)
+        except requests.RequestException:
+            expires_at = self._offline_expires_at()
+            if expires_at is None or timezone.now() >= expires_at:
+                raise
+            logger.warning(
+                "Resana token refresh before the task failed for user %s: going "
+                "on, the offline token %s",
+                self.user.id,
+                describe_expiry(expires_at),
             )
 
     def _expire(self, message: str, keep_access_token: bool) -> ResanaTokenExpired:
