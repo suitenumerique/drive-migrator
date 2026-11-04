@@ -6,7 +6,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.auth import admin as auth_admin
 from django.core.exceptions import PermissionDenied
-from django.db.models import F
+from django.db.models import Count, F, OuterRef, Subquery
 from django.http import (
     Http404,
     HttpResponse,
@@ -27,7 +27,7 @@ from core.processing.integrity import REPORT_COLUMNS, Stage, rows_by_severity
 from core.sources.resana.token_manager import ResanaTokenManager
 
 from . import models
-from .models import ExtraTaskInfo, Workspace
+from .models import ExtraTaskInfo, MigrationFile, MigrationRun, Workspace
 
 
 @admin.register(models.User)
@@ -162,6 +162,31 @@ def format_files_migrated(obj) -> str:
     return files_migrated
 
 
+def with_run_progress(queryset):
+    """Read the progress of each running migration with the page query: the
+    files of its run, and those not finished yet."""
+    runs = MigrationRun.objects.filter(task_id=OuterRef("task_result__task_id"))
+    files = (
+        MigrationFile.objects.filter(run__task_id=OuterRef("task_result__task_id"))
+        .values("run")
+        .annotate(count=Count("pk"))
+        .values("count")
+    )
+    return queryset.annotate(
+        run_files=Subquery(files),
+        run_remaining=Subquery(runs.values("remaining_files")),
+    )
+
+
+def format_progress(obj) -> str:
+    """ "done/total" files of a migration annotated by with_run_progress, "-"
+    without a run: not started yet, or finished and purged."""
+    if obj.run_files is None:
+        return "-"
+    # Files refused while planning count as done from the start.
+    return f"{obj.run_files - obj.run_remaining}/{obj.run_files}"
+
+
 class EchoBuffer:
     """File-like object that returns each write, to stream a csv writer."""
 
@@ -190,6 +215,7 @@ class ExtraTaskInfoAdminInline(admin.TabularInline):
         "task_result",
         "get_task",
         "get_task_status",
+        "get_progress",
         "get_task_date_created",
         "get_task_date_done",
         "integrity_check_passed",
@@ -199,7 +225,12 @@ class ExtraTaskInfoAdminInline(admin.TabularInline):
     max_num = 0
 
     def get_queryset(self, request):
-        return with_integrity_counts(super().get_queryset(request))
+        return with_run_progress(with_integrity_counts(super().get_queryset(request)))
+
+    def get_progress(self, obj):
+        return format_progress(obj)
+
+    get_progress.short_description = "Progress"
 
     def get_files_migrated(self, obj):
         return format_files_migrated(obj)
@@ -375,6 +406,7 @@ class ExtraTaskInfoAdmin(admin.ModelAdmin):
         "get_user",
         "get_task",
         "get_task_status",
+        "get_progress",
         "get_task_date_created",
         "get_task_date_done",
         "integrity_check_passed",
@@ -390,13 +422,23 @@ class ExtraTaskInfoAdmin(admin.ModelAdmin):
     actions = ["export_integrity_csv"]
 
     def get_queryset(self, request):
+        queryset = (
+            super()
+            .get_queryset(request)
+            .select_related("task_result", "workspace", "user")
+        )
         # The per-file listing can weigh megabytes: loaded only when displayed.
-        return with_integrity_counts(super().get_queryset(request))
+        return with_run_progress(with_integrity_counts(queryset))
 
     def get_files_migrated(self, obj):
         return format_files_migrated(obj)
 
     get_files_migrated.short_description = "Files migrated"
+
+    def get_progress(self, obj):
+        return format_progress(obj)
+
+    get_progress.short_description = "Progress"
 
     def get_integrity_summary(self, obj):
         summary = obj.integrity_report.get("summary")
