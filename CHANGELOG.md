@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Refresh the Resana offline token before its 1 h idle timeout, so long
+  migrations no longer fail after 3 h #304
+- Fail a Resana migration before locking the workspace when the offline
+  token is no longer valid, and ask the user to log in again #304
+
 ## [v0.12.1] - 2026-11-03
 
 - Drop name columns from the Drive members CSV
