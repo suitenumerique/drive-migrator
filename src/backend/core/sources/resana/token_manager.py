@@ -174,9 +174,9 @@ class ResanaTokenManager:
         to its idle deadline, and raise ResanaTokenExpired if it is missing or
         refused, rather than hours later. An offline token without a readable
         exp claim is trusted."""
-        self.get_valid_token(strict=True)
+        self.get_valid_token(require_offline_token=True)
 
-    def get_valid_token(self, strict: bool = False) -> str:
+    def get_valid_token(self, require_offline_token: bool = False) -> str:
         """Return a valid decrypted access token, refreshing proactively if near expiry.
 
         Raises ResanaTokenExpired if the token cannot be renewed or decrypted.
@@ -188,7 +188,7 @@ class ResanaTokenManager:
         and the loser would clear the tokens the winner just stored.
         """
         try:
-            return self._get_valid_token(strict)
+            return self._get_valid_token(require_offline_token)
         except InvalidToken as exc:
             # Encrypted with another key: the user must log in again.
             self.clear_tokens()
@@ -196,11 +196,11 @@ class ResanaTokenManager:
                 "Stored Resana tokens cannot be decrypted."
             ) from exc
 
-    def _get_valid_token(self, strict: bool) -> str:
+    def _get_valid_token(self, require_offline_token: bool) -> str:
         if (
             self._token_is_fresh()
             and self._offline_token_is_fresh()
-            and (self.user.resana_refresh_token or not strict)
+            and (self.user.resana_refresh_token or not require_offline_token)
         ):
             return decrypt_token(self.user.resana_access_token)
 
@@ -212,7 +212,7 @@ class ResanaTokenManager:
             # An access token that still works is kept, for the cleanup of the
             # run this failure stops, or of another run of the same user.
             keep_access_token = self._access_token_works()
-            if strict and not self.user.resana_refresh_token:
+            if require_offline_token and not self.user.resana_refresh_token:
                 if not keep_access_token:
                     self.clear_tokens()
                 raise ResanaTokenExpired("No Resana offline token is stored.")
@@ -225,8 +225,8 @@ class ResanaTokenManager:
                     )
                 self._refresh(keep_access_token=keep_access_token)
             elif not self._offline_token_is_fresh():
-                if strict:
-                    self._refresh(keep_access_token=keep_access_token)
+                if require_offline_token:
+                    self._refresh_before_task(keep_access_token)
                 else:
                     self._refresh_ahead()
 
@@ -286,6 +286,22 @@ class ResanaTokenManager:
                 "access token, which %s",
                 self.user.id,
                 describe_access_expiry(self.user.resana_token_expires_at),
+            )
+
+    def _refresh_before_task(self, keep_access_token: bool) -> None:
+        """A refused or missing offline token fails the task start, but a
+        network failure doesn't while the offline token is still alive."""
+        try:
+            self._refresh(keep_access_token=keep_access_token)
+        except requests.RequestException:
+            expires_at = self._offline_expires_at()
+            if expires_at is None or timezone.now() >= expires_at:
+                raise
+            logger.warning(
+                "Resana token refresh before the task failed for user %s: going "
+                "on, the offline token %s",
+                self.user.id,
+                describe_expiry(expires_at),
             )
 
     def _expire(self, message: str, keep_access_token: bool) -> ResanaTokenExpired:

@@ -564,3 +564,26 @@ def test_access_token_with_minutes_left_is_used_while_it_can_be_renewed(settings
 
     assert token == "current-access"
     mock_keycloak.assert_not_called()
+
+
+def test_ensure_offline_token_goes_on_after_a_keycloak_blip(settings):
+    """A network failure doesn't fail the task start while the offline token
+    is still alive: the next calls refresh it ahead."""
+    user = _make_user_with_idle_offline_token(settings, timedelta(minutes=5))
+    offline_before = decrypt_token(user.resana_refresh_token)
+
+    _ensure_offline_token_with(user, keycloak_error=requests.ConnectionError("down"))
+
+    user.refresh_from_db()
+    assert decrypt_token(user.resana_refresh_token) == offline_before
+
+
+def test_ensure_offline_token_raises_on_a_keycloak_blip_after_the_deadline(settings):
+    """Once past its idle deadline the offline token is dead anyway: the task
+    start fails instead of locking the workspace."""
+    user = _make_user_with_idle_offline_token(settings, timedelta(minutes=-5))
+
+    with pytest.raises(requests.ConnectionError):
+        _ensure_offline_token_with(
+            user, keycloak_error=requests.ConnectionError("down")
+        )
