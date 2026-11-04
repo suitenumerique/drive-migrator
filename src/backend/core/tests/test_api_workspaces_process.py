@@ -8,6 +8,7 @@ from unittest.mock import ANY, MagicMock, patch
 from django.test import override_settings
 from django.utils import timezone
 
+import jwt
 import pytest
 import requests
 from cryptography.fernet import Fernet
@@ -151,7 +152,7 @@ def test_resana_source_token_refused_raises_resana_token_required():
     data = _workspace_data(workspace, "drive")
 
     with patch("core.api.views.workspaces_process.ResanaTokenManager") as mock_tm:
-        mock_tm.return_value.get_valid_token.side_effect = ResanaTokenExpired()
+        mock_tm.return_value.ensure_offline_token.side_effect = ResanaTokenExpired()
 
         with pytest.raises(APIException) as exc_info:
             view.validation(user, data, [workspace])
@@ -166,7 +167,9 @@ def test_resana_source_token_unreachable_raises_source_unavailable():
     workspace = factories.WorkspaceFactory(source_type="resana")
 
     with patch("core.api.views.workspaces_process.ResanaTokenManager") as mock_tm:
-        mock_tm.return_value.get_valid_token.side_effect = requests.ConnectionError()
+        mock_tm.return_value.ensure_offline_token.side_effect = (
+            requests.ConnectionError()
+        )
 
         with pytest.raises(APIException) as exc_info:
             _make_view().validation(
@@ -186,11 +189,10 @@ def test_resana_source_token_valid_does_not_raise():
     data = _workspace_data(workspace, "drive")
 
     with patch("core.api.views.workspaces_process.ResanaTokenManager") as mock_tm:
-        mock_tm.return_value.get_valid_token.return_value = "fresh-access-token"
         view.validation(user, data, [workspace])  # must not raise
 
     mock_tm.assert_called_once_with(user)
-    mock_tm.return_value.get_valid_token.assert_called_once()
+    mock_tm.return_value.ensure_offline_token.assert_called_once()
 
 
 @override_settings(DRIVE_AUTH_MODE="service_account")
@@ -206,7 +208,7 @@ def test_refused_resana_session_creates_no_task():
         patch("core.api.views.workspaces_process.ResanaTokenManager") as mock_tm,
         patch("core.api.views.workspaces_process.export") as mock_export,
     ):
-        mock_tm.return_value.get_valid_token.side_effect = ResanaTokenExpired()
+        mock_tm.return_value.ensure_offline_token.side_effect = ResanaTokenExpired()
         response = client.post(
             "/api/v1.0/workspaces/process",
             {"workspaces": _workspace_data(workspace, "drive")},
@@ -285,6 +287,39 @@ def test_resana_offline_token_refused_clears_tokens():
 
 
 @override_settings(DRIVE_AUTH_MODE="service_account")
+def test_dead_resana_offline_token_raises_resana_token_required():
+    """An offline token past its idle deadline sends the user back to log in
+    at launch, even though the access token is still valid for a while."""
+    expired_offline = jwt.encode(
+        {
+            "typ": "Offline",
+            "exp": int((timezone.now() - timedelta(minutes=30)).timestamp()),
+        },
+        "test-secret-long-enough-for-hs256",
+        algorithm="HS256",
+    )
+    user = factories.UserFactory(
+        resana_access_token=encrypt_token("current-access"),
+        resana_refresh_token=encrypt_token(expired_offline),
+        resana_token_expires_at=timezone.now() + timedelta(hours=1),
+    )
+    workspace = factories.WorkspaceFactory(source_type="resana")
+    http_error = requests.HTTPError("400 Bad Request")
+    http_error.response = MagicMock(status_code=400)
+
+    with patch(
+        "core.sources.resana.token_manager.refresh_offline_token",
+        side_effect=http_error,
+    ):
+        with pytest.raises(APIException) as exc_info:
+            _make_view().validation(
+                user, _workspace_data(workspace, "drive"), [workspace]
+            )
+
+    assert exc_info.value.detail["error_name"] == "ResanaTokenRequired"
+
+
+@override_settings(DRIVE_AUTH_MODE="service_account")
 def test_unreadable_resana_token_raises_resana_token_required():
     """A token encrypted with another key is cleared and the user logs in again."""
     other_key = Fernet(Fernet.generate_key())
@@ -338,7 +373,7 @@ def test_validation_logs_token_status_before_failing_check():
         patch("core.api.views.workspaces_process.DriveUserTokenBackend"),
         patch("core.api.views.workspaces_process.ResanaTokenManager") as mock_tm,
     ):
-        mock_tm.return_value.get_valid_token.side_effect = ResanaTokenExpired()
+        mock_tm.return_value.ensure_offline_token.side_effect = ResanaTokenExpired()
 
         with pytest.raises(APIException):
             view.validation(user, data, [workspace])
