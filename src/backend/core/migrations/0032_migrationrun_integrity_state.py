@@ -20,4 +20,14 @@ class Migration(migrations.Migration):
             name='expected_size',
             field=models.BigIntegerField(blank=True, null=True),
         ),
+        migrations.AddField(
+            model_name='migrationrun',
+            name='cursor',
+            field=models.PositiveIntegerField(default=0),
+        ),
+        migrations.AddField(
+            model_name='migrationrun',
+            name='in_flight',
+            field=models.PositiveIntegerField(default=0),
+        ),
     ]

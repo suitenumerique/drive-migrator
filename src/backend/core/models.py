@@ -261,6 +261,10 @@ class MigrationRun(BaseModel):
     remaining_files = models.PositiveIntegerField(default=0)
     # Guards against finishing the run twice when its last files end together.
     finish_published = models.BooleanField(default=False)
+    # Position of the next file to dispatch, see take_next_batch.
+    cursor = models.PositiveIntegerField(default=0)
+    # Files dispatched and not finished yet: the batch is done at 0.
+    in_flight = models.PositiveIntegerField(default=0)
     # Destination state shared by the file tasks (e.g. Drive folder ids).
     destinations_state = models.JSONField(default=dict, blank=True)
     # Each destination's error, failures in a row and closing, see FileExports.

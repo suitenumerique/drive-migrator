@@ -3,6 +3,7 @@
 import itertools
 import os
 
+from django.conf import settings
 from django.db import transaction
 
 import magic
@@ -60,6 +61,40 @@ def create_migration_run(
         itertools.chain(planned_rows, refused_rows), batch_size=BULK_BATCH_SIZE
     )
     return run
+
+
+def take_next_batch(run: MigrationRun) -> list[int]:
+    """Take the next pending files of the run from its cursor, within the batch
+    limits, and count them in flight. Return their positions.
+
+    A batch holds at least one file, even one bigger than the bytes limit; a
+    size the source did not announce counts as 0.
+    """
+    max_files = settings.MIGRATION_BATCH_MAX_FILES
+    max_bytes = settings.MIGRATION_BATCH_MAX_BYTES
+    with transaction.atomic():
+        locked = MigrationRun.objects.select_for_update().get(pk=run.pk)
+        rows = (
+            locked.files.filter(
+                position__gte=locked.cursor, status=MigrationFile.Status.PENDING
+            )
+            .order_by("position")
+            .values_list("position", "expected_size")
+        )
+        if max_files:
+            rows = rows[:max_files]
+        positions = []
+        total_bytes = 0
+        for position, expected_size in rows.iterator():
+            total_bytes += expected_size or 0
+            if positions and max_bytes and total_bytes > max_bytes:
+                break
+            positions.append(position)
+        if positions:
+            locked.cursor = positions[-1] + 1
+            locked.in_flight += len(positions)
+            locked.save(update_fields=["cursor", "in_flight", "updated_at"])
+    return positions
 
 
 def download_migration_file(
