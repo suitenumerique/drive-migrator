@@ -744,3 +744,30 @@ def test_download_file_returns_the_local_path_of_downloaded_files(tmp_path, sett
 
     assert local_paths == [str(tmp_path / "workspace_ws26" / "ok.txt"), None]
     assert os.path.isfile(local_paths[0])
+
+
+def test_download_file_makes_its_folder_on_a_worker_that_did_not_prepare_it(
+    tmp_path, settings
+):
+    """The file tasks of a run may run on another worker than its start: each
+    one makes the folder of its file."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws27")
+    doc = SourceFile(id="f1", name="doc", extension=".txt", download_url="x")
+    run = _run(
+        SourceFolder(
+            name="root",
+            children=[
+                SourceFolder(
+                    name="sub", children=[SourceFolder(name="deep", files=[doc])]
+                )
+            ],
+        )
+    )
+
+    local_path = FolderCreator().download_file(
+        workspace, run.files.get(), _make_backend()
+    )
+
+    assert local_path == str(tmp_path / "workspace_ws27" / "sub" / "deep" / "doc.txt")
+    assert os.path.isfile(local_path)

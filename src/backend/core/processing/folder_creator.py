@@ -34,7 +34,7 @@ class FolderCreator:
         migration_file: MigrationFile,
         source_backend: AbstractSourceBackend,
     ) -> str | None:
-        """Download one file of the run into the folder of prepare_folder().
+        """Download one file of the run into the local folder of the run.
         Return its local path, or None when it did not reach the disk."""
         if migration_file.status != MigrationFile.Status.PENDING:
             # Refused while planning: nothing to download.
@@ -43,6 +43,8 @@ class FolderCreator:
         local_path = os.path.join(
             self.get_workspace_path(workspace), migration_file.path
         )
+        # The worker that prepared the folder may not be this one.
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
         self.__download_file(migration_file, local_path, source_backend)
         if migration_file.status != MigrationFile.Status.DOWNLOADED:
             return None
