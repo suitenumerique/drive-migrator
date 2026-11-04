@@ -16,6 +16,8 @@ and this project adheres to
   token is no longer valid, and ask the user to log in again #304
 - Stop downloading as soon as the source token expired, instead of failing
   every remaining file #304
+- Unlock the Resana workspace with the last minute of the access token when
+  it can no longer be refreshed at the end of a run #304
 
 ## [v0.12.1] - 2026-11-03
 

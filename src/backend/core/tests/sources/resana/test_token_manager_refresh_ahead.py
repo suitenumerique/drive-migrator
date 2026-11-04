@@ -426,3 +426,138 @@ def test_ensure_offline_token_does_not_refresh_again_after_another_worker(settin
 
     first_keycloak.assert_called_once()
     second_keycloak.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Last minute of the access token — cleanup after a failed run
+# ---------------------------------------------------------------------------
+
+
+def _make_user_in_the_last_minute(settings):
+    """Build a user whose access token still works for 30 s, within the refresh
+    buffer, with an offline token far from its idle deadline."""
+    user = _make_user_with_idle_offline_token(settings, timedelta(minutes=45))
+    user.resana_token_expires_at = timezone.now() + timedelta(seconds=30)
+    user.save()
+    return user
+
+
+def test_refused_refresh_in_the_last_minute_keeps_the_access_token(settings):
+    """The run stops, but the access token that still works stays stored, so
+    the cleanup that follows can still unlock the workspace."""
+    user = _make_user_in_the_last_minute(settings)
+
+    with pytest.raises(ResanaTokenExpired):
+        _get_valid_token_with(user, keycloak_error=_keycloak_refusal())
+
+    user.refresh_from_db()
+    assert decrypt_token(user.resana_access_token) == "current-access"
+    assert user.resana_refresh_token == ""
+
+
+def test_missing_offline_token_in_the_last_minute_keeps_the_access_token(settings):
+    """Without an offline token the run stops, keeping the working access token."""
+    user = _make_user_in_the_last_minute(settings)
+    user.resana_refresh_token = ""
+    user.save()
+
+    with pytest.raises(ResanaTokenExpired):
+        ResanaTokenManager(user).get_valid_token()
+
+    user.refresh_from_db()
+    assert decrypt_token(user.resana_access_token) == "current-access"
+
+
+def test_get_token_for_cleanup_uses_the_last_minute_of_the_access_token(settings):
+    """After the refresh was refused, the cleanup still gets the access token
+    while it works."""
+    user = _make_user_in_the_last_minute(settings)
+    with pytest.raises(ResanaTokenExpired):
+        _get_valid_token_with(user, keycloak_error=_keycloak_refusal())
+
+    assert ResanaTokenManager(user).get_token_for_cleanup() == "current-access"
+
+
+def test_get_token_for_cleanup_refreshes_when_it_can(settings):
+    """The cleanup prefers a refreshed token, which outlasts the last minute."""
+    user = _make_user_in_the_last_minute(settings)
+    new_access = _make_access_jwt()
+
+    with (
+        patch(
+            "core.sources.resana.token_manager.refresh_offline_token",
+            return_value={
+                "access_token": "kc-access",
+                "refresh_token": _offline_jwt_expiring_in(timedelta(hours=1)),
+            },
+        ),
+        patch(
+            "core.sources.resana.token_manager.create_bridge_session",
+            return_value={
+                "plateformeSessionId": "new-sess",
+                "interstis_access": new_access,
+                "csrfToken": "new-csrf",
+            },
+        ),
+    ):
+        token = ResanaTokenManager(user).get_token_for_cleanup()
+
+    assert token == new_access
+
+
+def test_get_token_for_cleanup_raises_once_the_access_token_expired(settings):
+    """An access token past its expiry is of no use: the tokens are cleared."""
+    user = _make_user_in_the_last_minute(settings)
+    user.resana_refresh_token = ""
+    user.resana_token_expires_at = timezone.now() - timedelta(seconds=1)
+    user.save()
+
+    with pytest.raises(ResanaTokenExpired):
+        ResanaTokenManager(user).get_token_for_cleanup()
+
+    user.refresh_from_db()
+    assert not ResanaTokenManager(user).is_connected()
+
+
+def test_get_token_for_cleanup_uses_the_last_minute_when_keycloak_is_down(settings):
+    """A Keycloak outage during the cleanup doesn't prevent the unlock while the
+    access token still works."""
+    user = _make_user_in_the_last_minute(settings)
+
+    with patch(
+        "core.sources.resana.token_manager.refresh_offline_token",
+        side_effect=requests.ConnectionError("down"),
+    ):
+        token = ResanaTokenManager(user).get_token_for_cleanup()
+
+    assert token == "current-access"
+
+
+def _make_user_with_five_minutes_left(settings, offline_token=True):
+    user = _make_user_with_idle_offline_token(settings, timedelta(minutes=45))
+    user.resana_token_expires_at = timezone.now() + timedelta(minutes=5)
+    if not offline_token:
+        user.resana_refresh_token = ""
+    user.save()
+    return user
+
+
+def test_run_stops_early_without_offline_token(settings):
+    """Without an offline token nothing can renew the access token: the run
+    stops 10 minutes before it expires, leaving the cleanup time to unlock."""
+    user = _make_user_with_five_minutes_left(settings, offline_token=False)
+
+    with pytest.raises(ResanaTokenExpired):
+        ResanaTokenManager(user).get_valid_token()
+
+    assert ResanaTokenManager(user).get_token_for_cleanup() == "current-access"
+
+
+def test_access_token_with_minutes_left_is_used_while_it_can_be_renewed(settings):
+    """With an offline token, the access token is used until its last minute."""
+    user = _make_user_with_five_minutes_left(settings)
+
+    token, mock_keycloak = _get_valid_token_with(user)
+
+    assert token == "current-access"
+    mock_keycloak.assert_not_called()

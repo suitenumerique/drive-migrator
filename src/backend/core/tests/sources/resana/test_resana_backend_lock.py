@@ -462,7 +462,9 @@ def test_finalize_export_does_not_raise_when_lock_client_cannot_be_built(setting
         patch("core.sources.resana.backend.ResanaLockClient") as mock_lock,
         patch("core.sources.resana.backend.logger") as mock_logger,
     ):
-        mock_tm.return_value.get_valid_token.side_effect = ResanaTokenExpired("expired")
+        mock_tm.return_value.get_token_for_cleanup.side_effect = ResanaTokenExpired(
+            "expired"
+        )
         ResanaSourceBackend().finalize_export(workspace)  # must not raise
 
     # The workspace may stay locked: an error, not a warning, with what to reverse by hand.
@@ -811,3 +813,31 @@ def test_begin_export_locks_nothing_when_the_offline_token_is_no_longer_valid(
     mock_tm.assert_called_with(workspace.migration_user)
     mock_lock.return_value.lock_workspace.assert_not_called()
     workspace.save.assert_not_called()
+
+
+def test_finalize_export_unlocks_with_the_cleanup_token(settings):
+    """finalize_export() builds its clients from the cleanup token, so it can
+    still unlock after the run stopped on a refused refresh."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = _make_workspace()
+    workspace.source_lock_state = {
+        "slug": "2137419",
+        "workspace_locked_by_us": True,
+        "folders_granted_by_us": [],
+    }
+
+    with (
+        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
+        patch("core.sources.resana.backend.ResanaMembersClient") as mock_members,
+        patch("core.sources.resana.backend.ResanaLockClient") as mock_lock,
+    ):
+        mock_tm.return_value.get_valid_token.side_effect = ResanaTokenExpired()
+        mock_tm.return_value.get_token_for_cleanup.return_value = "last-minute"
+        _patch_members_client(mock_members, is_locked=True)
+        ResanaSourceBackend().finalize_export(workspace)
+
+    assert mock_lock.call_args.kwargs["access_token"] == "last-minute"
+    assert mock_members.call_args.kwargs["access_token"] == "last-minute"
+    mock_lock.return_value.unlock_workspace.assert_called_once_with("2137419")
+    # Fetched once: a second Keycloak timeout would outlast the last minute.
+    mock_tm.return_value.get_token_for_cleanup.assert_called_once()

@@ -130,7 +130,7 @@ def test_get_valid_token_refreshes_when_expired(settings):
         expires_at=timezone.now() - timedelta(seconds=1),
     )
 
-    def fake_refresh(self):
+    def fake_refresh(self, keep_access_token=False):  # pylint: disable=unused-argument
         self.user.resana_access_token = encrypt_token("new-access")
         self.user.resana_token_expires_at = timezone.now() + timedelta(hours=3)
         self.user.save()
@@ -146,7 +146,7 @@ def test_get_valid_token_refreshes_when_expires_at_is_none(settings):
     settings.OIDC_TOKENS_ENCRYPTION_KEY = _fernet_key()
     user = _make_user(access="old-access", refresh="my-refresh", expires_at=None)
 
-    def fake_refresh(self):
+    def fake_refresh(self, keep_access_token=False):  # pylint: disable=unused-argument
         self.user.resana_access_token = encrypt_token("refreshed")
         self.user.resana_token_expires_at = timezone.now() + timedelta(hours=3)
         self.user.save()
