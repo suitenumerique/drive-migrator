@@ -5,7 +5,12 @@ from django.conf import settings
 
 from celery.utils.log import get_task_logger
 
-from core.backends.source import AbstractSourceBackend, SourceFile, SourceFolder
+from core.backends.source import (
+    AbstractSourceBackend,
+    SourceFile,
+    SourceFolder,
+    SourceTokenExpired,
+)
 from core.models import Workspace
 from core.utils import (
     ensure_file_uniqueness,
@@ -138,6 +143,11 @@ class FolderCreator:
             )
             try:
                 source_backend.download_file(file, destination)
+            except SourceTokenExpired as error:
+                # Every remaining file would fail the same way: stop the run,
+                # so the user is asked to log in again.
+                self.__add_failed_file(file, relative_path, str(error))
+                raise
             # Broad on purpose: source_backend is backend-agnostic (Resana, Osmose,
             # filesystem...), so we can't target a specific exception type here. One
             # file failing must not abort the rest of the workspace's download.
