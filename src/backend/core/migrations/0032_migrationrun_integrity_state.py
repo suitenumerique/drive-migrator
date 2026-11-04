@@ -30,4 +30,9 @@ class Migration(migrations.Migration):
             name='in_flight',
             field=models.PositiveIntegerField(default=0),
         ),
+        migrations.AddField(
+            model_name='migrationrun',
+            name='source_token_expired',
+            field=models.BooleanField(default=False),
+        ),
     ]

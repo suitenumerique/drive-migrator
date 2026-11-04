@@ -6,14 +6,18 @@ from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
+from celery.exceptions import Ignore
 
 from core.backends.destination import FileExportStatus
-from core.backends.source import SourceFolder
+from core.backends.source import SourceFolder, SourceTokenExpired
 from core.factories import UserFactory, WorkspaceFactory
 from core.models import User, Workspace
+from core.processing import tasks
 from core.processing.plan import build_plan
 from core.processing.tasks import export
 from core.sources.resana.token_manager import ResanaTokenExpired
+
+EXPORT_DATA = {"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}}
 
 
 @pytest.fixture(autouse=True)
@@ -33,17 +37,28 @@ def _rejected_files_bucket():
 def migration_run():
     """Keep the run's working rows out of the database: workspaces are mocks here."""
     with (
+        patch("core.processing.tasks.run_exists", return_value=False),
         patch("core.processing.tasks.create_migration_run") as create,
         patch("core.processing.tasks.delete_migration_run") as delete,
         patch("core.processing.tasks.save_run_files_stats") as save_stats,
         patch("core.processing.tasks.drop_unlinked_kept_files") as drop_kept,
         patch("core.processing.tasks.failed_downloads", return_value=[]) as failed,
+        patch("core.processing.tasks.stop_run") as stop,
+        patch("core.processing.tasks.record_file_error"),
+        patch("core.processing.tasks._extra_task_of", return_value=None),
     ):
         files = MagicMock()
         files.count.return_value = 0
         create.side_effect = lambda workspace, task_id, plan: SimpleNamespace(
-            workspace=workspace, exports_state={}, files=files
+            pk="run-1",
+            task_id=task_id,
+            workspace=workspace,
+            exports_state={},
+            integrity_state={},
+            source_token_expired=False,
+            files=files,
         )
+        stop.side_effect = lambda run: setattr(run, "source_token_expired", True)
         yield SimpleNamespace(
             create=create,
             delete=delete,
@@ -70,6 +85,20 @@ def user():
     u = MagicMock(spec=User)
     u.id = "user-1"
     return u
+
+
+def _export(data=None):
+    """Run export(), then, as the workers would, each file of its run and its
+    finish. Raise the error of the run, if any."""
+    with patch("core.processing.tasks.dispatch_batch") as dispatch:
+        with pytest.raises(Ignore):
+            export(data or EXPORT_DATA)  # pylint: disable=no-value-for-parameter
+    run, user = dispatch.call_args.args
+    source_backend = tasks.SourceManager().get_backend()
+    for migration_file in run.files.iterator():
+        if not run.source_token_expired:
+            tasks.run_file(run, user, source_backend, migration_file)
+    tasks.finish_run(run, user, source_backend)
 
 
 def _run_export(
@@ -99,7 +128,7 @@ def _run_export(
             setup_creator(mock_folder_creator_cls.return_value)
         mock_dest_registry.get_all.return_value = dest_backends
 
-        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+        _export()
 
         return (
             mock_source_backend,
@@ -125,7 +154,7 @@ def test_export_fetches_workspace_and_user(workspace, user):
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+        _export()
 
     mock_ws_get.assert_called_once_with(id="ws-1")
     mock_user_get.assert_called_once_with(id="user-1")
@@ -188,6 +217,65 @@ def test_export_builds_local_folder_from_its_migration_run(
     creator.prepare_folder.assert_called_once_with(workspace, ANY)
     assert creator.prepare_folder.call_args.args[1].workspace is workspace
     migration_run.delete.assert_called_once_with(migration_run.create.call_args.args[1])
+
+
+def _export_dispatching(workspace, user, dispatch_error=None):
+    """Run export() alone, its first batch not queued; return what it raised,
+    the dispatch, the file-by-file exports and the source."""
+    with (
+        patch("core.models.Workspace.objects.get", return_value=workspace),
+        patch("core.models.User.objects.get", return_value=user),
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator"),
+        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
+        patch("core.processing.tasks.FileExports") as exports_cls,
+        patch("core.processing.tasks.dispatch_batch") as dispatch,
+    ):
+        source_backend = mock_sm.return_value.get_backend.return_value
+        source_backend.get_workspace_structure.return_value = SourceFolder(name="root")
+        mock_dr.get_all.return_value = [_destination("drive")]
+        dispatch.side_effect = dispatch_error
+        with pytest.raises((Ignore, RuntimeError)) as raised:
+            export(EXPORT_DATA)  # pylint: disable=no-value-for-parameter
+    return SimpleNamespace(
+        error=raised.value,
+        dispatch=dispatch,
+        exports=exports_cls.return_value,
+        source=source_backend,
+    )
+
+
+def test_export_queues_the_first_batch_and_leaves_the_run_to_its_tasks(
+    workspace, user, migration_run
+):
+    """export() starts the run and queues its first batch, then ends without a
+    result of its own: the source stays locked and the run is kept for its file
+    tasks, until finish_migration reports the outcome."""
+    result = _export_dispatching(workspace, user)
+
+    assert isinstance(result.error, Ignore)
+    run, dispatched_user = result.dispatch.call_args.args
+    assert run.workspace is workspace
+    assert dispatched_user is user
+    result.exports.open.assert_called_once_with()
+    result.exports.abort.assert_not_called()
+    result.source.finalize_export.assert_not_called()
+    migration_run.delete.assert_not_called()
+
+
+def test_export_undoes_the_start_when_the_first_batch_cannot_be_queued(
+    workspace, user, migration_run
+):
+    """A broker down at the start leaves no destination open, no run kept and
+    no source locked."""
+    result = _export_dispatching(
+        workspace, user, dispatch_error=RuntimeError("broker down")
+    )
+
+    assert str(result.error) == "broker down"
+    result.exports.abort.assert_called_once_with()
+    migration_run.delete.assert_called_once()
+    result.source.finalize_export.assert_called_once_with(workspace)
 
 
 @pytest.mark.django_db
@@ -294,7 +382,7 @@ def test_export_persists_download_errors_on_workspace(workspace, user, migration
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+        _export()
 
     assert workspace.download_errors == failed_files
     workspace.save.assert_called()
@@ -327,8 +415,8 @@ def test_export_keeps_earlier_download_errors_when_the_source_token_expires(
         )
         mock_dr.get_all.return_value = []
 
-        with pytest.raises(ResanaTokenExpired):
-            export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+        with pytest.raises(SourceTokenExpired):
+            _export()
 
     assert workspace.download_errors == failed_files
 
@@ -349,7 +437,7 @@ def test_export_resets_previous_run_errors_before_starting(workspace, user):
         pytest.raises(RuntimeError, match="stop"),
     ):
         mock_sm.return_value.get_backend.return_value = source_backend
-        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+        _export()
 
 
 def test_export_clears_previous_run_rejected_files_before_starting(workspace, user):
@@ -371,7 +459,7 @@ def test_export_clears_previous_run_rejected_files_before_starting(workspace, us
             pytest.raises(RuntimeError, match="stop"),
         ):
             mock_sm.return_value.get_backend.return_value = source_backend
-            export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+            _export()
 
 
 def test_export_does_not_save_download_errors_when_all_files_succeed(
@@ -392,7 +480,7 @@ def test_export_does_not_save_download_errors_when_all_files_succeed(
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+        _export()
 
     workspace.save.assert_not_called()
 
@@ -419,7 +507,7 @@ def test_export_saves_download_errors_with_update_fields(
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+        _export()
 
     workspace.save.assert_called_once_with(update_fields=["download_errors"])
 
@@ -447,7 +535,7 @@ def test_export_fails_when_all_downloads_fail(workspace, user, migration_run):
         mock_dr.get_all.return_value = [_destination("archive")]
 
         with pytest.raises(RuntimeError):
-            export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+            _export()
 
     exports_cls.return_value.close.assert_not_called()
 
@@ -539,7 +627,7 @@ def _run_export_with_creator(
             setup_creator(mock_fc.return_value)
         mock_dr.get_all.return_value = dest_backends
 
-        export({"workspace": {"id": workspace.id}, "user": {"id": user.id}})  # pylint: disable=no-value-for-parameter
+        _export({"workspace": {"id": workspace.id}, "user": {"id": user.id}})
     return source_backend, mock_fc.return_value
 
 
@@ -649,6 +737,8 @@ def test_export_aborts_file_by_file_destinations_when_the_run_fails(
 @pytest.fixture()
 def mock_tracker_cls():
     with patch("core.processing.tasks.IntegrityTracker") as tracker_cls:
+        # The finish rebuilds from the run the tracker export() fed.
+        tracker_cls.from_run.return_value = tracker_cls.return_value
         yield tracker_cls
 
 
@@ -669,7 +759,7 @@ def _run_export_with_tracker(workspace, user, dest_backends, failures=None):
         mock_dr.get_all.return_value = dest_backends
         exports_cls.return_value.close.return_value = failures or {}
 
-        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+        _export()
     return creator, folder
 
 
@@ -752,7 +842,7 @@ def test_export_calls_begin_export_before_get_workspace_structure(workspace, use
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+        _export()
 
     assert calls == ["begin", "structure"]
 
@@ -778,7 +868,7 @@ def test_export_calls_finalize_export_even_when_get_workspace_structure_raises(
         source_backend.get_workspace_structure.side_effect = RuntimeError("boom")
 
         with pytest.raises(RuntimeError, match="boom"):
-            export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+            _export()
 
     source_backend.finalize_export.assert_called_once_with(workspace)
 
@@ -796,7 +886,7 @@ def test_export_calls_finalize_export_even_when_begin_export_raises(workspace, u
         source_backend.begin_export.side_effect = RuntimeError("grant failed")
 
         with pytest.raises(RuntimeError, match="grant failed"):
-            export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
+            _export()
 
     source_backend.get_workspace_structure.assert_not_called()
     source_backend.finalize_export.assert_called_once_with(workspace)

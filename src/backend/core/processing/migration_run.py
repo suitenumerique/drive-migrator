@@ -5,6 +5,7 @@ import os
 
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 
 import magic
 from celery.utils.log import get_task_logger
@@ -97,6 +98,35 @@ def take_next_batch(run: MigrationRun) -> list[int]:
     return positions
 
 
+def finish_file(run: MigrationRun, position: int) -> MigrationRun:
+    """Count a dispatched file of the run done; return the run as it stands
+    then, so that a single file task sees its batch, or the run, done."""
+    with transaction.atomic():
+        locked = MigrationRun.objects.select_for_update().get(pk=run.pk)
+        locked.files.filter(position=position).update(finished_at=timezone.now())
+        locked.in_flight -= 1
+        locked.remaining_files -= 1
+        locked.save(update_fields=["in_flight", "remaining_files", "updated_at"])
+    return locked
+
+
+def stop_run(run: MigrationRun) -> None:
+    """Stop the run on an expired source token: its files left are skipped."""
+    run.source_token_expired = True
+    MigrationRun.objects.filter(pk=run.pk).update(source_token_expired=True)
+
+
+def record_file_error(migration_file: MigrationFile, error: Exception) -> None:
+    """Keep an unexpected error on the row of its file; a file not downloaded
+    yet counts as failed to download."""
+    fields = {"error": str(error)}
+    if migration_file.status == MigrationFile.Status.PENDING:
+        fields["status"] = MigrationFile.Status.DOWNLOAD_FAILED
+    for name, value in fields.items():
+        setattr(migration_file, name, value)
+    MigrationFile.objects.filter(pk=migration_file.pk).update(**fields)
+
+
 def download_migration_file(
     migration_file: MigrationFile,
     source_backend: AbstractSourceBackend,
@@ -167,6 +197,11 @@ def failed_downloads(run: MigrationRun) -> list[dict]:
         .order_by("position")
         .values_list("source", "path", "error")
     ]
+
+
+def run_exists(task_id: str) -> bool:
+    """Whether the task already planned its run, e.g. delivered twice."""
+    return MigrationRun.objects.filter(task_id=task_id).exists()
 
 
 def delete_migration_run(task_id: str) -> None:

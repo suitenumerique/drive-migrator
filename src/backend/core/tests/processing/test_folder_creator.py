@@ -771,3 +771,25 @@ def test_download_file_makes_its_folder_on_a_worker_that_did_not_prepare_it(
 
     assert local_path == str(tmp_path / "workspace_ws27" / "sub" / "deep" / "doc.txt")
     assert os.path.isfile(local_path)
+
+
+def test_download_file_downloads_again_a_file_whose_task_died_after_it(
+    tmp_path, settings
+):
+    """A file downloaded by a task that died before handing it over, queued
+    again by the watchdog, is downloaded again on this worker: its first copy
+    went with the other worker."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws28")
+    doc = SourceFile(id="f1", name="doc", extension=".txt", download_url="x")
+    run = _run(SourceFolder(name="root", files=[doc]))
+    MigrationFile.objects.filter(run=run).update(
+        status=MigrationFile.Status.DOWNLOADED, size=3
+    )
+    backend = _make_backend()
+
+    local_path = FolderCreator().download_file(workspace, run.files.get(), backend)
+
+    backend.download_file.assert_called_once()
+    assert local_path == str(tmp_path / "workspace_ws28" / "doc.txt")
+    assert os.path.isfile(local_path)

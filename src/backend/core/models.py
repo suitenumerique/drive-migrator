@@ -265,6 +265,8 @@ class MigrationRun(BaseModel):
     cursor = models.PositiveIntegerField(default=0)
     # Files dispatched and not finished yet: the batch is done at 0.
     in_flight = models.PositiveIntegerField(default=0)
+    # The source token expired: the files left are skipped and the run fails.
+    source_token_expired = models.BooleanField(default=False)
     # Destination state shared by the file tasks (e.g. Drive folder ids).
     destinations_state = models.JSONField(default=dict, blank=True)
     # Each destination's error, failures in a row and closing, see FileExports.

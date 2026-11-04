@@ -11,7 +11,10 @@ class CeleryMixin:
         environ_name="REDIS_URL",
         environ_prefix=None,
     )
-    CELERY_BROKER_TRANSPORT_OPTIONS = values.DictValue({})
+    # Redis hands an unacknowledged message to another worker after the
+    # visibility timeout (1 hour by default): keep it above the longest task,
+    # see docs/migration-pipeline.md.
+    CELERY_BROKER_TRANSPORT_OPTIONS = values.DictValue({"visibility_timeout": 43200})
     CELERY_RESULT_BACKEND = "django-db"
     CELERY_CACHE_BACKEND = "django-cache"
     CELERY_TASK_SERIALIZER = "json"

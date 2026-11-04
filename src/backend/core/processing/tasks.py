@@ -2,9 +2,11 @@ import os
 from typing import Callable
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from celery import states
+from celery.exceptions import Ignore
 from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
@@ -34,6 +36,11 @@ from core.processing.migration_run import (
     create_migration_run,
     delete_migration_run,
     failed_downloads,
+    finish_file,
+    record_file_error,
+    run_exists,
+    stop_run,
+    take_next_batch,
 )
 from core.processing.plan import build_plan
 from core.processing.rejected_files import (
@@ -128,7 +135,12 @@ def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
 
 
 @app.task(bind=True)
-def export(self, data):  # pylint: disable=unused-argument
+def export(self, data):
+    if run_exists(self.request.id):
+        # Delivered again by the broker: the run goes on with its own tasks.
+        logger.warning("Run of task %s already started: skipping", self.request.id)
+        raise Ignore()
+
     workspace_id = data["workspace"]["id"]
     logger.info("Starting workspace %s ...", workspace_id)
 
@@ -153,6 +165,7 @@ def export(self, data):  # pylint: disable=unused-argument
     source_backend = SourceManager().get_backend()
     list_work_dir()
 
+    dispatched = False
     try:
         logger.info("Calling begin_export ...")
         source_backend.begin_export(workspace)
@@ -174,29 +187,139 @@ def export(self, data):  # pylint: disable=unused-argument
             )
         integrity_tracker.set_kept_files(folder)
 
-        run_failed = True
         run = None
         try:
             plan = build_plan(folder)
             run = create_migration_run(workspace, self.request.id, plan)
             try:
                 _start_export(run, user, source_backend, integrity_tracker)
-                for migration_file in run.files.iterator():
-                    _export_file(run, user, source_backend, migration_file)
+                dispatch_batch(run, user)
             except BaseException:
                 _abort_export(run, user)
                 raise
+        except BaseException:
+            _clean_up_run(self.request.id, run, integrity_tracker, run_failed=True)
+            raise
+        dispatched = True
+    finally:
+        if not dispatched:
+            logger.info("Calling finalize_export ...")
+            source_backend.finalize_export(workspace)
+
+    logger.info("Run %s started", run.pk)
+    # The tasks of the run carry on, and finish_migration reports the outcome.
+    raise Ignore()
+
+
+def dispatch_batch(run, user) -> None:
+    """Queue a task for each file of the next batch of the run, or the finish of
+    the run when it has no file left to dispatch."""
+    positions = take_next_batch(run)
+    for position in positions:
+        _publish(export_file, run, user, position)
+    if not positions:
+        _publish_finish(run, user)
+
+
+def _publish(task, run, user, *args) -> None:
+    # A worker must never read a run whose changes are not committed yet.
+    transaction.on_commit(lambda: task.delay(str(run.pk), str(user.pk), *args))
+
+
+def _publish_finish(run, user) -> None:
+    # Conditional, so that a run is finished only once.
+    if MigrationRun.objects.filter(pk=run.pk, finish_published=False).update(
+        finish_published=True
+    ):
+        _publish(finish_migration, run, user)
+
+
+def _load_run(run_id):
+    return MigrationRun.objects.select_related("workspace").filter(pk=run_id).first()
+
+
+@app.task(ignore_result=True)
+def export_file(run_id, user_id, position):
+    """Export one file of a run, then queue what comes next once its batch, or
+    the run, is done."""
+    run = _load_run(run_id)
+    if run is None:
+        logger.warning("Run %s is gone: skipping its file %s", run_id, position + 1)
+        return
+    user = User.objects.get(pk=user_id)
+    if run.source_token_expired:
+        logger.info("Run %s stopped: skipping its file %s", run.pk, position + 1)
+    else:
+        source_backend = SourceManager().get_backend()
+        source_backend.resume_export(run.workspace)
+        run_file(run, user, source_backend, run.files.get(position=position))
+
+    run = finish_file(run, position)
+    if run.in_flight:
+        return
+    if run.remaining_files and not run.source_token_expired:
+        dispatch_batch(run, user)
+    else:
+        _publish_finish(run, user)
+
+
+def run_file(run, user, source_backend, migration_file):
+    """Export one file of the run. Whatever goes wrong, the run goes on with
+    its next files, except on an expired source token, which stops it."""
+    try:
+        _export_file(run, user, source_backend, migration_file)
+    except SourceTokenExpired:
+        logger.warning("The source token expired: stopping run %s", run.pk)
+        stop_run(run)
+    # Broad on purpose: one file failing must not block the rest of the run.
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        logger.exception(
+            "File %s of run %s failed", migration_file.position + 1, run.pk
+        )
+        record_file_error(migration_file, error)
+
+
+@app.task(ignore_result=True)
+def finish_migration(run_id, user_id):
+    """Close the destinations of a run whose files are all done, purge the run,
+    release the source, then report the outcome."""
+    run = MigrationRun.objects.select_related("workspace").get(pk=run_id)
+    user = User.objects.get(pk=user_id)
+    source_backend = SourceManager().get_backend()
+    source_backend.resume_export(run.workspace)
+    finish_run(run, user, source_backend)
+
+
+def finish_run(run, user, source_backend):
+    """Raise the error of a failed run once it is reported."""
+    integrity_tracker = IntegrityTracker.from_run(run)
+    error = None
+    try:
+        run_failed = True
+        try:
+            if run.source_token_expired:
+                _abort_export(run, user)
+                raise SourceTokenExpired("The source token expired during the run.")
             _finish_export(run, user)
             run_failed = False
+        # Broad on purpose: reported to the user first, then raised again.
+        except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            error = exc
         finally:
-            _clean_up_run(self.request.id, run, integrity_tracker, run_failed)
+            _clean_up_run(run.task_id, run, integrity_tracker, run_failed)
     finally:
         logger.info("Calling finalize_export ...")
-        source_backend.finalize_export(workspace)
+        source_backend.finalize_export(run.workspace)
 
-    logger.info("Task done")
-
-    return True
+    extra_task = _extra_task_of(run.task_id)
+    if extra_task is not None:
+        if error is None:
+            on_export_success(extra_task)
+        else:
+            on_export_failure(extra_task, error)
+    if error is not None:
+        raise error
+    logger.info("Run %s done", run.pk)
 
 
 def _start_export(run, user, source_backend, integrity_tracker):

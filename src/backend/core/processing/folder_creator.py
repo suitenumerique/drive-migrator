@@ -36,8 +36,12 @@ class FolderCreator:
     ) -> str | None:
         """Download one file of the run into the local folder of the run.
         Return its local path, or None when it did not reach the disk."""
-        if migration_file.status != MigrationFile.Status.PENDING:
-            # Refused while planning: nothing to download.
+        if migration_file.status in (
+            MigrationFile.Status.DOWNLOAD_FAILED,
+            MigrationFile.Status.NOT_WRITTEN,
+        ):
+            # Refused while planning, or failed already: nothing to download.
+            # A file downloaded by a task that died is downloaded again.
             return None
         logger.info("Downloading file %s ...", migration_file.position + 1)
         local_path = os.path.join(
