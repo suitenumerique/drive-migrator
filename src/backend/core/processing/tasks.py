@@ -1,4 +1,6 @@
+import json
 import os
+import traceback
 from typing import Callable
 
 from django.conf import settings
@@ -311,6 +313,7 @@ def finish_run(run, user, source_backend):
         logger.info("Calling finalize_export ...")
         source_backend.finalize_export(run.workspace)
 
+    _record_outcome(run.task_id, error)
     extra_task = _extra_task_of(run.task_id)
     if extra_task is not None:
         if error is None:
@@ -443,10 +446,34 @@ def _check_downloads(workspace: Workspace, run: MigrationRun) -> None:
         )
 
 
+def _record_outcome(task_id, error) -> None:
+    """Record the outcome of a migration on the TaskResult of its export() task,
+    which ended without one, as Celery would have."""
+    if error is None:
+        fields = {"status": states.SUCCESS, "result": json.dumps(True)}
+    else:
+        fields = {
+            "status": states.FAILURE,
+            "result": json.dumps(
+                {
+                    "exc_type": type(error).__name__,
+                    "exc_message": [str(error)],
+                    "exc_module": type(error).__module__,
+                }
+            ),
+            "traceback": "".join(traceback.format_exception(error)),
+        }
+    # update() skips the auto_now of date_done.
+    TaskResult.objects.filter(task_id=task_id).update(
+        date_done=timezone.now(), **fields
+    )
+
+
 # From https://github.com/celery/django-celery-results/issues/286#issuecomment-1279161047
 @before_task_publish.connect
 def create_task_result_on_publish(sender=None, headers=None, body=None, **kwargs):  # pylint: disable=unused-argument
-    if "task" not in headers:
+    # One row per migration: the tasks of its run have none.
+    if headers.get("task") != export.name:
         return
 
     TaskResult.objects.store_result(
@@ -502,6 +529,9 @@ def on_export_failure(
 
 @task_success.connect
 def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
+    # The outcome of a run is reported by finish_migration.
+    if sender.name != export.name:
+        return
     extra_task = _extra_task_of(sender.request.id)
     if extra_task is not None:
         on_export_success(extra_task)
@@ -509,6 +539,8 @@ def task_success(sender=None, **kwargs):  # pylint: disable=unused-argument
 
 @task_failure.connect
 def task_failure(sender=None, **kwargs):
+    if sender.name != export.name:
+        return
     extra_task = _extra_task_of(sender.request.id)
     if extra_task is not None:
         on_export_failure(extra_task, kwargs.get("exception"))

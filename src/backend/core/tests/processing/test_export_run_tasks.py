@@ -1,11 +1,14 @@
 """Tests for the tasks carrying on a run once export() planned it: one task per
 file, dispatched batch by batch, then the finish of the run."""
 
+import json
 import uuid
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
+from celery import states
+from django_celery_results.models import TaskResult
 
 from core.backends.source import SourceFile, SourceFolder, SourceTokenExpired
 from core.factories import UserFactory, WorkspaceFactory
@@ -378,3 +381,48 @@ def test_finish_migration_without_extra_task_reports_nothing(
         tasks.finish_migration(*_ids(run, user))
 
     finish_steps.on_success.assert_not_called()
+
+
+@pytest.fixture(name="task_result")
+def fixture_task_result():
+    """The TaskResult of the migration, left pending by export()."""
+    return TaskResult.objects.create(
+        task_id="task-1", task_name=tasks.export.name, status=states.PENDING
+    )
+
+
+@pytest.mark.usefixtures("finish_steps")
+def test_finish_migration_records_the_success_of_the_migration(
+    settings, user, task_result
+):
+    """The admin shows the migration done once its run is."""
+    run = _run(1, 0, settings)
+
+    tasks.finish_migration(*_ids(run, user))
+
+    task_result.refresh_from_db()
+    assert task_result.status == states.SUCCESS
+    assert task_result.date_done is not None
+    assert task_result.result == "true"
+    assert task_result.task_name == tasks.export.name
+
+
+def test_finish_migration_records_the_failure_of_the_migration(
+    settings, user, task_result, finish_steps
+):
+    """The admin shows the error of a failed migration, and where it rose."""
+    run = _run(1, 0, settings)
+    finish_steps.finish_export.side_effect = RuntimeError("Export failed for drive")
+
+    with pytest.raises(RuntimeError):
+        tasks.finish_migration(*_ids(run, user))
+
+    task_result.refresh_from_db()
+    assert task_result.status == states.FAILURE
+    assert task_result.date_done is not None
+    assert json.loads(task_result.result) == {
+        "exc_type": "RuntimeError",
+        "exc_message": ["Export failed for drive"],
+        "exc_module": "builtins",
+    }
+    assert "RuntimeError: Export failed for drive" in task_result.traceback

@@ -46,6 +46,7 @@ def migration_run():
         patch("core.processing.tasks.stop_run") as stop,
         patch("core.processing.tasks.record_file_error"),
         patch("core.processing.tasks._extra_task_of", return_value=None),
+        patch("core.processing.tasks._record_outcome"),
     ):
         files = MagicMock()
         files.count.return_value = 0
