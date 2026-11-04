@@ -163,7 +163,14 @@ class ResanaTokenManager:
         """Return the decrypted csrfToken for the legacy portal's X-CSRF-TOKEN header."""
         return decrypt_token(self.user.resana_csrf_token)
 
-    def get_valid_token(self) -> str:
+    def ensure_offline_token(self) -> None:
+        """Before a long task locks anything: refresh now an offline token close
+        to its idle deadline, and raise ResanaTokenExpired if it is missing or
+        refused, rather than hours later. An offline token without a readable
+        exp claim is trusted."""
+        self.get_valid_token(strict=True)
+
+    def get_valid_token(self, strict: bool = False) -> str:
         """Return a valid decrypted access token, refreshing proactively if near expiry.
 
         Raises ResanaTokenExpired (and clears the stored tokens) if the token
@@ -174,7 +181,7 @@ class ResanaTokenManager:
         and the loser would clear the tokens the winner just stored.
         """
         try:
-            return self._get_valid_token()
+            return self._get_valid_token(strict)
         except InvalidToken as exc:
             # Encrypted with another key: the user must log in again.
             self.clear_tokens()
@@ -182,8 +189,12 @@ class ResanaTokenManager:
                 "Stored Resana tokens cannot be decrypted."
             ) from exc
 
-    def _get_valid_token(self) -> str:
-        if self._token_is_fresh() and self._offline_token_is_fresh():
+    def _get_valid_token(self, strict: bool) -> str:
+        if (
+            self._token_is_fresh()
+            and self._offline_token_is_fresh()
+            and (self.user.resana_refresh_token or not strict)
+        ):
             return decrypt_token(self.user.resana_access_token)
 
         with cache.lock(
@@ -191,6 +202,9 @@ class ResanaTokenManager:
         ):
             # Another worker may have refreshed while we waited for the lock.
             self.user.refresh_from_db(fields=RESANA_TOKEN_FIELDS)
+            if strict and not self.user.resana_refresh_token:
+                self.clear_tokens()
+                raise ResanaTokenExpired("No Resana offline token is stored.")
             if not self._token_is_fresh():
                 if not self.user.resana_refresh_token:
                     self.clear_tokens()
@@ -199,7 +213,10 @@ class ResanaTokenManager:
                     )
                 self._refresh()
             elif not self._offline_token_is_fresh():
-                self._refresh_ahead()
+                if strict:
+                    self._refresh()
+                else:
+                    self._refresh_ahead()
 
         return decrypt_token(self.user.resana_access_token)
 

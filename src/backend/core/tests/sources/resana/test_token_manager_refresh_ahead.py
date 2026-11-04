@@ -333,3 +333,96 @@ def test_refresh_logs_the_offline_token_deadlines(settings):
         "expires at 2026-10-15T18:18:08+00:00 (in 10800s), offline token "
         "rotated, expires at 2026-10-15T16:18:08+00:00 (in 3600s)",
     ]
+
+
+# ---------------------------------------------------------------------------
+# ensure_offline_token() — before a task locks anything
+# ---------------------------------------------------------------------------
+
+
+def _ensure_offline_token_with(user, keycloak_error=None):
+    """Call ensure_offline_token() against mocked Keycloak and bridge, and
+    return the Keycloak mock."""
+    with (
+        patch(
+            "core.sources.resana.token_manager.refresh_offline_token",
+            return_value={
+                "access_token": "kc-access",
+                "refresh_token": _offline_jwt_expiring_in(timedelta(hours=1)),
+            },
+            side_effect=keycloak_error,
+        ) as mock_keycloak,
+        patch(
+            "core.sources.resana.token_manager.create_bridge_session",
+            return_value={
+                "plateformeSessionId": "new-sess",
+                "interstis_access": _make_access_jwt(),
+                "csrfToken": "new-csrf",
+            },
+        ),
+    ):
+        ResanaTokenManager(user).ensure_offline_token()
+    return mock_keycloak
+
+
+def test_ensure_offline_token_raises_when_the_offline_token_is_refused(settings):
+    """A task that waited past the idle timeout fails before locking anything,
+    even though the access token would still work for a while."""
+    user = _make_user_with_idle_offline_token(settings, timedelta(minutes=-30))
+
+    with pytest.raises(ResanaTokenExpired):
+        _ensure_offline_token_with(user, keycloak_error=_keycloak_refusal())
+
+    user.refresh_from_db()
+    assert not ResanaTokenManager(user).is_connected()
+
+
+def test_ensure_offline_token_refreshes_an_offline_token_close_to_its_deadline(
+    settings,
+):
+    """An offline token close to its idle deadline is renewed right away."""
+    user = _make_user_with_idle_offline_token(settings, timedelta(minutes=5))
+
+    mock_keycloak = _ensure_offline_token_with(user)
+
+    mock_keycloak.assert_called_once()
+    user.refresh_from_db()
+    assert ResanaTokenManager(user).is_connected()
+
+
+def test_ensure_offline_token_does_nothing_while_the_offline_token_has_time_left(
+    settings,
+):
+    """No refresh when the offline token is far from its idle deadline."""
+    user = _make_user_with_idle_offline_token(settings, timedelta(minutes=45))
+
+    mock_keycloak = _ensure_offline_token_with(user)
+
+    mock_keycloak.assert_not_called()
+
+
+def test_ensure_offline_token_raises_without_offline_token(settings):
+    """Without an offline token, the access token can't outlast its lifetime:
+    the user must log in again before the task starts."""
+    user = _make_user_with_idle_offline_token(settings, timedelta(minutes=30))
+    user.resana_refresh_token = ""
+    user.save()
+
+    with pytest.raises(ResanaTokenExpired):
+        _ensure_offline_token_with(user)
+
+    user.refresh_from_db()
+    assert not ResanaTokenManager(user).is_connected()
+
+
+def test_ensure_offline_token_does_not_refresh_again_after_another_worker(settings):
+    """A stale copy of the user doesn't refresh again a token another worker
+    just renewed."""
+    user_a = _make_user_with_idle_offline_token(settings, timedelta(minutes=5))
+    user_b = type(user_a).objects.get(pk=user_a.pk)
+
+    first_keycloak = _ensure_offline_token_with(user_a)
+    second_keycloak = _ensure_offline_token_with(user_b)
+
+    first_keycloak.assert_called_once()
+    second_keycloak.assert_not_called()

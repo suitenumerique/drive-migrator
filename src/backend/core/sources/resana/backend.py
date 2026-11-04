@@ -214,6 +214,9 @@ class ResanaSourceBackend(AbstractSourceBackend):
         reverses that.
         """
         self._user = workspace.migration_user
+        # A task that waited in the queue past the offline token idle timeout
+        # must fail here, not hours later with the workspace left locked.
+        ResanaTokenManager(self._user).ensure_offline_token()
         members_client = self._get_members_client()
         slug = members_client.find_slug_by_workspace_uuid(workspace.source_id)
         if slug is None:

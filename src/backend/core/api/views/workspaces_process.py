@@ -76,7 +76,7 @@ class WorkspacesProcessAPIView(APIView):
     def ensure_resana_source_token(user):
         """Make sure the user's Resana session can be used or renewed."""
         try:
-            ResanaTokenManager(user).get_valid_token()
+            ResanaTokenManager(user).ensure_offline_token()
         except ResanaTokenExpired as exc:
             raise APIException("ResanaTokenRequired") from exc
         except RequestException as exc:

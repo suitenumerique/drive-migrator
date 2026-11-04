@@ -786,3 +786,28 @@ def test_finalize_export_persists_remaining_lock_state_in_database(settings):
         "workspace_locked_by_us": True,
         "folders_granted_by_us": ["f2"],
     }
+
+
+def test_begin_export_locks_nothing_when_the_offline_token_is_no_longer_valid(
+    settings,
+):
+    """A dead offline token fails the task before the workspace is locked,
+    instead of a few hours later with the workspace left locked."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = _make_workspace()
+
+    with (
+        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
+        patch("core.sources.resana.backend.ResanaMembersClient") as mock_members,
+        patch("core.sources.resana.backend.ResanaLockClient") as mock_lock,
+    ):
+        mock_tm.return_value.ensure_offline_token.side_effect = ResanaTokenExpired(
+            "Resana offline token is no longer valid."
+        )
+        _patch_members_client(mock_members)
+        with pytest.raises(ResanaTokenExpired):
+            ResanaSourceBackend().begin_export(workspace)
+
+    mock_tm.assert_called_with(workspace.migration_user)
+    mock_lock.return_value.lock_workspace.assert_not_called()
+    workspace.save.assert_not_called()
