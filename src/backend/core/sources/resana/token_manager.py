@@ -12,6 +12,7 @@ import jwt
 import requests
 from cryptography.fernet import InvalidToken
 
+from core.backends.source import SourceTokenExpired
 from core.encryption import decrypt_token, encrypt_token
 from core.sources.resana.migrator_auth import (
     MigratorClient,
@@ -54,7 +55,7 @@ OFFLINE_EXPIRY_ERRORS = (
 )
 
 
-class ResanaTokenExpired(Exception):
+class ResanaTokenExpired(SourceTokenExpired):
     """Raised when the Resana access token is expired and no refresh token is available."""
 
 

@@ -26,6 +26,7 @@ from core.processing.tasks import (
 from core.processing.tasks import (
     task_success as task_success_handler,
 )
+from core.sources.resana.token_manager import ResanaTokenExpired
 
 
 @pytest.fixture(autouse=True)
@@ -703,7 +704,38 @@ def test_task_failure_handler_sends_fail_mail():
         task_failure_handler(sender=mock_sender)
 
     mock_mails_cls.return_value.send_fail_mail.assert_called_once_with(
-        mock_extra_task.user, mock_workspace
+        mock_extra_task.user, mock_workspace, source_token_expired=False
+    )
+
+
+def test_task_failure_handler_asks_to_log_in_again_on_expired_source_token():
+    """A run that failed on an expired source token tells the user to log in
+    to the source again before relaunching."""
+    mock_sender = MagicMock()
+    mock_sender.request.id = "task-id-4"
+    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
+    mock_workspace = MagicMock(spec=Workspace)
+    mock_workspace.destination_statuses = {}
+    mock_extra_task.workspace = mock_workspace
+
+    with (
+        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
+        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.MailsManager") as mock_mails_cls,
+    ):
+        mock_tr_cls.objects.filter.return_value.first.return_value = MagicMock(
+            spec=TaskResult
+        )
+        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
+
+        task_failure_handler(
+            sender=mock_sender,
+            exception=ResanaTokenExpired("Resana offline token is no longer valid."),
+        )
+
+    mock_mails_cls.return_value.send_fail_mail.assert_called_once_with(
+        mock_extra_task.user, mock_workspace, source_token_expired=True
     )
 
 

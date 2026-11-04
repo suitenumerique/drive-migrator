@@ -10,7 +10,12 @@ from django_celery_results.models import TaskResult
 
 from core.analytics import local_files_stats, posthog_capture, workspaces_counts
 from core.backends.destination import DestinationRegistry
-from core.backends.source import SourceFolder, SourceManager, truncate_folder_files
+from core.backends.source import (
+    SourceFolder,
+    SourceManager,
+    SourceTokenExpired,
+    truncate_folder_files,
+)
 from core.mails_manager import MailsManager
 from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.folder_creator import FolderCreator
@@ -261,4 +266,8 @@ def task_failure(sender=None, **kwargs):
     cleanup_workspace_dir(workspace)
 
     mail_manager = MailsManager()
-    mail_manager.send_fail_mail(extra_task.user, workspace)
+    mail_manager.send_fail_mail(
+        extra_task.user,
+        workspace,
+        source_token_expired=isinstance(kwargs.get("exception"), SourceTokenExpired),
+    )

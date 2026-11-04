@@ -88,6 +88,13 @@ class MailsManager:
             if metadata.get(REJECTED_FILES_S3_KEY)
         ]
 
-    def send_fail_mail(self, user, workspace: Workspace):
+    def send_fail_mail(
+        self, user, workspace: Workspace, source_token_expired: bool = False
+    ):
         title = _(f"Migration ou export l'espace {workspace.title} échoué")
-        self.send_migration_mail(user, workspace, "fail", {"title": title})
+        self.send_migration_mail(
+            user,
+            workspace,
+            "fail",
+            {"title": title, "source_token_expired": source_token_expired},
+        )
