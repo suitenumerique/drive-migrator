@@ -14,6 +14,8 @@ and this project adheres to
   migrations no longer fail after 3 h #304
 - Fail a Resana migration before locking the workspace when the offline
   token is no longer valid, and ask the user to log in again #304
+- Stop downloading as soon as the source token expired, instead of failing
+  every remaining file #304
 
 ## [v0.12.1] - 2026-11-03
 
