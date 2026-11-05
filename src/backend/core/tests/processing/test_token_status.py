@@ -36,6 +36,22 @@ def test_log_token_status_logs_resana_and_drive_tokens():
     ]
 
 
+@override_settings(DRIVE_AUTH_MODE="user_exchanged_token")
+def test_log_token_status_logs_the_exchanged_drive_token():
+    """With token exchange, the Drive line describes the exchanged token."""
+    user = factories.UserFactory()
+    logger = MagicMock()
+
+    log_token_status(logger, "Before migration launch", user, resana=False, drive=True)
+
+    logger.info.assert_called_once_with(
+        "%s: %s",
+        "Before migration launch",
+        f"Drive (Menshen) tokens for user {user.id}: exchanged token missing; "
+        "ProConnect access token missing; ProConnect refresh token missing",
+    )
+
+
 @override_settings(DRIVE_AUTH_MODE="service_account")
 def test_log_token_status_skips_drive_in_service_account_mode():
     """The service account doesn't use the user's tokens: nothing to log for Drive."""

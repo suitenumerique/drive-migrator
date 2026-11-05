@@ -1,5 +1,6 @@
 """DriveBackend — HTTP client for La Suite Drive API."""
 
+import functools
 import logging
 import time
 import uuid
@@ -9,8 +10,17 @@ from enum import StrEnum
 from django.conf import settings
 from django.utils import timezone
 
+import httpx2
 from celery.utils.log import get_task_logger
+from menshen_client import (
+    Configuration,
+    TokenExchangeClient,
+    TokenExchangeRequest,
+    TokenType,
+)
+from menshen_client.exceptions import ResponseParsingError
 from requests.auth import AuthBase
+from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError, RequestException
 from tenacity import (
     before_sleep_log,
@@ -150,6 +160,37 @@ def _is_duplicate_id_conflict(error: HTTPError) -> bool:
     return _has_error_code(error, 400, _EXISTING_ID)
 
 
+class DriveAuthMode(StrEnum):
+    """How the migrator authenticates to Drive (DRIVE_AUTH_MODE)."""
+
+    SERVICE_ACCOUNT = "service_account"
+    USER_TOKEN = "user_token"  # noqa: S105
+    USER_EXCHANGED_TOKEN = "user_exchanged_token"  # noqa: S105
+
+
+def get_drive_auth_mode() -> DriveAuthMode:
+    """Return the configured auth mode, the service account when unknown."""
+    try:
+        return DriveAuthMode(
+            getattr(settings, "DRIVE_AUTH_MODE", DriveAuthMode.SERVICE_ACCOUNT)
+        )
+    except ValueError:
+        logger.error(
+            "Invalid DRIVE_AUTH_MODE %r, falling back to %s",
+            settings.DRIVE_AUTH_MODE,
+            DriveAuthMode.SERVICE_ACCOUNT.value,
+        )
+        return DriveAuthMode.SERVICE_ACCOUNT
+
+
+def uses_user_identity() -> bool:
+    """Whether Drive items are created as the migration user, who then owns them."""
+    return get_drive_auth_mode() in (
+        DriveAuthMode.USER_TOKEN,
+        DriveAuthMode.USER_EXCHANGED_TOKEN,
+    )
+
+
 class DriveTokenExpired(DestinationTokenExpired, RuntimeError):
     """The ProConnect token cannot be refreshed: the user must log in again."""
 
@@ -166,15 +207,20 @@ def _is_invalid_grant(response) -> bool:
 
 
 def clear_drive_tokens(user) -> None:
-    """Remove the stored Drive (ProConnect) tokens, forcing the user to log in again."""
+    """Remove the stored Drive tokens, ProConnect and exchanged ones, forcing the
+    user to log in again."""
     user.oidc_access_token = ""
     user.oidc_refresh_token = ""
     user.oidc_token_expires_at = None
+    user.drive_exchanged_token = ""
+    user.drive_exchanged_token_expires_at = None
     user.save(
         update_fields=[
             "oidc_access_token",
             "oidc_refresh_token",
             "oidc_token_expires_at",
+            "drive_exchanged_token",
+            "drive_exchanged_token_expires_at",
             "updated_at",
         ]
     )
@@ -207,6 +253,17 @@ def describe_drive_tokens(user) -> str:
     refresh = (
         "refresh token present" if user.oidc_refresh_token else "refresh token missing"
     )
+    if get_drive_auth_mode() == DriveAuthMode.USER_EXCHANGED_TOKEN:
+        exchanged = "exchanged token missing"
+        if user.drive_exchanged_token:
+            exchanged = (
+                "exchanged token present, "
+                f"{describe_access_expiry(user.drive_exchanged_token_expires_at)}"
+            )
+        return (
+            f"Drive (Menshen) tokens for user {user.id}: {exchanged}; "
+            f"ProConnect {access}; ProConnect {refresh}"
+        )
     return f"Drive (ProConnect) tokens for user {user.id}: {access}; {refresh}"
 
 
@@ -680,3 +737,120 @@ class DriveUserTokenBackend(DriveBackend):
             self._user.id,
             reason,
         )
+
+
+@functools.cache
+def _get_menshen_client() -> TokenExchangeClient:
+    """One long-lived client per process, as the Menshen client recommends."""
+    return TokenExchangeClient(
+        config=Configuration(
+            client_id=settings.MENSHEN_CLIENT_ID,
+            client_secret=settings.MENSHEN_CLIENT_SECRET,
+            server_root_url=settings.MENSHEN_SERVER_ROOT_URL,
+            requests_timeout=settings.MENSHEN_REQUESTS_TIMEOUT,
+        )
+    )
+
+
+class DriveUserExchangedTokenBackend(DriveBackend):
+    """Uses a Drive token exchanged with Menshen (RFC 8693) for the user's
+    ProConnect token. Targets /external_api/v1.0/.
+
+    The exchange happens when a migration starts, for a token that outlives the
+    ProConnect one: it is stored on the user so queued Celery tasks can use it.
+    The ProConnect token, the subject of the exchange, is kept fresh by
+    DriveUserTokenBackend.
+    """
+
+    def __init__(self, user):
+        super().__init__()
+        self._user = user
+        self._access_token = decrypt_token(user.drive_exchanged_token) or None
+        self._token_expires_at = user.drive_exchanged_token_expires_at
+
+    def exchange(self) -> None:
+        """Exchange the user's ProConnect token for a Drive token, and store it."""
+        # Refreshes, and stores, the ProConnect token when it has expired.
+        subject_token = DriveUserTokenBackend(self._user)._get_token()  # noqa: SLF001  # pylint: disable=protected-access
+        try:
+            response = _get_menshen_client().exchange(
+                TokenExchangeRequest(
+                    subject_token=subject_token,
+                    subject_token_type=TokenType.ACCESS_TOKEN,
+                    audience=settings.DRIVE_TOKEN_EXCHANGE_AUDIENCE or None,
+                    scope=settings.DRIVE_TOKEN_EXCHANGE_SCOPE or None,
+                )
+            )
+        except httpx2.HTTPStatusError as error:
+            self._log_exchange_failure(
+                f"Menshen returned {describe_oauth_error(error)}"
+            )
+            # Menshen refuses an expired or revoked ProConnect token: logging in
+            # again gives a fresh one.
+            if _is_invalid_grant(error.response):
+                raise DriveTokenExpired(
+                    f"Menshen refused the ProConnect token of user {self._user.email}."
+                ) from error
+            # Raised as requests errors, which callers already handle: 5xx are
+            # transient, other refusals are configuration errors.
+            if error.response.status_code >= 500:
+                raise RequestsConnectionError(
+                    f"Menshen returned {error.response.status_code}"
+                ) from error
+            raise HTTPError(f"Menshen returned {error.response.status_code}") from error
+        except httpx2.TransportError as error:
+            self._log_exchange_failure(
+                f"Menshen request failed ({type(error).__name__})"
+            )
+            raise RequestsConnectionError(
+                f"Menshen request failed ({type(error).__name__})"
+            ) from error
+        except ResponseParsingError:
+            self._log_exchange_failure("Menshen returned an invalid response")
+            raise
+        self._access_token = response.access_token
+        self._token_expires_at = timezone.now() + timedelta(seconds=response.expires_in)
+        self._user.drive_exchanged_token = encrypt_token(self._access_token)
+        self._user.drive_exchanged_token_expires_at = self._token_expires_at
+        self._user.save(
+            update_fields=[
+                "drive_exchanged_token",
+                "drive_exchanged_token_expires_at",
+                "updated_at",
+            ]
+        )
+        logger.info(
+            "Drive (Menshen) token exchange succeeded for user %s: "
+            "new exchanged token %s",
+            self._user.id,
+            describe_access_expiry(self._token_expires_at),
+        )
+
+    def _can_refresh(self) -> bool:
+        return bool(self._user.oidc_refresh_token)
+
+    def _refresh(self):
+        # The token is normally exchanged when the migration starts: exchange
+        # again while the ProConnect token can still be refreshed.
+        logger.info(
+            "Drive (Menshen) token exchange for user %s: %s",
+            self._user.id,
+            "exchanged token missing"
+            if self._access_token is None
+            else f"exchanged token {describe_access_expiry(self._token_expires_at)}",
+        )
+        self.exchange()
+
+    def _log_exchange_failure(self, reason: str) -> None:
+        logger.warning(
+            "Drive (Menshen) token exchange failed for user %s: %s",
+            self._user.id,
+            reason,
+        )
+
+
+def make_user_drive_backend(user) -> DriveBackend:
+    """Return the backend acting as the user for the configured auth mode."""
+    if get_drive_auth_mode() == DriveAuthMode.USER_EXCHANGED_TOKEN:
+        return DriveUserExchangedTokenBackend(user)
+    return DriveUserTokenBackend(user)

@@ -104,6 +104,53 @@ def test_drive_token_refresh_succeeds_no_exception():
     mock_instance._get_token.assert_called_once()
 
 
+@override_settings(DRIVE_AUTH_MODE="user_exchanged_token")
+def test_drive_token_exchange_runs_once_at_launch():
+    """With token exchange, launching a migration to Drive exchanges the token."""
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory()
+
+    with (
+        patch(
+            "core.api.views.workspaces_process.DriveUserExchangedTokenBackend"
+        ) as mock_cls,
+        patch("core.api.views.workspaces_process.DriveUserTokenBackend") as mock_raw,
+    ):
+        _make_view().validation(user, _workspace_data(workspace, "drive"), [workspace])
+
+    mock_cls.assert_called_once_with(user)
+    mock_cls.return_value.exchange.assert_called_once_with()
+    mock_raw.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "error, error_name",
+    [
+        (DestinationTokenExpired(), "DriveTokenRequired"),
+        (requests.ConnectionError(), "DestinationUnavailable"),
+        (requests.HTTPError(), "DestinationUnavailable"),
+    ],
+)
+@override_settings(DRIVE_AUTH_MODE="user_exchanged_token")
+def test_drive_token_exchange_failure_is_mapped(error, error_name):
+    """A refused ProConnect token sends the user back to log in; an unreachable
+    or misconfigured Menshen does not."""
+    user = factories.UserFactory()
+    workspace = factories.WorkspaceFactory()
+
+    with patch(
+        "core.api.views.workspaces_process.DriveUserExchangedTokenBackend"
+    ) as mock_cls:
+        mock_cls.return_value.exchange.side_effect = error
+
+        with pytest.raises(APIException) as exc_info:
+            _make_view().validation(
+                user, _workspace_data(workspace, "drive"), [workspace]
+            )
+
+    assert exc_info.value.detail["error_name"] == error_name
+
+
 @override_settings(DRIVE_AUTH_MODE="service_account")
 def test_drive_service_account_mode_skips_token_check():
     """DRIVE_AUTH_MODE=service_account → DriveUserTokenBackend never instantiated."""

@@ -1,7 +1,5 @@
 import logging
 
-from django.conf import settings
-
 from django_celery_results.models import TaskResult
 from requests.exceptions import RequestException
 from rest_framework.response import Response
@@ -11,7 +9,13 @@ from core.analytics import posthog_capture
 from core.sources.osmose.serializers import WorkspaceSerializer
 
 from ...backends.destination import AccountPolicy, DestinationRegistry
-from ...destinations.drive.drive_backend import DriveUserTokenBackend
+from ...destinations.drive.drive_backend import (
+    DriveAuthMode,
+    DriveUserExchangedTokenBackend,
+    DriveUserTokenBackend,
+    get_drive_auth_mode,
+    uses_user_identity,
+)
 from ...destinations.resana.resana_backend import ResanaBackend
 from ...models import ExtraTaskInfo, FeatureFlag, Workspace
 from ...processing.tasks import export
@@ -61,11 +65,16 @@ class WorkspacesProcessAPIView(APIView):
 
     @staticmethod
     def ensure_drive_token(user):
-        """Make sure the user's Drive token can be used or refreshed."""
+        """Make sure the user's Drive token can be used or refreshed. With token
+        exchange, exchange it now, so the migration has a token that outlives
+        the ProConnect one."""
         try:
             with limited_retries(max_attempts=1):
-                # pylint: disable-next=protected-access
-                DriveUserTokenBackend(user)._get_token()  # noqa: SLF001
+                if get_drive_auth_mode() == DriveAuthMode.USER_EXCHANGED_TOKEN:
+                    DriveUserExchangedTokenBackend(user).exchange()
+                else:
+                    # pylint: disable-next=protected-access
+                    DriveUserTokenBackend(user)._get_token()  # noqa: SLF001
         except RequestException as exc:
             logger.warning("Could not refresh the Drive token: %s", exc)
             raise APIException("DestinationUnavailable") from exc
@@ -112,10 +121,7 @@ class WorkspacesProcessAPIView(APIView):
             if not resana_user:
                 raise APIException("ResanaUserNotFound")
 
-        if (
-            check_drive_token
-            and getattr(settings, "DRIVE_AUTH_MODE", "service_account") == "user_token"
-        ):
+        if check_drive_token and uses_user_identity():
             self.ensure_drive_token(user)
 
         if check_resana_source_token:
