@@ -29,7 +29,7 @@ from tenacity import (
 _QUERY_IN_TEXT_RE = re.compile(r"\?\S*")
 
 # Logs the calls of every service, whose retries go to the logger of the service
-request_logger = structlog.get_logger(__name__)
+logger = structlog.get_logger(__name__)
 
 _max_attempts_cap: ContextVar[int | None] = ContextVar(
     "retrying_session_max_attempts_cap", default=None
@@ -136,10 +136,10 @@ class RetryingSession(requests.Session):
 
     SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
-    def __init__(self, settings_prefix: str, logger):
+    def __init__(self, settings_prefix: str, retry_logger):
         super().__init__()
         self.settings_prefix = settings_prefix
-        self.logger = logger
+        self.retry_logger = retry_logger
 
     def _setting(self, name: str) -> int:
         return getattr(settings, f"{self.settings_prefix}_RETRY_{name}")
@@ -162,14 +162,14 @@ class RetryingSession(requests.Session):
             response = super().request(method, url, *args, **kwargs)
         except Exception as error:
             # The message of the error may hold the URL with its query
-            request_logger.info(
+            logger.info(
                 "http_request",
                 **fields,
                 error=type(error).__name__,
                 duration_ms=round((time.monotonic() - started_at) * 1000),
             )
             raise
-        request_logger.info(
+        logger.info(
             "http_request",
             **fields,
             status=response.status_code,
@@ -209,7 +209,7 @@ class RetryingSession(requests.Session):
             if not outcome.failed:
                 # Release the discarded 5xx response's pooled connection.
                 outcome.result().close()
-            self.logger.info(
+            self.retry_logger.info(
                 "Retrying %s %s in %s seconds after attempt %s failed: %s",
                 method.upper(),
                 _strip_query(url),
@@ -223,7 +223,7 @@ class RetryingSession(requests.Session):
     def _give_up(self, method, url):
         def _callback(retry_state):
             outcome = retry_state.outcome
-            self.logger.error(
+            self.retry_logger.error(
                 "%s %s giving up after %s attempt(s): %s",
                 method.upper(),
                 _strip_query(url),
