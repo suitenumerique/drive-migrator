@@ -14,7 +14,6 @@ import pytest
 import structlog
 from celery.app.log import Logging
 from celery.signals import before_task_publish, task_prerun
-from rest_framework.test import APIClient
 
 from core import factories
 from core.processing.tasks import export
@@ -219,10 +218,9 @@ def test_logging_request(client, console_logs):
 
 
 @pytest.mark.django_db
-def test_logging_request_user(console_logs):
+def test_logging_request_user(client, console_logs):
     """A request should be logged with the id of its user."""
     user = factories.UserFactory()
-    client = APIClient()
     client.force_login(user)
 
     client.get("/api/v1.0/users/", HTTP_X_REQUEST_ID="front-42")
@@ -240,10 +238,9 @@ def test_logging_request_user(console_logs):
 
 
 @pytest.mark.django_db
-def test_logging_request_exception(console_logs):
+def test_logging_request_exception(client, console_logs):
     """A request that raises should be logged with its traceback."""
     user = factories.UserFactory()
-    client = APIClient()
     client.raise_request_exception = False
     client.force_login(user)
 
