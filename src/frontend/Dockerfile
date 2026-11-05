@@ -40,7 +40,7 @@ WORKDIR /home/frontend/apps/main
 RUN yarn build
 
 # ---- Front-end image ----
-FROM nginxinc/nginx-unprivileged:1.30.4-alpine3.24 AS frontend-production
+FROM nginxinc/nginx-unprivileged:1.31.6-alpine3.24 AS frontend-production
 
 # Upgrade system packages to install security updates
 USER root
