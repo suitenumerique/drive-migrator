@@ -33,7 +33,7 @@
     "react-aria-components": "1.21.1",
     "typescript": "6.0.3",
     "**/js-yaml": "5.4.2",
-    "**/@next/eslint-plugin-next/glob": "13.0.6",
+    "**/@next/eslint-plugin-next/glob": "14.0.2",
     "**/@typescript-eslint/typescript-estree/minimatch": "10.2.6"
   }
 }
