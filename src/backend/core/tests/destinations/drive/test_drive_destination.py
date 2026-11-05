@@ -284,14 +284,20 @@ def test_service_account_mode_does_not_double_share_migration_user_who_is_also_m
 
 
 # ---------------------------------------------------------------------------
-# user_token mode (DRIVE_AUTH_MODE = "user_token")
+# user token modes (DRIVE_AUTH_MODE = "user_token" or "user_exchanged_token")
 # ---------------------------------------------------------------------------
 
 
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
-def test_user_token_mode_uses_user_token_backend(mock_cls, tmp_path, settings):
-    """In user_token mode, export() instantiates DriveUserTokenBackend with the user."""
-    settings.DRIVE_AUTH_MODE = "user_token"
+@pytest.fixture(name="user_auth_mode", params=["user_token", "user_exchanged_token"])
+def fixture_user_auth_mode(request, settings):
+    """Run the test in each mode acting as the migration user."""
+    settings.DRIVE_AUTH_MODE = request.param
+
+
+@pytest.mark.usefixtures("user_auth_mode")
+@patch("core.destinations.drive.backend.make_user_drive_backend")
+def test_user_token_mode_uses_user_token_backend(mock_cls, tmp_path):
+    """In user token modes, export() builds the user backend with the user."""
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     user = MagicMock()
@@ -301,12 +307,10 @@ def test_user_token_mode_uses_user_token_backend(mock_cls, tmp_path, settings):
     mock_cls.assert_called_once_with(user)
 
 
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
-def test_user_token_mode_does_not_share_with_migration_user(
-    mock_cls, tmp_path, settings
-):
-    """In user_token mode, migration_user is already owner — sharing is skipped."""
-    settings.DRIVE_AUTH_MODE = "user_token"
+@pytest.mark.usefixtures("user_auth_mode")
+@patch("core.destinations.drive.backend.make_user_drive_backend")
+def test_user_token_mode_does_not_share_with_migration_user(mock_cls, tmp_path):
+    """In user token modes, migration_user is already owner — sharing is skipped."""
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     workspace = _make_workspace(
@@ -319,10 +323,10 @@ def test_user_token_mode_does_not_share_with_migration_user(
     assert "alice@example.com" not in emails_queried
 
 
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
-def test_user_token_mode_still_shares_with_other_members(mock_cls, tmp_path, settings):
-    """In user_token mode, other workspace members (not the migration user) are still shared."""
-    settings.DRIVE_AUTH_MODE = "user_token"
+@pytest.mark.usefixtures("user_auth_mode")
+@patch("core.destinations.drive.backend.make_user_drive_backend")
+def test_user_token_mode_still_shares_with_other_members(mock_cls, tmp_path):
+    """In user token modes, other workspace members (not the migration user) are still shared."""
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     mock_backend.find_user_by_email.return_value = {"id": "other-user-uuid"}
@@ -341,12 +345,12 @@ def test_user_token_mode_still_shares_with_other_members(mock_cls, tmp_path, set
     assert "bob@example.com" in emails_queried
 
 
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
+@pytest.mark.usefixtures("user_auth_mode")
+@patch("core.destinations.drive.backend.make_user_drive_backend")
 def test_user_token_mode_shares_with_members_even_without_migration_user(
-    mock_cls, tmp_path, settings
+    mock_cls, tmp_path
 ):
-    """In user_token mode with no migration_user, members are still shared normally."""
-    settings.DRIVE_AUTH_MODE = "user_token"
+    """In user token modes with no migration_user, members are still shared normally."""
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     mock_backend.find_user_by_email.return_value = {"id": "user-uuid"}
@@ -857,10 +861,10 @@ def test_export_logs_each_file_before_creating_it(mock_cls, tmp_path, settings):
     mock_logger.info.assert_called_once_with("Uploading file %s (%s bytes)", item_id, 7)
 
 
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
-def test_user_token_mode_sets_status_success(mock_cls, tmp_path, settings):
-    """In user_token mode, export() sets destination status to SUCCESS."""
-    settings.DRIVE_AUTH_MODE = "user_token"
+@pytest.mark.usefixtures("user_auth_mode")
+@patch("core.destinations.drive.backend.make_user_drive_backend")
+def test_user_token_mode_sets_status_success(mock_cls, tmp_path):
+    """In user token modes, export() sets destination status to SUCCESS."""
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     workspace = _make_workspace()
@@ -939,12 +943,12 @@ def test_account_policy_is_none_in_service_account_mode(settings):
     assert DriveDestinationBackend().get_account_policy() is AccountPolicy.NONE
 
 
+@pytest.mark.usefixtures("user_auth_mode")
 @pytest.mark.parametrize(
     "policy", [AccountPolicy.USER_CREATED, AccountPolicy.AUTO_CREATED]
 )
 def test_account_policy_follows_the_setting_in_user_token_mode(settings, policy):
-    """In user_token mode, DRIVE_ACCOUNT_POLICY says who creates the account."""
-    settings.DRIVE_AUTH_MODE = "user_token"
+    """In user token modes, DRIVE_ACCOUNT_POLICY says who creates the account."""
     settings.DRIVE_ACCOUNT_POLICY = policy.value
 
     assert DriveDestinationBackend().get_account_policy() is policy
@@ -986,7 +990,7 @@ def test_no_account_creation_url_when_the_user_creates_no_account(
 
 
 @pytest.mark.parametrize("me, expected", [({"id": "alice-uuid"}, True), (None, False)])
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
+@patch("core.destinations.drive.backend.make_user_drive_backend")
 def test_user_account_exists_asks_drive_with_the_user_token(mock_cls, me, expected):
     """The account exists when Drive knows the holder of the user's token."""
     user = MagicMock()

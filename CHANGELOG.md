@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Integrate a new Drive `"user_exchanged_token"` auth mode, exchanging the
+  ProConnect token with Menshen
+
 ## [v0.12.1] - 2026-11-03
 
 - Drop name columns from the Drive members CSV

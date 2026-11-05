@@ -298,10 +298,33 @@ class Base(Configuration):
     )
     # "service_account": client_credentials grant via /external_api/v1.0/ (default)
     # "user_token": authenticated user's ProConnect token via /external_api/v1.0/
+    # "user_exchanged_token": the user's ProConnect token exchanged with Menshen
+    # (RFC 8693) when a migration starts, for a long-lived Drive token.
     DRIVE_AUTH_MODE = values.Value(
         "service_account", environ_name="DRIVE_AUTH_MODE", environ_prefix=None
     )
-    # In user_token mode, who creates the user's Drive account:
+    # Menshen token exchange server, used in user_exchanged_token mode. The
+    # exchanged token's lifetime is set by Menshen, per client and audience.
+    MENSHEN_SERVER_ROOT_URL = values.Value(
+        "", environ_name="MENSHEN_SERVER_ROOT_URL", environ_prefix=None
+    )
+    MENSHEN_CLIENT_ID = values.Value(
+        "", environ_name="MENSHEN_CLIENT_ID", environ_prefix=None
+    )
+    MENSHEN_CLIENT_SECRET = values.Value(
+        "", environ_name="MENSHEN_CLIENT_SECRET", environ_prefix=None
+    )
+    MENSHEN_REQUESTS_TIMEOUT = values.FloatValue(
+        30.0, environ_name="MENSHEN_REQUESTS_TIMEOUT", environ_prefix=None
+    )
+    # Drive's audience in Menshen, and the scope requested for the exchanged token.
+    DRIVE_TOKEN_EXCHANGE_AUDIENCE = values.Value(
+        "", environ_name="DRIVE_TOKEN_EXCHANGE_AUDIENCE", environ_prefix=None
+    )
+    DRIVE_TOKEN_EXCHANGE_SCOPE = values.Value(
+        "", environ_name="DRIVE_TOKEN_EXCHANGE_SCOPE", environ_prefix=None
+    )
+    # In user token modes, who creates the user's Drive account:
     # "user_created": the user must log in to Drive once before migrating.
     # "auto_created": Drive creates it on the first migration (needs the
     # resource server to create unknown users, see django-lasuite OIDC_RS_CREATE_USER).

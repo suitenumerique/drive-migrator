@@ -24,6 +24,8 @@ class UserFactory(factory.django.DjangoModelFactory):
     oidc_access_token = ""
     oidc_refresh_token = ""
     oidc_token_expires_at = None
+    drive_exchanged_token = ""
+    drive_exchanged_token_expires_at = None
     resana_access_token = ""
     resana_refresh_token = ""
     resana_token_expires_at = None

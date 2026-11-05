@@ -67,6 +67,8 @@ class UserAdmin(auth_admin.UserAdmin):
                     "oidc_access_token",
                     "oidc_refresh_token",
                     "oidc_token_expires_at",
+                    "drive_exchanged_token",
+                    "drive_exchanged_token_expires_at",
                 ),
                 "classes": ("collapse",),
             },
@@ -125,6 +127,8 @@ class UserAdmin(auth_admin.UserAdmin):
             "oidc_access_token",
             "oidc_refresh_token",
             "oidc_token_expires_at",
+            "drive_exchanged_token",
+            "drive_exchanged_token_expires_at",
         )
         return fields
 

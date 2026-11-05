@@ -316,6 +316,16 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
         help_text=_("Expiry datetime of the stored OIDC access token."),
     )
 
+    # Drive token exchanged with Menshen for the ProConnect access token when a
+    # migration starts (DRIVE_AUTH_MODE=user_exchanged_token). Kept apart from
+    # the OIDC tokens, which each login overwrites.
+    drive_exchanged_token = models.TextField(blank=True, default="")
+    drive_exchanged_token_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("Expiry datetime of the stored Drive exchanged token."),
+    )
+
     # Resana tokens stored for async Celery tasks (source Resana migration).
     # Populated via the /api/v1.0/resana/auth/connect + callback endpoints
     # (resana-migrator Keycloak client, PKCE flow).
