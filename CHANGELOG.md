@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- Log as JSON with django-structlog, with the request and workspace ids
+
 ## [v0.12.1] - 2026-11-03
 
 - Drop name columns from the Drive members CSV

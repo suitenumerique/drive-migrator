@@ -1,5 +1,7 @@
 """Tests for GET /available-destinations/ endpoint."""
 
+from unittest.mock import ANY
+
 from django.test import override_settings
 
 import pytest
@@ -178,18 +180,32 @@ def test_account_status_tries_the_destination_once():
 
 
 @override_settings(DESTINATION_BACKENDS=[_DRIVE_PATH])
-def test_account_status_asks_to_log_in_again_when_the_token_expired(monkeypatch):
+def test_account_status_asks_to_log_in_again_when_the_token_expired(
+    monkeypatch, console_logs
+):
     """An unusable token is not a missing account: the user must log in again."""
     monkeypatch.setattr(
         _FakeDrive,
         "user_account_exists",
         _failing_account_check(DestinationTokenExpired()),
     )
+    user = factories.UserFactory()
 
-    response = _account_status()
+    response = _account_status(user)
 
     assert response.status_code == 403
     assert response.json()["error_name"] == "DriveTokenRequired"
+    assert console_logs[-1] == {
+        "event": "request_finished",
+        "level": "warning",
+        "logger": "django_structlog.middlewares.request",
+        "code": 403,
+        "duration_ms": ANY,
+        "error_name": "DriveTokenRequired",
+        "request": "GET /api/v1.0/available-destinations/drive/account-status/",
+        "request_id": ANY,
+        "user_id": str(user.pk),
+    }
 
 
 @override_settings(DESTINATION_BACKENDS=[_DRIVE_PATH])

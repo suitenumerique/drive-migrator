@@ -289,3 +289,25 @@ def test_notify_upload_ended_is_retried_when_the_response_is_cut_short(backend):
         backend.notify_upload_ended("item")
 
     assert http.post.call_count == 2
+
+
+def test_create_item_sends_one_request_id_for_all_its_attempts(backend, settings):
+    """The attempts of a creation and its existence checks share a request id."""
+    settings.DRIVE_RETRY_MAX_ATTEMPTS = 2
+    with patch_drive_http() as http, pytest.raises(Timeout):
+        http.post.side_effect = Timeout("read timed out")
+        http.get.return_value = _response(status_code=404)
+        backend.create_folder("docs")
+
+    assert len(http.request_ids) == 4
+    assert len(set(http.request_ids)) == 1
+
+
+def test_notify_upload_ended_sends_one_request_id_for_all_its_attempts(backend):
+    """The attempts of upload-ended's own loop share a request id."""
+    with patch_drive_http() as http:
+        http.post.side_effect = [Timeout("read timed out"), _response(status_code=200)]
+        backend.notify_upload_ended("item")
+
+    assert len(http.request_ids) == 2
+    assert len(set(http.request_ids)) == 1
