@@ -16,7 +16,6 @@ from core.processing.tasks import (
     debug_folder,
     export,
     list_work_dir,
-    list_workspace_dir,
 )
 from core.processing.tasks import (
     task_failure as task_failure_handler,
@@ -38,23 +37,6 @@ def test_list_work_dir_logs_files(tmp_path, settings):
     (tmp_path / "subdir").mkdir()
 
     list_work_dir()  # must not raise — logging is the side effect
-
-
-# ---------------------------------------------------------------------------
-# list_workspace_dir
-# ---------------------------------------------------------------------------
-
-
-def test_list_workspace_dir_logs_files(tmp_path, settings):
-    """list_workspace_dir() walks the workspace directory and logs each file."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    ws = MagicMock(spec=Workspace)
-    ws.id = "ws-log"
-    workspace_dir = tmp_path / "workspace_ws-log"
-    workspace_dir.mkdir()
-    (workspace_dir / "doc.pdf").write_text("data")
-
-    list_workspace_dir(ws)  # must not raise
 
 
 # ---------------------------------------------------------------------------

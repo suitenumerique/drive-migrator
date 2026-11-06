@@ -1,7 +1,7 @@
 import json
 import os
 import traceback
-from typing import Callable
+from contextlib import suppress
 
 from django.conf import settings
 from django.core.cache import cache
@@ -31,7 +31,7 @@ from core.backends.source import (
     truncate_folder_files,
 )
 from core.mails_manager import MailsManager
-from core.models import ExtraTaskInfo, MigrationFile, MigrationRun, User, Workspace
+from core.models import ExtraTaskInfo, MigrationRun, User, Workspace
 from core.processing.file_exports import FileExports
 from core.processing.folder_creator import FolderCreator
 from core.processing.integrity import IntegrityTracker, Stage
@@ -80,22 +80,6 @@ def list_work_dir():
                 size = entry.stat().st_size
             size_fmt = sizeof_fmt(size)
             logger.info("%s %s (%s)", entry.name, size_fmt, size)
-
-
-def list_workspace_dir(workspace: Workspace):
-    logger.info("Listing workspace dir")
-    creator = FolderCreator()
-    path = creator.get_workspace_path(workspace)
-    files = []
-    for root, _, filenames in os.walk(path):
-        for filename in filenames:
-            files.append(os.path.join(root, filename))
-
-    logger.info("Listing %s files", len(files))
-    for file in files:
-        size = os.stat(file).st_size
-        size_formatted = sizeof_fmt(size)
-        logger.info("File: %s %s (%s) ...", file, size_formatted, size)
 
 
 def cleanup_workspace_dir(workspace: Workspace):
@@ -422,14 +406,27 @@ def _start_export(run, user, source_backend, integrity_tracker):
     for destination in destinations:
         # Registered first so a destination that fails midway is still checked.
         integrity_tracker.add_exported_destination(destination)
-    FileExports(run, user, destinations).open()
+    file_exports = FileExports(run, user, destinations)
+    errors = file_exports.open()
+    if destinations and not file_exports.receiving:
+        raise RuntimeError(
+            f"No destination could be opened for workspace {workspace.id}"
+        ) from next(iter(errors.values()), None)
     creator.prepare_folder(workspace, run)
 
 
 def _export_file(run, user, source_backend, migration_file):
     """Download one file of the run and hand it to the destinations."""
     workspace = run.workspace
-    destinations = _pending_destinations(workspace)
+    file_exports = FileExports(run, user, _pending_destinations(workspace))
+    if not file_exports.receiving:
+        # Every destination failed: the run fails when it closes.
+        logger.warning(
+            "No destination left for run %s: skipping its file %s",
+            run.pk,
+            migration_file.position + 1,
+        )
+        return
     try:
         local_path = FolderCreator().download_file(
             workspace, migration_file, source_backend
@@ -438,9 +435,8 @@ def _export_file(run, user, source_backend, migration_file):
         # The run stops: keep the files that failed before the token expired.
         _save_download_errors(workspace, run)
         raise
-    handover = _file_handover(FileExports(run, user, destinations), destinations)
-    if local_path is not None and handover is not None:
-        handover(migration_file, local_path)
+    if local_path is not None:
+        _hand_over(file_exports, migration_file, local_path)
 
 
 def _finish_export(run, user):
@@ -450,7 +446,6 @@ def _finish_export(run, user):
     file_exports = FileExports(run, user, _pending_destinations(workspace))
     try:
         _check_downloads(workspace, run)
-        list_workspace_dir(workspace)
     except BaseException:
         file_exports.abort()
         raise
@@ -479,25 +474,21 @@ def _clean_up_run(task_id, run, integrity_tracker, run_failed):
     delete_migration_run(task_id)
 
 
-def _file_handover(
-    file_exports: FileExports, destinations: list[AbstractDestinationBackend]
-) -> Callable[[MigrationFile, str], None] | None:
-    """What to do with each downloaded file: hand it to the destinations, then
-    drop it. A file a destination did not take is kept on S3 first, for the
-    user."""
-    if not destinations:
-        return None
-
-    def put_and_drop(migration_file: MigrationFile, local_path: str) -> None:
+def _hand_over(file_exports, migration_file, local_path):
+    """Hand a downloaded file to the destinations, then drop it from the disk.
+    A file a destination did not take is kept on S3 first, for the user."""
+    try:
         file_exports.put(migration_file, local_path)
         if not all(
             result.get("status") == FileExportStatus.SENT
             for result in migration_file.results.values()
         ):
             keep_refused_file(file_exports.run, migration_file, local_path)
-        os.remove(local_path)
-
-    return put_and_drop
+    finally:
+        # Only the finish's worker cleans its local folder. A file gone
+        # already must not hide the error of its hand over.
+        with suppress(FileNotFoundError):
+            os.remove(local_path)
 
 
 def _pending_destinations(workspace: Workspace) -> list[AbstractDestinationBackend]:

@@ -98,6 +98,19 @@ def test_a_destination_that_raises_is_disabled_without_stopping_the_others(run):
     assert str(failures["drive"]) == "401 Unauthorized"
 
 
+def test_exports_receive_while_one_destination_is_active(run):
+    """A destination failing to open receives nothing: once none is left, the
+    other tasks of the run see the run receives no file any more."""
+    drive, other = _destination("drive"), _destination("other")
+    drive.open_export.side_effect = RuntimeError("401 Unauthorized")
+    _exports(run, drive, other)
+    run.refresh_from_db()
+
+    user = UserFactory()
+    assert FileExports(run, user, [drive, other]).receiving
+    assert not FileExports(run, user, [drive]).receiving
+
+
 def test_consecutive_file_failures_disable_the_destination(run, settings):
     """K files failing in a row mean the destination itself is unusable."""
     settings.MIGRATION_DESTINATION_MAX_CONSECUTIVE_FAILURES = 2
@@ -180,12 +193,16 @@ def test_a_destination_that_fails_to_open_gets_no_file(run):
     """A destination that can't even be prepared is disabled from the start."""
     drive, other = _destination("drive"), _destination("other")
     drive.open_export.side_effect = RuntimeError("Drive down")
-    exports = _exports(run, drive, other)
+    exports = FileExports(run, UserFactory(), [drive, other])
 
+    errors = exports.open()
     _put_all(exports, run)
 
     drive.put_file.assert_not_called()
     assert other.put_file.call_count == 4
+    assert {name: str(error) for name, error in errors.items()} == {
+        "drive": "Drive down"
+    }
     assert list(exports.close()) == ["drive"]
 
 

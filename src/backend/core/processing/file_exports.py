@@ -1,4 +1,4 @@
-"""Destinations receiving a run file by file, see AbstractDestinationBackend."""
+"""The destinations of a run, receiving it file by file."""
 
 from contextlib import contextmanager
 
@@ -45,7 +45,7 @@ class _Session:
 
 class FileExports:
     """
-    Hand each downloaded file of a run to the file-by-file destinations, so that
+    Hand each downloaded file of a run to its destinations, so that
     a destination failing never stops the others: an error it raises, or too
     many files failing in a row, only disables that destination.
 
@@ -64,7 +64,14 @@ class FileExports:
         self.sessions = [_Session(destination) for destination in destinations]
         self._merge(run.exports_state)
 
-    def open(self) -> None:
+    @property
+    def receiving(self) -> bool:
+        """Whether a destination still receives the files of the run."""
+        return any(session.active for session in self.sessions)
+
+    def open(self) -> dict[str, Exception]:
+        """Open every destination; return the error of each one that failed
+        to open by name."""
         for session in self.sessions:
             # Opening may take long: show the watchdog the run goes on.
             mark_run_alive(self.run)
@@ -75,6 +82,11 @@ class FileExports:
                 self.run,
             )
         self._save()
+        return {
+            session.destination.name: session.error
+            for session in self.sessions
+            if session.error is not None
+        }
 
     def put(self, migration_file: MigrationFile, local_path: str) -> None:
         """Send one downloaded file to every active destination, then save
