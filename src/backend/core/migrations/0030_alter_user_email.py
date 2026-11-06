@@ -15,9 +15,4 @@ class Migration(migrations.Migration):
             name='email',
             field=models.EmailField(blank=True, max_length=254, null=True, unique=True, verbose_name='identity email address'),
         ),
-        migrations.AlterField(
-            model_name='user',
-            name='language',
-            field=models.CharField(choices="(('en-us', 'English'), ('fr-fr', 'French'))", default='en-us', help_text='The language in which the user wants to see the interface.', max_length=10, verbose_name='language'),
-        ),
     ]
