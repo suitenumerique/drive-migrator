@@ -24,6 +24,7 @@ from core.destinations.drive.drive_backend import (
     DriveServiceAccountBackend,
     DriveUserTokenBackend,
     FileRejection,
+    RecoveredItemUploaded,
     get_file_rejection,
 )
 from core.mails_manager import MailsManager
@@ -362,6 +363,11 @@ def _send_file(client, local_path: str, parent_id: str, item_id: str) -> dict:
                 size=size,
                 item_id=item_id,
             )
+        except RecoveredItemUploaded as error:
+            # Sent by a former run of the file task: its state is checked
+            # with the others once the run closes.
+            logger.info("File %s was uploaded already", item_id)
+            return {"status": FileExportStatus.SENT, "item_id": error.item["id"]}
         except HTTPError as error:
             rejection = _creation_rejection(client, error, parent_id)
             if rejection is None:

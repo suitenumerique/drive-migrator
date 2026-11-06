@@ -4,7 +4,8 @@ import traceback
 from typing import Callable
 
 from django.conf import settings
-from django.db import transaction
+from django.core.cache import cache
+from django.db import InterfaceError, OperationalError, transaction
 from django.utils import timezone
 
 from celery import states
@@ -39,6 +40,7 @@ from core.processing.migration_run import (
     delete_migration_run,
     failed_downloads,
     finish_file,
+    mark_run_alive,
     record_file_error,
     run_exists,
     stop_run,
@@ -56,6 +58,9 @@ from core.utils import get_dir_size, sizeof_fmt
 from main.celery_app import app
 
 logger = get_task_logger(__name__)
+
+# Longer than any redelivery of an export task by the broker.
+EXPORT_CLAIM_TIMEOUT = 30 * 24 * 3600
 
 
 def list_work_dir():
@@ -136,12 +141,16 @@ def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
     )
 
 
-@app.task(bind=True)
+# Not track_started: Celery would mark STARTED any copy delivered again, even
+# once the migration is over, before the claim below ignores it.
+@app.task(bind=True, track_started=False)
 def export(self, data):
-    if run_exists(self.request.id):
-        # Delivered again by the broker: the run goes on with its own tasks.
-        logger.warning("Run of task %s already started: skipping", self.request.id)
+    # run_exists() too, in case the cache lost the claim.
+    if not claim_export(self.request.id) or run_exists(self.request.id):
+        # Delivered again by the broker: the first delivery runs the migration.
+        logger.warning("Task %s already started: skipping", self.request.id)
         raise Ignore()
+    TaskResult.objects.filter(task_id=self.request.id).update(status=states.STARTED)
 
     workspace_id = data["workspace"]["id"]
     logger.info("Starting workspace %s ...", workspace_id)
@@ -213,6 +222,12 @@ def export(self, data):
     raise Ignore()
 
 
+def claim_export(task_id) -> bool:
+    """Claim an export task for this delivery; False once another delivery of
+    it started, even after its run is over and purged."""
+    return cache.add(f"export-claim:{task_id}", True, timeout=EXPORT_CLAIM_TIMEOUT)
+
+
 def dispatch_batch(run, user) -> None:
     """Queue a task for each file of the next batch of the run, or the finish of
     the run when it has no file left to dispatch."""
@@ -240,7 +255,13 @@ def _load_run(run_id):
     return MigrationRun.objects.select_related("workspace").filter(pk=run_id).first()
 
 
-@app.task(ignore_result=True)
+# Safe to run again: a file is counted done once.
+@app.task(
+    ignore_result=True,
+    autoretry_for=(OperationalError, InterfaceError),
+    retry_backoff=True,
+    max_retries=3,
+)
 def export_file(run_id, user_id, position):
     """Export one file of a run, then queue what comes next once its batch, or
     the run, is done."""
@@ -248,15 +269,29 @@ def export_file(run_id, user_id, position):
     if run is None:
         logger.warning("Run %s is gone: skipping its file %s", run_id, position + 1)
         return
+    migration_file = run.files.get(position=position)
+    if migration_file.finished_at is not None:
+        # Delivered twice, by the broker or the watchdog.
+        logger.info("File %s of run %s is already done", position + 1, run.pk)
+        if export_file.request.retries:
+            # Retried after counting it: what comes next may not be queued.
+            _queue_next(run, User.objects.get(pk=user_id))
+        return
     user = User.objects.get(pk=user_id)
     if run.source_token_expired:
         logger.info("Run %s stopped: skipping its file %s", run.pk, position + 1)
     else:
-        source_backend = SourceManager().get_backend()
-        source_backend.resume_export(run.workspace)
-        run_file(run, user, source_backend, run.files.get(position=position))
+        mark_run_alive(run)
+        run_file(run, user, SourceManager().get_backend(), migration_file)
 
     run = finish_file(run, position)
+    if run is not None:
+        _queue_next(run, user)
+
+
+def _queue_next(run, user) -> None:
+    """Once the batch of the run is done, queue its next batch, or its finish
+    once no file is left."""
     if run.in_flight:
         return
     if run.remaining_files and not run.source_token_expired:
@@ -269,10 +304,14 @@ def run_file(run, user, source_backend, migration_file):
     """Export one file of the run. Whatever goes wrong, the run goes on with
     its next files, except on an expired source token, which stops it."""
     try:
+        source_backend.resume_export(run.workspace)
         _export_file(run, user, source_backend, migration_file)
     except SourceTokenExpired:
         logger.warning("The source token expired: stopping run %s", run.pk)
         stop_run(run)
+    # Not the file's: the whole task is retried.
+    except (OperationalError, InterfaceError):
+        raise
     # Broad on purpose: one file failing must not block the rest of the run.
     except Exception as error:  # pylint: disable=broad-exception-caught
         logger.exception(

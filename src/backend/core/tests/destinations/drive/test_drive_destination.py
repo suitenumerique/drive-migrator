@@ -16,7 +16,7 @@ from core.backends.destination import (
     RejectedFile,
 )
 from core.destinations.drive.backend import DriveDestinationBackend
-from core.destinations.drive.drive_backend import FileRejection
+from core.destinations.drive.drive_backend import FileRejection, RecoveredItemUploaded
 from core.factories import UserFactory
 from core.models import Workspace
 
@@ -187,6 +187,25 @@ def test_put_keeps_the_id_drive_gives_back(drive_client, make_run, migrate):
 
     drive_client.notify_upload_ended.assert_called_once_with("drive-id")
     assert _drive_results(run)["report.pdf"]["item_id"] == "drive-id"
+
+
+def test_a_file_sent_again_is_kept_as_sent(drive_client, make_run, migrate):
+    """A file task run again, e.g. by the watchdog, finds its item uploaded
+    already: the file is sent, and Drive keeps receiving the next ones."""
+
+    def recovered(_title, **kwargs):
+        raise RecoveredItemUploaded({"id": kwargs["item_id"], "upload_state": "ready"})
+
+    drive_client.create_file_item.side_effect = recovered
+    run = make_run()
+
+    assert migrate(run) == {}
+
+    drive_client.upload_to_s3.assert_not_called()
+    assert _drive_results(run)["report.pdf"] == {
+        "status": FileExportStatus.SENT,
+        "item_id": ANY,
+    }
 
 
 def test_file_refused_at_upload_ended_is_rejected(drive_client, make_run, migrate):

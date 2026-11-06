@@ -3,8 +3,13 @@ file, dispatched batch by batch, then the finish of the run."""
 
 import json
 import uuid
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
+
+from django.core.cache import cache
+from django.db import OperationalError
+from django.utils import timezone
 
 import pytest
 from celery import states
@@ -101,6 +106,20 @@ def _finish_task(run, user):
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(name="local_cache")
+def fixture_local_cache(settings):
+    """Claim the export tasks in a cache of this test only."""
+    settings.CACHES = {
+        "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+    }
+    cache.clear()
+
+
+def _export_data(workspace, user):
+    return {"workspace": {"id": str(workspace.id)}, "user": {"id": str(user.id)}}
+
+
+@pytest.mark.usefixtures("local_cache")
 def test_an_export_delivered_twice_leaves_its_run_alone(settings, user, source_backend):
     """A second delivery of export(), by the broker, touches neither the run
     already started nor its workspace."""
@@ -108,9 +127,7 @@ def test_an_export_delivered_twice_leaves_its_run_alone(settings, user, source_b
     workspace = run.workspace
     workspace.download_errors = [{"name": "a.txt"}]
     workspace.save()
-    data = {"workspace": {"id": str(workspace.id)}, "user": {"id": str(user.id)}}
-
-    result = tasks.export.apply(args=[data], task_id="task-1")
+    result = tasks.export.apply(args=[_export_data(workspace, user)], task_id="task-1")
 
     assert result.state == "IGNORED"
 
@@ -119,6 +136,62 @@ def test_an_export_delivered_twice_leaves_its_run_alone(settings, user, source_b
     source_backend.finalize_export.assert_not_called()
     workspace.refresh_from_db()
     assert workspace.download_errors == [{"name": "a.txt"}]
+
+
+@pytest.mark.usefixtures("local_cache")
+def test_an_export_delivered_again_after_its_run_finished_does_nothing(
+    user, source_backend
+):
+    """A copy of export() run once the first delivery finished and purged its
+    run starts no second migration of the workspace."""
+    workspace = WorkspaceFactory(download_errors=[{"name": "a.txt"}])
+    assert tasks.claim_export("task-1")
+
+    result = tasks.export.apply(args=[_export_data(workspace, user)], task_id="task-1")
+
+    assert result.state == "IGNORED"
+    source_backend.begin_export.assert_not_called()
+    workspace.refresh_from_db()
+    assert workspace.download_errors == [{"name": "a.txt"}]
+
+
+@pytest.mark.usefixtures("local_cache", "source_backend")
+def test_an_export_marks_its_migration_started_once_claimed(user):
+    """Celery does not mark export() started: a copy delivered again would
+    overwrite the outcome of the migration. The delivery that claims the
+    task does it."""
+    task_result = TaskResult.objects.create(task_id="task-1", status=states.PENDING)
+    data = {"workspace": {"id": str(uuid.uuid4())}, "user": {"id": str(user.id)}}
+
+    tasks.export.apply(args=[data], task_id="task-1")
+
+    assert tasks.export.track_started is False
+    task_result.refresh_from_db()
+    assert task_result.status == states.STARTED
+
+
+@pytest.mark.usefixtures("local_cache")
+def test_an_export_delivered_again_keeps_the_outcome_of_its_migration(
+    user, source_backend
+):
+    """A copy run once the migration is over leaves its outcome as it is."""
+    task_result = TaskResult.objects.create(task_id="task-1", status=states.SUCCESS)
+    assert tasks.claim_export("task-1")
+    workspace = WorkspaceFactory()
+
+    tasks.export.apply(args=[_export_data(workspace, user)], task_id="task-1")
+
+    task_result.refresh_from_db()
+    assert task_result.status == states.SUCCESS
+    source_backend.begin_export.assert_not_called()
+
+
+@pytest.mark.usefixtures("local_cache")
+def test_an_export_task_is_claimed_once():
+    """Only the first delivery of an export task claims it."""
+    assert tasks.claim_export("task-1")
+    assert not tasks.claim_export("task-1")
+    assert tasks.claim_export("task-2")
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +343,126 @@ def test_an_unexpected_error_after_the_download_keeps_the_file_downloaded(
     assert row.error == "handover failed"
 
 
+def test_a_file_task_delivered_twice_counts_its_file_once(settings, worker):
+    """A file task queued again, by the broker or the watchdog, after its file
+    was done does nothing: the run counts each file once."""
+    run = _run(3, 2, settings)
+    with worker.committed():
+        tasks.dispatch_batch(run, worker.user)
+        tasks.export_file(*_ids(run, worker.user), 0)
+        tasks.export_file(*_ids(run, worker.user), 0)
+
+    assert worker.export_one.call_count == 1
+    run.refresh_from_db()
+    assert (run.in_flight, run.remaining_files) == (1, 2)
+    assert len(worker.published) == 2
+
+
+def test_export_file_shows_its_run_alive_when_it_starts(settings, worker):
+    """A long file must not make its run look stuck: the run is marked alive
+    before the transfer starts."""
+    run = _run(1, 0, settings)
+    with worker.committed():
+        tasks.dispatch_batch(run, worker.user)
+    long_ago = timezone.now() - timedelta(hours=5)
+    MigrationRun.objects.filter(pk=run.pk).update(updated_at=long_ago)
+    seen = []
+    worker.export_one.side_effect = lambda *args: seen.append(
+        MigrationRun.objects.get(pk=run.pk).updated_at
+    )
+
+    with worker.committed():
+        tasks.export_file(*_ids(run, worker.user), 0)
+
+    assert seen[0] > long_ago
+
+
 @pytest.mark.usefixtures("source_backend")
+def test_a_source_failing_to_resume_fails_only_its_file(settings, worker):
+    """An error resuming the source fails the file, which is counted done: the
+    batch goes on rather than waiting for the watchdog."""
+    run = _run(1, 0, settings)
+    with worker.committed():
+        tasks.dispatch_batch(run, worker.user)
+    worker.source_backend.resume_export.side_effect = RuntimeError("source down")
+
+    with worker.committed():
+        tasks.export_file(*_ids(run, worker.user), 0)
+
+    worker.export_one.assert_not_called()
+    migration_file = run.files.get(position=0)
+    assert migration_file.finished_at is not None
+    assert "source down" in migration_file.error
+    assert worker.published[-1] == _finish_task(run, worker.user)
+
+
+def test_a_file_task_is_run_again_on_a_database_blip(settings, worker):
+    """A database error counting the file done leaves its batch waiting: the
+    task, run twice safely, is retried."""
+    run = _run(1, 0, settings)
+    with worker.committed():
+        tasks.dispatch_batch(run, worker.user)
+    blips = [OperationalError("server closed the connection")]
+
+    def count_done(*args):
+        if blips:
+            raise blips.pop()
+        return finish_file(*args)
+
+    with (
+        patch("core.processing.tasks.finish_file", side_effect=count_done),
+        worker.committed(),
+    ):
+        tasks.export_file.apply(args=_ids(run, worker.user) + (0,))
+
+    assert run.files.get(position=0).finished_at is not None
+    assert worker.published[-1] == _finish_task(run, worker.user)
+
+
+def test_a_file_task_retried_once_its_file_counted_queues_the_next_batch(
+    settings, worker
+):
+    """A database error queuing the next batch, after the file was counted
+    done: the retry finds the file done, and queues the next batch all the
+    same."""
+    run = _run(2, 1, settings)
+    with worker.committed():
+        tasks.dispatch_batch(run, worker.user)
+    blips = [OperationalError("server closed the connection")]
+    dispatch_batch = tasks.dispatch_batch
+
+    def dispatch(*args):
+        if blips:
+            raise blips.pop()
+        return dispatch_batch(*args)
+
+    with (
+        patch("core.processing.tasks.dispatch_batch", side_effect=dispatch),
+        worker.committed(),
+    ):
+        tasks.export_file.apply(args=_ids(run, worker.user) + (0,))
+
+    assert worker.export_one.call_count == 1
+    assert worker.published[-1] == _file_task(run, worker.user, 1)
+
+
+def test_a_database_error_exporting_a_file_retries_it(settings, worker):
+    """A database error is no error of the file: the task is retried rather
+    than the file counted failed."""
+    run = _run(1, 0, settings)
+    with worker.committed():
+        tasks.dispatch_batch(run, worker.user)
+    worker.export_one.side_effect = [OperationalError("deadlock detected"), None]
+
+    with worker.committed():
+        tasks.export_file.apply(args=_ids(run, worker.user) + (0,))
+
+    migration_file = run.files.get(position=0)
+    assert worker.export_one.call_count == 2
+    assert migration_file.finished_at is not None
+    assert not migration_file.error
+
+
 def test_export_file_of_a_purged_run_does_nothing(published, user, export_one):
     """A file task left in the queue after its run was purged just ends."""
     tasks.export_file(str(uuid.uuid4()), str(user.pk), 0)

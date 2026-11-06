@@ -212,6 +212,19 @@ def describe_drive_tokens(user) -> str:
     return f"Drive (ProConnect) tokens for user {user.id}: {access}; {refresh}"
 
 
+class RecoveredItemUploaded(RuntimeError):
+    """The file item recovered by its id is uploaded already, e.g. by a former
+    run of the same file task: it must not be replaced."""
+
+    def __init__(self, item: dict):
+        super().__init__(
+            f"Recovered Drive item {item.get('id')} is not pending "
+            f"upload (upload_state={item.get('upload_state')!r}); "
+            "can't safely replace it with a fresh create."
+        )
+        self.item = item
+
+
 class _BearerTokenAuth(AuthBase):
     """Set the bearer token when each attempt is prepared, so a retry after a
     long timeout sends a refreshed token instead of one that expired meanwhile."""
@@ -301,11 +314,7 @@ class DriveBackend:
         carries one, and Drive can't regenerate it). Still pending, so delete the
         orphan and create a fresh item instead of getting stuck."""
         if existing_item.get("upload_state") != "pending":
-            raise RuntimeError(
-                f"Recovered Drive item {existing_item.get('id')} is not pending "
-                f"upload (upload_state={existing_item.get('upload_state')!r}); "
-                "can't safely replace it with a fresh create."
-            )
+            raise RecoveredItemUploaded(existing_item)
         self._delete_item(existing_item["id"])
         return self._create_item(url, payload)
 

@@ -15,7 +15,10 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError, Timeout
 
 from core.destinations.drive import drive_backend
-from core.destinations.drive.drive_backend import DriveServiceAccountBackend
+from core.destinations.drive.drive_backend import (
+    DriveServiceAccountBackend,
+    RecoveredItemUploaded,
+)
 from core.tests.destinations.drive.drive_http_mock import patch_drive_http
 
 TEST_KEY = Fernet.generate_key().decode()
@@ -575,7 +578,7 @@ def test_service_account_create_file_item_refuses_to_replace_non_pending_recover
 
     with (
         patch_drive_http() as mock_requests,
-        pytest.raises(RuntimeError, match="not pending upload"),
+        pytest.raises(RecoveredItemUploaded, match="not pending upload") as raised,
     ):
         mock_requests.post.return_value = error_response
         mock_requests.get.return_value = _found_response(recovered_item)
@@ -583,6 +586,7 @@ def test_service_account_create_file_item_refuses_to_replace_non_pending_recover
 
     assert mock_requests.post.call_count == 1
     mock_requests.delete.assert_not_called()
+    assert raised.value.item == recovered_item
 
 
 def test_service_account_get_item_if_exists_returns_item_when_found(settings):

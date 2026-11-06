@@ -38,6 +38,8 @@ def migration_run():
     """Keep the run's working rows out of the database: workspaces are mocks here."""
     with (
         patch("core.processing.tasks.run_exists", return_value=False),
+        patch("core.processing.tasks.claim_export", return_value=True),
+        patch("core.processing.tasks.TaskResult"),
         patch("core.processing.tasks.create_migration_run") as create,
         patch("core.processing.tasks.delete_migration_run") as delete,
         patch("core.processing.tasks.save_run_files_stats") as save_stats,

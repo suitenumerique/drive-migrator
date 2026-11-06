@@ -98,16 +98,25 @@ def take_next_batch(run: MigrationRun) -> list[int]:
     return positions
 
 
-def finish_file(run: MigrationRun, position: int) -> MigrationRun:
+def finish_file(run: MigrationRun, position: int) -> MigrationRun | None:
     """Count a dispatched file of the run done; return the run as it stands
-    then, so that a single file task sees its batch, or the run, done."""
+    then, so that a single file task sees its batch, or the run, done. None
+    when the file was already counted, its task delivered twice."""
     with transaction.atomic():
         locked = MigrationRun.objects.select_for_update().get(pk=run.pk)
-        locked.files.filter(position=position).update(finished_at=timezone.now())
+        if not locked.files.filter(position=position, finished_at=None).update(
+            finished_at=timezone.now()
+        ):
+            return None
         locked.in_flight -= 1
         locked.remaining_files -= 1
         locked.save(update_fields=["in_flight", "remaining_files", "updated_at"])
     return locked
+
+
+def mark_run_alive(run: MigrationRun) -> None:
+    """Show the run is making progress, for the watchdog."""
+    MigrationRun.objects.filter(pk=run.pk).update(updated_at=timezone.now())
 
 
 def stop_run(run: MigrationRun) -> None:
