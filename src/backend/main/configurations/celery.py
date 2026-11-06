@@ -1,0 +1,21 @@
+"""Celery task queue settings."""
+
+from configurations import values
+
+
+class CeleryMixin:
+    """Redis broker, django-db result backend and JSON (de)serialization."""
+
+    CELERY_BROKER_URL = values.Value(
+        "redis://redis:6379/0",
+        environ_name="REDIS_URL",
+        environ_prefix=None,
+    )
+    CELERY_BROKER_TRANSPORT_OPTIONS = values.DictValue({})
+    CELERY_RESULT_BACKEND = "django-db"
+    CELERY_CACHE_BACKEND = "django-cache"
+    CELERY_TASK_SERIALIZER = "json"
+    CELERY_RESULT_SERIALIZER = "json"
+    CELERY_ACCEPT_CONTENT = ["json"]
+    CELERY_RESULT_EXTENDED = True
+    CELERY_TRACK_STARTED = True
