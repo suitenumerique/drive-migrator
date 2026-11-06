@@ -61,8 +61,39 @@ When the source token expires during a run, the run stops: the files already
 queued are skipped, no further batch is queued, and the migration fails asking
 the user to log in to the source again.
 
-## Known limit
+## Watchdog
 
-A worker killed in the middle of a file task (out of memory, node lost) leaves
-its run unfinished: the run waits for a file that never ends, and the source
-workspace stays locked.
+A worker killed in the middle of a task (out of memory, node lost, redeploy)
+leaves its run waiting for a file, or a finish, that never ends, with the
+source workspace locked. The `watch_migration_runs` command, run every 10
+minutes by the `watch-migration-runs-job` CronJob of the Helm chart, handles
+every run without news for `MIGRATION_RUN_STALL_SECONDS`:
+
+- a run whose files are all done gets its finish queued, when it was lost;
+- its files queued and never finished, its next batch when it was never
+  queued, or its finish queued and never started, are queued again, up to
+  `MIGRATION_RUN_MAX_REDISPATCHES` times without progress: each file done
+  gives the run its redispatches back;
+- then, or when its start was lost, the run is marked stalled and its finish
+  queued: its destinations are aborted, its source workspace released, and
+  the migration fails telling the user;
+- a finish that started and went silent is done by the command itself, as
+  failed, after the stall time once per redispatch, plus once. A destination
+  that finish closed already, such as a Resana import running, is left as it
+  is.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MIGRATION_RUN_STALL_SECONDS` | `10800` (3 hours) | Time without news after which a run is stalled. |
+| `MIGRATION_RUN_MAX_REDISPATCHES` | `2` | Times a stalled run is queued again without progress before it fails. |
+
+A run shows alive each time one of its files, or its finish, starts, and
+before each of its destinations opens or closes. Waiting in the queue behind
+the batches of other runs is no news, so keep `MIGRATION_RUN_STALL_SECONDS`
+above that wait plus the transfer of the biggest file. Otherwise, files still
+waiting are queued again for nothing, and a file still transferring is sent
+twice at once.
+
+The watchdog only sees runs: a worker killed while `export` reads the tree
+of the workspace, before its run is stored, leaves the source workspace
+locked with no run to handle.

@@ -61,6 +61,16 @@ backend:
       - "manage.py"
       - "refresh_resana_jobs"
     restartPolicy: Never
+  # Gets the stalled migration runs moving again, or fails them.
+  watch_migration_runs_job:
+    schedule: "*/10 * * * *"
+    command:
+      - "python"
+      - "manage.py"
+      - "watch_migration_runs"
+    restartPolicy: Never
+    # A pass only aborts the destinations of the runs it fails.
+    activeDeadlineSeconds: 3600
   probes:
     liveness:
       path: /__heartbeat__
