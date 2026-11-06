@@ -39,9 +39,9 @@ def test_authentication_getter_existing_user_no_email(
 
     monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", get_userinfo_mocked)
 
-    # 1 SELECT to find user + 1 SELECT for unique validation (full_clean) + 1 UPDATE for tokens
+    # 1 SELECT to find user + 2 SELECT for unique validation (full_clean) + 1 UPDATE for tokens
     with (
-        django_assert_num_queries(3),
+        django_assert_num_queries(4),
         patch("core.authentication.backends.posthog_capture") as capture,
     ):
         user = klass.get_or_create_user(
