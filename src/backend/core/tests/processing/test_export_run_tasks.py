@@ -19,7 +19,7 @@ from core.backends.source import SourceFile, SourceFolder, SourceTokenExpired
 from core.factories import UserFactory, WorkspaceFactory
 from core.models import MigrationFile, MigrationRun
 from core.processing import tasks
-from core.processing.migration_run import create_migration_run
+from core.processing.migration_run import create_migration_run, finish_file
 from core.processing.plan import build_plan
 
 pytestmark = pytest.mark.django_db
@@ -264,6 +264,20 @@ def test_export_file_exports_its_file_and_counts_it_done(settings, worker):
     assert len(worker.published) == 2
 
 
+def test_a_file_task_leaves_the_big_states_of_its_run_in_the_database(settings, worker):
+    """integrity_state lists every source file and dirs every folder: a file
+    task, run once per file, reads neither."""
+    run = _run(2, 0, settings)
+    with worker.committed():
+        tasks.dispatch_batch(run, worker.user)
+        tasks.export_file(*_ids(run, worker.user), 0)
+
+    loaded = worker.export_one.call_args.args[0]
+    assert {"integrity_state", "dirs"} <= loaded.get_deferred_fields()
+    counted = finish_file(run, 1)
+    assert "integrity_state" in counted.get_deferred_fields()
+
+
 def test_the_last_file_of_a_batch_dispatches_the_next_batch(settings, worker):
     """Once every file of a batch is done, the next batch is queued."""
     run = _run(3, 2, settings)
@@ -375,6 +389,52 @@ def test_export_file_shows_its_run_alive_when_it_starts(settings, worker):
         tasks.export_file(*_ids(run, worker.user), 0)
 
     assert seen[0] > long_ago
+
+
+def test_the_files_left_of_a_stalled_run_are_skipped(settings, worker):
+    """A file task delivered late, once the watchdog failed its run, exports
+    nothing and queues no batch."""
+    run = _run(3, 2, settings)
+    with worker.committed():
+        tasks.dispatch_batch(run, worker.user)
+    MigrationRun.objects.filter(pk=run.pk).update(stalled=True, finish_published=True)
+
+    with worker.committed():
+        tasks.export_file(*_ids(run, worker.user), 0)
+        tasks.export_file(*_ids(run, worker.user), 1)
+
+    worker.export_one.assert_not_called()
+    assert len(worker.published) == 2
+
+
+def test_a_file_task_whose_run_is_purged_meanwhile_just_ends(settings, worker):
+    """The watchdog failed and purged the run while a file was still sent:
+    the task ends without error and publishes nothing."""
+    run = _run(2, 0, settings)
+    with worker.committed():
+        tasks.dispatch_batch(run, worker.user)
+    worker.export_one.side_effect = lambda *args: MigrationRun.objects.filter(
+        pk=run.pk
+    ).delete()
+
+    with worker.committed():
+        tasks.export_file(*_ids(run, worker.user), 0)
+
+    assert len(worker.published) == 2
+
+
+def test_a_file_task_whose_run_is_purged_once_loaded_just_ends(settings, worker):
+    """The run is purged between its reading and the reading of the file row,
+    e.g. by a finish running alongside: the task ends without error."""
+    run = _run(1, 0, settings)
+    loaded = MigrationRun.objects.select_related("workspace").get(pk=run.pk)
+    MigrationRun.objects.filter(pk=run.pk).delete()
+
+    with patch("core.processing.tasks._load_run", return_value=loaded):
+        tasks.export_file(*_ids(run, worker.user), 0)
+
+    worker.export_one.assert_not_called()
+    assert not worker.published
 
 
 @pytest.mark.usefixtures("source_backend")
@@ -561,6 +621,130 @@ def test_finish_migration_of_a_stopped_run_asks_to_log_in_again(
     extra_task, error = finish_steps.on_failure.call_args.args
     assert extra_task is finish_steps.extra_task
     assert isinstance(error, SourceTokenExpired)
+
+
+def test_finish_migration_of_a_stalled_run_aborts_and_reports_it(
+    settings, user, finish_steps
+):
+    """A run the watchdog failed closes no destination: they are aborted, and
+    the user told the migration stopped making progress."""
+    run = _run(1, 0, settings)
+    MigrationRun.objects.filter(pk=run.pk).update(stalled=True)
+
+    with pytest.raises(tasks.RunStalled, match="stopped making progress"):
+        tasks.finish_migration(*_ids(run, user))
+
+    finish_steps.finish_export.assert_not_called()
+    finish_steps.abort.assert_called_once_with(ANY, user)
+    finish_steps.clean_up.assert_called_once_with(
+        "task-1", ANY, finish_steps.tracker, True
+    )
+    assert isinstance(finish_steps.on_failure.call_args.args[1], tasks.RunStalled)
+
+
+@pytest.mark.parametrize("stop", ["source_token_expired", "stalled"])
+def test_finish_migration_of_a_stopped_run_keeps_its_failed_downloads(
+    settings, user, finish_steps, stop
+):
+    """The files that failed to download, on any worker, reach the workspace
+    for the mail and the CSV, even though the run stopped."""
+    run = _run(2, 0, settings)
+    run.files.filter(position=1).update(
+        status=MigrationFile.Status.DOWNLOAD_FAILED, error="403"
+    )
+    MigrationRun.objects.filter(pk=run.pk).update(**{stop: True})
+
+    with pytest.raises((SourceTokenExpired, tasks.RunStalled)):
+        tasks.finish_migration(*_ids(run, user))
+
+    run.workspace.refresh_from_db()
+    assert [error["name"] for error in run.workspace.download_errors] == ["doc1.txt"]
+    finish_steps.abort.assert_called_once()
+
+
+def test_finish_migration_of_a_stopped_run_aborts_even_if_its_errors_fail_to_save(
+    settings, user, finish_steps
+):
+    """The destinations are aborted first: an error saving the failed
+    downloads leaves none half open."""
+    run = _run(1, 0, settings)
+    MigrationRun.objects.filter(pk=run.pk).update(stalled=True)
+
+    with (
+        patch(
+            "core.processing.tasks._save_download_errors",
+            side_effect=RuntimeError("database down"),
+        ),
+        pytest.raises(RuntimeError, match="database down"),
+    ):
+        tasks.finish_migration(*_ids(run, user))
+
+    finish_steps.abort.assert_called_once()
+
+
+def test_finish_migration_shows_its_run_alive_before_the_integrity_check(
+    settings, user, finish_steps
+):
+    """The integrity check may wait for the analysis of the destinations: the
+    run is marked alive again once they closed."""
+    run = _run(1, 0, settings)
+    long_ago = timezone.now() - timedelta(hours=5)
+
+    def close_long_ago(*_args):
+        MigrationRun.objects.filter(pk=run.pk).update(updated_at=long_ago)
+
+    seen = []
+    finish_steps.finish_export.side_effect = close_long_ago
+    finish_steps.clean_up.side_effect = lambda *args: seen.append(
+        MigrationRun.objects.get(pk=run.pk).updated_at
+    )
+
+    tasks.finish_migration(*_ids(run, user))
+
+    assert seen[0] > long_ago
+
+
+def test_finish_migration_of_a_run_already_finishing_does_nothing(
+    settings, user, finish_steps
+):
+    """A finish already done by the watchdog, or a second delivery of the
+    finish, leaves the run to the one that started first."""
+    run = _run(1, 0, settings)
+    MigrationRun.objects.filter(pk=run.pk).update(finish_started=True)
+
+    tasks.finish_migration(*_ids(run, user))
+
+    finish_steps.finish_export.assert_not_called()
+    finish_steps.abort.assert_not_called()
+    assert not finish_steps.order
+
+
+def test_finish_migration_of_a_purged_run_does_nothing(user, finish_steps):
+    """A finish delivered once its run was purged, e.g. by the watchdog, ends
+    without touching the destinations nor the source."""
+    tasks.finish_migration(str(uuid.uuid4()), str(user.pk))
+
+    finish_steps.finish_export.assert_not_called()
+    finish_steps.abort.assert_not_called()
+    assert not finish_steps.order
+
+
+def test_finish_migration_shows_its_run_alive_when_it_starts(
+    settings, user, finish_steps
+):
+    """A finish that waited in the queue, or runs long, must not make its run
+    look stuck: the run is marked alive before the destinations close."""
+    run = _run(1, 0, settings)
+    long_ago = timezone.now() - timedelta(hours=5)
+    MigrationRun.objects.filter(pk=run.pk).update(updated_at=long_ago)
+    seen = []
+    finish_steps.finish_export.side_effect = lambda *args: seen.append(
+        MigrationRun.objects.get(pk=run.pk).updated_at
+    )
+
+    tasks.finish_migration(*_ids(run, user))
+
+    assert seen[0] > long_ago
 
 
 def test_finish_migration_without_extra_task_reports_nothing(

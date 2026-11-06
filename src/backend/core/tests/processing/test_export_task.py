@@ -11,13 +11,19 @@ from celery.exceptions import Ignore
 from core.backends.destination import FileExportStatus
 from core.backends.source import SourceFolder, SourceTokenExpired
 from core.factories import UserFactory, WorkspaceFactory
-from core.models import User, Workspace
+from core.models import MigrationRun, User, Workspace
 from core.processing import tasks
 from core.processing.plan import build_plan
 from core.processing.tasks import export
 from core.sources.resana.token_manager import ResanaTokenExpired
 
 EXPORT_DATA = {"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}}
+
+
+class _FakeRun(SimpleNamespace):
+    """A run kept out of the database, stopped as the model is."""
+
+    stopped = MigrationRun.stopped
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +45,7 @@ def migration_run():
     with (
         patch("core.processing.tasks.run_exists", return_value=False),
         patch("core.processing.tasks.claim_export", return_value=True),
+        patch("core.processing.tasks.mark_run_alive"),
         patch("core.processing.tasks.TaskResult"),
         patch("core.processing.tasks.create_migration_run") as create,
         patch("core.processing.tasks.delete_migration_run") as delete,
@@ -52,13 +59,14 @@ def migration_run():
     ):
         files = MagicMock()
         files.count.return_value = 0
-        create.side_effect = lambda workspace, task_id, plan: SimpleNamespace(
+        create.side_effect = lambda workspace, task_id, plan: _FakeRun(
             pk="run-1",
             task_id=task_id,
             workspace=workspace,
             exports_state={},
             integrity_state={},
             source_token_expired=False,
+            stalled=False,
             files=files,
         )
         stop.side_effect = lambda run: setattr(run, "source_token_expired", True)

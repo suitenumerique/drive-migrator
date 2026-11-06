@@ -267,12 +267,23 @@ class MigrationRun(BaseModel):
     in_flight = models.PositiveIntegerField(default=0)
     # The source token expired: the files left are skipped and the run fails.
     source_token_expired = models.BooleanField(default=False)
+    # Times the watchdog queued the unfinished files of the run again.
+    redispatches = models.PositiveIntegerField(default=0)
+    # The run stopped making progress: the files left are skipped and it fails.
+    stalled = models.BooleanField(default=False)
+    # A finish of the run started: another one, or the watchdog's, keeps out.
+    finish_started = models.BooleanField(default=False)
     # Destination state shared by the file tasks (e.g. Drive folder ids).
     destinations_state = models.JSONField(default=dict, blank=True)
     # Each destination's error, failures in a row and closing, see FileExports.
     exports_state = models.JSONField(default=dict, blank=True)
     # Source files and destinations of the integrity report, see IntegrityTracker.
     integrity_state = models.JSONField(default=dict, blank=True)
+
+    @property
+    def stopped(self) -> bool:
+        """The run goes no further: its files left are skipped."""
+        return self.source_token_expired or self.stalled
 
 
 class MigrationFile(BaseModel):

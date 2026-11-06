@@ -1,6 +1,9 @@
 """Tests for the destinations that receive a run file by file."""
 
+from datetime import timedelta
 from unittest.mock import MagicMock
+
+from django.utils import timezone
 
 import pytest
 
@@ -106,6 +109,47 @@ def test_consecutive_file_failures_disable_the_destination(run, settings):
 
     assert drive.put_file.call_count == 2
     assert "drive" in exports.close()
+
+
+def test_open_shows_the_run_alive_before_each_destination(run):
+    """Opening a destination may take long (Drive makes every folder): the
+    run is marked alive before each one, for the watchdog."""
+    long_ago = timezone.now() - timedelta(hours=5)
+    MigrationRun.objects.filter(pk=run.pk).update(updated_at=long_ago)
+    seen = []
+
+    def record_alive(_user, opened_run):
+        seen.append(MigrationRun.objects.get(pk=opened_run.pk).updated_at)
+
+    drive, other = _destination("drive"), _destination("other")
+    drive.open_export.side_effect = record_alive
+    other.open_export.side_effect = record_alive
+
+    _exports(run, drive, other)
+
+    assert len(seen) == 2
+    assert all(updated_at > long_ago for updated_at in seen)
+
+
+def test_close_shows_the_run_alive_before_each_destination(run):
+    """Closing a destination may take long (sharing, integrity): the run is
+    marked alive before each one, for the watchdog."""
+    seen = []
+
+    def record_alive(_user, closed_run):
+        seen.append(MigrationRun.objects.get(pk=closed_run.pk).updated_at)
+
+    drive, other = _destination("drive"), _destination("other")
+    drive.close_export.side_effect = record_alive
+    other.close_export.side_effect = record_alive
+    exports = _exports(run, drive, other)
+    long_ago = timezone.now() - timedelta(hours=5)
+    MigrationRun.objects.filter(pk=run.pk).update(updated_at=long_ago)
+
+    exports.close()
+
+    assert len(seen) == 2
+    assert all(updated_at > long_ago for updated_at in seen)
 
 
 def test_a_success_resets_the_consecutive_failures(run, settings):

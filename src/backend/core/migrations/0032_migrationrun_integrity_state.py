@@ -35,4 +35,19 @@ class Migration(migrations.Migration):
             name='source_token_expired',
             field=models.BooleanField(default=False),
         ),
+        migrations.AddField(
+            model_name='migrationrun',
+            name='redispatches',
+            field=models.PositiveIntegerField(default=0),
+        ),
+        migrations.AddField(
+            model_name='migrationrun',
+            name='stalled',
+            field=models.BooleanField(default=False),
+        ),
+        migrations.AddField(
+            model_name='migrationrun',
+            name='finish_started',
+            field=models.BooleanField(default=False),
+        ),
     ]

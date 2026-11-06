@@ -9,6 +9,7 @@ from celery.utils.log import get_task_logger
 
 from core.backends.destination import AbstractDestinationBackend, FileExportStatus
 from core.models import MigrationFile, MigrationRun, User
+from core.processing.migration_run import mark_run_alive
 
 logger = get_task_logger(__name__)
 
@@ -65,6 +66,8 @@ class FileExports:
 
     def open(self) -> None:
         for session in self.sessions:
+            # Opening may take long: show the watchdog the run goes on.
+            mark_run_alive(self.run)
             self._call(
                 session,
                 session.destination.open_export,
@@ -104,6 +107,8 @@ class FileExports:
         return the error of each failed destination by name."""
         for session in self.sessions:
             if session.active:
+                # Closing may take long: show the watchdog the run goes on.
+                mark_run_alive(self.run)
                 self._call(
                     session,
                     session.destination.close_export,

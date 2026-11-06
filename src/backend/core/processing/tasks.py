@@ -36,6 +36,7 @@ from core.processing.file_exports import FileExports
 from core.processing.folder_creator import FolderCreator
 from core.processing.integrity import IntegrityTracker, Stage
 from core.processing.migration_run import (
+    claim_finish,
     create_migration_run,
     delete_migration_run,
     failed_downloads,
@@ -61,6 +62,10 @@ logger = get_task_logger(__name__)
 
 # Longer than any redelivery of an export task by the broker.
 EXPORT_CLAIM_TIMEOUT = 30 * 24 * 3600
+
+
+class RunStalled(RuntimeError):
+    """The run stopped making progress, and the watchdog failed it."""
 
 
 def list_work_dir():
@@ -233,9 +238,9 @@ def dispatch_batch(run, user) -> None:
     the run when it has no file left to dispatch."""
     positions = take_next_batch(run)
     for position in positions:
-        _publish(export_file, run, user, position)
+        publish_file(run, user, position)
     if not positions:
-        _publish_finish(run, user)
+        publish_finish(run, user)
 
 
 def _publish(task, run, user, *args) -> None:
@@ -243,7 +248,11 @@ def _publish(task, run, user, *args) -> None:
     transaction.on_commit(lambda: task.delay(str(run.pk), str(user.pk), *args))
 
 
-def _publish_finish(run, user) -> None:
+def publish_file(run, user, position) -> None:
+    _publish(export_file, run, user, position)
+
+
+def publish_finish(run, user) -> None:
     # Conditional, so that a run is finished only once.
     if MigrationRun.objects.filter(pk=run.pk, finish_published=False).update(
         finish_published=True
@@ -251,8 +260,23 @@ def _publish_finish(run, user) -> None:
         _publish(finish_migration, run, user)
 
 
-def _load_run(run_id):
-    return MigrationRun.objects.select_related("workspace").filter(pk=run_id).first()
+# Every source file, every folder: read by the start and the finish only.
+_BIG_RUN_STATES = ("integrity_state", "dirs")
+
+
+def publish_finish_again(run, user) -> None:
+    """Queue the finish of the run again, its first one lost: claim_finish()
+    keeps a second one out."""
+    _publish(finish_migration, run, user)
+
+
+def _load_run(run_id, *deferred):
+    return (
+        MigrationRun.objects.select_related("workspace")
+        .defer(*deferred)
+        .filter(pk=run_id)
+        .first()
+    )
 
 
 # Safe to run again: a file is counted done once.
@@ -265,11 +289,16 @@ def _load_run(run_id):
 def export_file(run_id, user_id, position):
     """Export one file of a run, then queue what comes next once its batch, or
     the run, is done."""
-    run = _load_run(run_id)
+    # Run once per file: the big states only serve the start and the finish.
+    run = _load_run(run_id, *_BIG_RUN_STATES)
     if run is None:
         logger.warning("Run %s is gone: skipping its file %s", run_id, position + 1)
         return
-    migration_file = run.files.get(position=position)
+    migration_file = run.files.filter(position=position).first()
+    if migration_file is None:
+        # Purged meanwhile, by a finish running alongside.
+        logger.warning("Run %s is gone: skipping its file %s", run_id, position + 1)
+        return
     if migration_file.finished_at is not None:
         # Delivered twice, by the broker or the watchdog.
         logger.info("File %s of run %s is already done", position + 1, run.pk)
@@ -278,7 +307,7 @@ def export_file(run_id, user_id, position):
             _queue_next(run, User.objects.get(pk=user_id))
         return
     user = User.objects.get(pk=user_id)
-    if run.source_token_expired:
+    if run.stopped:
         logger.info("Run %s stopped: skipping its file %s", run.pk, position + 1)
     else:
         mark_run_alive(run)
@@ -294,10 +323,10 @@ def _queue_next(run, user) -> None:
     once no file is left."""
     if run.in_flight:
         return
-    if run.remaining_files and not run.source_token_expired:
+    if run.remaining_files and not run.stopped:
         dispatch_batch(run, user)
     else:
-        _publish_finish(run, user)
+        publish_finish(run, user)
 
 
 def run_file(run, user, source_backend, migration_file):
@@ -324,7 +353,14 @@ def run_file(run, user, source_backend, migration_file):
 def finish_migration(run_id, user_id):
     """Close the destinations of a run whose files are all done, purge the run,
     release the source, then report the outcome."""
-    run = MigrationRun.objects.select_related("workspace").get(pk=run_id)
+    run = _load_run(run_id)
+    if run is None:
+        # Finished by the watchdog meanwhile.
+        logger.warning("Run %s is gone: skipping its finish", run_id)
+        return
+    if not claim_finish(run):
+        logger.warning("The finish of run %s already started: skipping", run_id)
+        return
     user = User.objects.get(pk=user_id)
     source_backend = SourceManager().get_backend()
     source_backend.resume_export(run.workspace)
@@ -338,15 +374,22 @@ def finish_run(run, user, source_backend):
     try:
         run_failed = True
         try:
-            if run.source_token_expired:
+            if run.stopped:
                 _abort_export(run, user)
+                # The files left were skipped: tell those that failed before.
+                _save_download_errors(run.workspace, run)
+            if run.source_token_expired:
                 raise SourceTokenExpired("The source token expired during the run.")
+            if run.stalled:
+                raise RunStalled("The migration stopped making progress.")
             _finish_export(run, user)
             run_failed = False
         # Broad on purpose: reported to the user first, then raised again.
         except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             error = exc
         finally:
+            # The integrity check may wait for the analysis of the destinations.
+            mark_run_alive(run)
             _clean_up_run(run.task_id, run, integrity_tracker, run_failed)
     finally:
         logger.info("Calling finalize_export ...")

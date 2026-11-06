@@ -22,6 +22,17 @@ logger = get_task_logger(__name__)
 
 BULK_BATCH_SIZE = 1000
 
+# What the counting of a run reads, under its lock: not its big JSON states.
+_COUNTERS = (
+    "cursor",
+    "in_flight",
+    "remaining_files",
+    "redispatches",
+    "source_token_expired",
+    "stalled",
+    "updated_at",
+)
+
 
 @transaction.atomic
 def create_migration_run(
@@ -74,7 +85,9 @@ def take_next_batch(run: MigrationRun) -> list[int]:
     max_files = settings.MIGRATION_BATCH_MAX_FILES
     max_bytes = settings.MIGRATION_BATCH_MAX_BYTES
     with transaction.atomic():
-        locked = MigrationRun.objects.select_for_update().get(pk=run.pk)
+        locked = (
+            MigrationRun.objects.select_for_update().only(*_COUNTERS).get(pk=run.pk)
+        )
         rows = (
             locked.files.filter(
                 position__gte=locked.cursor, status=MigrationFile.Status.PENDING
@@ -92,26 +105,57 @@ def take_next_batch(run: MigrationRun) -> list[int]:
                 break
             positions.append(position)
         if positions:
-            locked.cursor = positions[-1] + 1
-            locked.in_flight += len(positions)
-            locked.save(update_fields=["cursor", "in_flight", "updated_at"])
+            _update(
+                locked,
+                cursor=positions[-1] + 1,
+                in_flight=locked.in_flight + len(positions),
+            )
     return positions
+
+
+def _update(locked: MigrationRun, **fields) -> None:
+    """Save counters of a run read with only them: save() would validate the
+    whole row, reading back each deferred field."""
+    fields["updated_at"] = timezone.now()
+    for name, value in fields.items():
+        setattr(locked, name, value)
+    MigrationRun.objects.filter(pk=locked.pk).update(**fields)
 
 
 def finish_file(run: MigrationRun, position: int) -> MigrationRun | None:
     """Count a dispatched file of the run done; return the run as it stands
     then, so that a single file task sees its batch, or the run, done. None
-    when the file was already counted, its task delivered twice."""
+    when the file was already counted, its task delivered twice, or when the
+    run was purged meanwhile."""
     with transaction.atomic():
-        locked = MigrationRun.objects.select_for_update().get(pk=run.pk)
-        if not locked.files.filter(position=position, finished_at=None).update(
-            finished_at=timezone.now()
-        ):
+        locked = (
+            MigrationRun.objects.select_for_update()
+            .only(*_COUNTERS)
+            .filter(pk=run.pk)
+            .first()
+        )
+        if locked is None or not locked.files.filter(
+            position=position, finished_at=None
+        ).update(finished_at=timezone.now()):
             return None
-        locked.in_flight -= 1
-        locked.remaining_files -= 1
-        locked.save(update_fields=["in_flight", "remaining_files", "updated_at"])
+        # The run made progress: the watchdog counts relaunches without any.
+        _update(
+            locked,
+            in_flight=locked.in_flight - 1,
+            remaining_files=locked.remaining_files - 1,
+            redispatches=0,
+        )
     return locked
+
+
+def claim_finish(run: MigrationRun) -> bool:
+    """Claim the finish of the run, showing it alive; False when a finish of
+    it already started."""
+    return bool(
+        MigrationRun.objects.filter(pk=run.pk, finish_started=False).update(
+            finish_started=True, updated_at=timezone.now()
+        )
+    )
 
 
 def mark_run_alive(run: MigrationRun) -> None:
