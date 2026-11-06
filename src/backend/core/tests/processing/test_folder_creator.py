@@ -1,5 +1,6 @@
 """Tests for FolderCreator — generic SourceFolder/SourceFile-based implementation."""
 
+import logging
 import os
 from unittest.mock import MagicMock
 
@@ -642,31 +643,37 @@ def test_create_folder_creates_empty_planned_dirs(tmp_path, settings):
     assert os.path.isdir(tmp_path / "workspace_ws25" / "empty")
 
 
-def test_create_folder_counts_the_bytes_written(tmp_path, settings):
-    """bytes_written sums the size of every downloaded file, failed ones excluded."""
+def test_create_folder_logs_the_size_of_each_downloaded_file(
+    tmp_path, settings, caplog
+):
+    """Each file reaching the disk is logged with its size, by its position:
+    file names may be personal data."""
     settings.APP_WORK_DIR = str(tmp_path)
     workspace = _make_workspace("ws23")
     files = [
         SourceFile(id="f1", name="a", extension=".txt", download_url="x"),
-        SourceFile(id="f2", name="b", extension=".txt", download_url="x"),
-        SourceFile(id="f3", name="broken", extension=".txt", download_url="x"),
+        SourceFile(id="f2", name="broken", extension=".txt", download_url="x"),
     ]
     backend = _make_backend()
 
     def download_file(file, destination):
-        if file.id == "f3":
+        if file.id == "f2":
             raise RuntimeError("403 Forbidden")
         with open(destination, "wb") as fh:
-            fh.write(b"x" * (3 if file.id == "f1" else 4))
+            fh.write(b"x" * 3)
 
     backend.download_file.side_effect = download_file
 
-    creator = FolderCreator()
-    _create_folder(
-        creator, workspace, _run(SourceFolder(name="root", files=files)), backend
-    )
+    with caplog.at_level(logging.INFO, logger="core.processing.folder_creator"):
+        _create_folder(
+            FolderCreator(),
+            workspace,
+            _run(SourceFolder(name="root", files=files)),
+            backend,
+        )
 
-    assert creator.bytes_written == 7
+    downloaded = [r.getMessage() for r in caplog.records if "Downloaded" in r.message]
+    assert downloaded == ["Downloaded file 1 (3.0B)"]
 
 
 # ---------------------------------------------------------------------------

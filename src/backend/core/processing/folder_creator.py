@@ -14,9 +14,6 @@ logger = get_task_logger(__name__)
 
 
 class FolderCreator:
-    def __init__(self):
-        self.bytes_written = 0
-
     def prepare_folder(self, workspace: Workspace, run: MigrationRun) -> str:
         """Create the empty local folder of the run, with its planned folders,
         and return its path."""
@@ -49,9 +46,14 @@ class FolderCreator:
         )
         # The worker that prepared the folder may not be this one.
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        self.__download_file(migration_file, local_path, source_backend)
+        download_migration_file(migration_file, source_backend, local_path)
         if migration_file.status != MigrationFile.Status.DOWNLOADED:
             return None
+        logger.info(
+            "Downloaded file %s (%s)",
+            migration_file.position + 1,
+            sizeof_fmt(migration_file.size),
+        )
         return local_path
 
     def get_workspace_path(self, workspace):
@@ -61,20 +63,3 @@ class FolderCreator:
         path = self.get_workspace_path(workspace)
         if os.path.exists(path):
             shutil.rmtree(path)
-
-    def __download_file(
-        self,
-        migration_file: MigrationFile,
-        local_path: str,
-        source_backend: AbstractSourceBackend,
-    ):
-        download_migration_file(migration_file, source_backend, local_path)
-        if migration_file.status != MigrationFile.Status.DOWNLOADED:
-            return
-
-        self.bytes_written += migration_file.size
-        logger.info(
-            "Directory size: %s (%s)",
-            sizeof_fmt(self.bytes_written),
-            self.bytes_written,
-        )
