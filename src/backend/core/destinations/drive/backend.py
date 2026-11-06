@@ -183,7 +183,9 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
     def abort_export(self, run) -> None:
         """Hand back the files Drive refused, even though the export failed."""
-        if self.name in run.destinations_state:
+        state = run.destinations_state.get(self.name)
+        # Unless the close failed after building the archive.
+        if state is not None and not state.get("lost_files_archived"):
             self._archive_lost_files(run, self._file_results(run))
 
     def _save_state(self, run, state: dict) -> None:
@@ -234,6 +236,9 @@ class DriveDestinationBackend(AbstractDestinationBackend):
         ]
         workspace = run.workspace
         RejectedFilesArchive(workspace, self).build(run, lost)
+        state = run.destinations_state[self.name]
+        state["lost_files_archived"] = True
+        self._save_state(run, state)
         # One event per run, without paths nor error messages (they may hold
         # URLs): file names may be personal data.
         if lost:

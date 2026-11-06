@@ -681,6 +681,40 @@ def test_drive_fails_when_it_rejects_every_file(
     assert run.workspace.get_destination_status("drive") != Workspace.Status.SUCCESS
 
 
+def test_a_drive_failing_after_its_archive_does_not_build_it_again(
+    drive_client, make_run, migrate, rejected_files_archive
+):
+    """The abort that follows a failed close keeps the archive the close built."""
+    _refuse(drive_client, "a.txt", "b.txt")
+
+    migrate(make_run(paths=["a.txt", "b.txt"]))
+
+    rejected_files_archive.return_value.build.assert_called_once()
+
+
+def test_a_drive_failing_before_its_archive_still_builds_it(
+    drive_client, make_run, migrate, rejected_files_archive
+):
+    """A close failing before the archive leaves it to the abort."""
+    ids = _refuse(drive_client, "a.txt")
+    create = drive_client.create_file_item.side_effect
+
+    def fail_on_listing(title, item_id, **kwargs):
+        if title == CSV_NAME:
+            raise _drive_refusal("not_authenticated", 401)
+        return create(title, item_id, **kwargs)
+
+    drive_client.create_file_item.side_effect = fail_on_listing
+    run = make_run(paths=["a.txt", "b.txt"], members=[{"email": "jean@example.com"}])
+
+    assert "drive" in migrate(run)
+
+    rejected_files_archive.return_value.build.assert_called_once()
+    assert _recorded(rejected_files_archive) == [
+        RejectedFile("a.txt", "file_type_not_allowed", ids["a.txt"])
+    ]
+
+
 def test_drive_fails_when_every_file_failed(drive_client, make_run, migrate, settings):
     """Files lost to errors count like refused ones: nothing reached Drive."""
     settings.MIGRATION_DESTINATION_MAX_CONSECUTIVE_FAILURES = 10
