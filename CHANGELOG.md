@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+- Add unicity on user email
+
 ## [v0.12.1] - 2026-11-03
 
 - Drop name columns from the Drive members CSV
