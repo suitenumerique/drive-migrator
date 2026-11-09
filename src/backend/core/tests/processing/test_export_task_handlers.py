@@ -11,11 +11,13 @@ from django_celery_results.models import TaskResult
 from core.backends.source import SourceFolder
 from core.models import ExtraTaskInfo, Workspace
 from core.processing.tasks import (
+    DestinationsFailed,
     cleanup_workspace_dir,
     create_task_result_on_publish,
     debug_folder,
     export,
     list_work_dir,
+    on_export_failure,
 )
 from core.processing.tasks import (
     task_failure as task_failure_handler,
@@ -184,6 +186,49 @@ def test_task_failure_handler_sets_pending_statuses_to_failure():
     mock_workspace.save.assert_called_once()
 
 
+def test_a_failed_destination_leaves_the_resana_import_pending():
+    """Resana closed, its import job runs: when another destination failed,
+    only that one is failed, so that the job is still followed."""
+    extra_task = MagicMock(spec=ExtraTaskInfo)
+    extra_task.workspace = MagicMock(spec=Workspace)
+    extra_task.workspace.destination_statuses = {
+        "archive": Workspace.Status.PENDING,
+        "resana": Workspace.Status.PENDING,
+    }
+
+    with (
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.capture_migration_finished"),
+        patch("core.processing.tasks.MailsManager"),
+    ):
+        on_export_failure(extra_task, DestinationsFailed(["archive"], "ws-1"))
+
+    extra_task.workspace.set_destination_status.assert_called_once_with(
+        "archive", Workspace.Status.FAILURE
+    )
+
+
+def test_only_the_destinations_named_failed_are_failed():
+    """The finish names the destinations that failed: the others closed."""
+    extra_task = MagicMock(spec=ExtraTaskInfo)
+    extra_task.workspace = MagicMock(spec=Workspace)
+    extra_task.workspace.destination_statuses = {
+        "drive": Workspace.Status.PENDING,
+        "resana": Workspace.Status.PENDING,
+    }
+
+    with (
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.capture_migration_finished"),
+        patch("core.processing.tasks.MailsManager"),
+    ):
+        on_export_failure(extra_task, RuntimeError("stalled"), ["drive"])
+
+    extra_task.workspace.set_destination_status.assert_called_once_with(
+        "drive", Workspace.Status.FAILURE
+    )
+
+
 def test_task_failure_handler_sends_fail_mail():
     """task_failure() sends a failure notification email."""
     mock_sender = MagicMock()
@@ -210,6 +255,45 @@ def test_task_failure_handler_sends_fail_mail():
     mock_mails_cls.return_value.send_fail_mail.assert_called_once_with(
         mock_extra_task.user, mock_workspace, source_token_expired=False
     )
+
+
+def test_a_failure_is_told_to_the_user_before_the_local_folder_is_deleted():
+    """Deleting the local folder may fail, e.g. on the watchdog's pod: the
+    user is told of the failure all the same."""
+    extra_task = MagicMock(spec=ExtraTaskInfo)
+    extra_task.workspace = MagicMock(spec=Workspace)
+    extra_task.workspace.destination_statuses = {}
+
+    with (
+        patch(
+            "core.processing.tasks.cleanup_workspace_dir",
+            side_effect=OSError("read-only file system"),
+        ),
+        patch("core.processing.tasks.MailsManager") as mock_mails_cls,
+        pytest.raises(OSError),
+    ):
+        on_export_failure(extra_task, RuntimeError("Export failed"))
+
+    mock_mails_cls.return_value.send_fail_mail.assert_called_once()
+
+
+def test_the_local_folder_of_a_failure_is_deleted_even_if_the_mail_fails():
+    """A mail server down still leaves no local folder behind."""
+    extra_task = MagicMock(spec=ExtraTaskInfo)
+    extra_task.workspace = MagicMock(spec=Workspace)
+    extra_task.workspace.destination_statuses = {}
+
+    with (
+        patch("core.processing.tasks.cleanup_workspace_dir") as cleanup,
+        patch("core.processing.tasks.MailsManager") as mock_mails_cls,
+        pytest.raises(ConnectionRefusedError),
+    ):
+        mock_mails_cls.return_value.send_fail_mail.side_effect = ConnectionRefusedError(
+            "SMTP down"
+        )
+        on_export_failure(extra_task, RuntimeError("Export failed"))
+
+    cleanup.assert_called_once_with(extra_task.workspace)
 
 
 def test_task_failure_handler_asks_to_log_in_again_on_expired_source_token():

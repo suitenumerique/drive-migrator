@@ -47,6 +47,7 @@ def migration_run():
         patch("core.processing.tasks.claim_export", return_value=True),
         patch("core.processing.tasks.mark_run_alive"),
         patch("core.processing.tasks.TaskResult"),
+        patch("core.processing.tasks._reported", return_value=False),
         patch("core.processing.tasks.create_migration_run") as create,
         patch("core.processing.tasks.delete_migration_run") as delete,
         patch("core.processing.tasks.save_run_files_stats") as save_stats,
@@ -278,14 +279,19 @@ def test_export_undoes_the_start_when_the_first_batch_cannot_be_queued(
     workspace, user, migration_run
 ):
     """A broker down at the start leaves no destination open, no run kept and
-    no source locked."""
+    no source locked: the run is purged last, for the watchdog to see it if
+    the worker dies before."""
+    released = []
+    migration_run.delete.side_effect = lambda *_: released.append(
+        tasks.SourceManager().get_backend().finalize_export.called
+    )
     result = _export_dispatching(
         workspace, user, dispatch_error=RuntimeError("broker down")
     )
 
     assert str(result.error) == "broker down"
     result.exports.abort.assert_called_once_with()
-    migration_run.delete.assert_called_once()
+    assert released == [True]
     result.source.finalize_export.assert_called_once_with(workspace)
 
 
@@ -768,6 +774,7 @@ def test_export_fails_when_a_destination_failed():
             failures={"drive": ValueError("401")},
         )
 
+    assert raised.value.names == ["drive"]
     assert isinstance(raised.value.__cause__, ValueError)
 
 

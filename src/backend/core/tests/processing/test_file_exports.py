@@ -3,6 +3,7 @@
 from datetime import timedelta
 from unittest.mock import MagicMock
 
+from django.db import OperationalError
 from django.utils import timezone
 
 import pytest
@@ -78,6 +79,35 @@ def test_put_hands_the_file_to_every_destination_and_saves_results(run):
         "drive": {"status": FileExportStatus.SENT},
         "other": {"status": FileExportStatus.SENT},
     }
+
+
+def test_put_skips_a_destination_the_file_was_sent_to_already(run):
+    """A file task run again sends its file only to the destinations that did
+    not get it the first time."""
+    drive, other = _destination("drive"), _destination("other")
+    exports = _exports(run, drive, other)
+    migration_file = run.files.first()
+    migration_file.results = {"drive": {"status": FileExportStatus.SENT}}
+
+    exports.put(migration_file, "/tmp/doc0.txt")
+
+    drive.put_file.assert_not_called()
+    other.put_file.assert_called_once()
+    migration_file.refresh_from_db()
+    assert set(migration_file.results) == {"drive", "other"}
+
+
+def test_a_database_error_while_sending_a_file_disables_no_destination(run):
+    """A database error is not the destination's: it reaches the file task,
+    retried, and the destination still receives the files."""
+    drive = _destination("drive")
+    drive.put_file.side_effect = OperationalError("server closed the connection")
+    exports = _exports(run, drive)
+
+    with pytest.raises(OperationalError):
+        exports.put(run.files.first(), "/tmp/doc0.txt")
+
+    assert _reloaded(run, drive).receiving
 
 
 def test_a_destination_that_raises_is_disabled_without_stopping_the_others(run):
@@ -163,6 +193,76 @@ def test_close_shows_the_run_alive_before_each_destination(run):
 
     assert len(seen) == 2
     assert all(updated_at > long_ago for updated_at in seen)
+
+
+def test_each_closing_is_saved_as_soon_as_done(run):
+    """A worker dying while a destination closes keeps the closing of those
+    before it: they are not aborted afterwards, only the others are."""
+    drive, other = _destination("drive"), _destination("other")
+    other.close_export.side_effect = SystemExit
+    exports = _exports(run, drive, other)
+    user = exports.user
+
+    with pytest.raises(SystemExit):
+        exports.close()
+    run.refresh_from_db()
+    FileExports(run, user, [drive, other]).abort()
+
+    drive.abort_export.assert_not_called()
+    other.abort_export.assert_called_once_with(run)
+    assert FileExports(run, user, [drive, other]).failed() == ["other"]
+
+
+def test_a_closing_is_saved_as_started_before_it_runs(run):
+    """A finish taken over later knows which destination was closing."""
+    seen = []
+
+    def record_closing(_user, closed_run):
+        state = MigrationRun.objects.get(pk=closed_run.pk).exports_state
+        seen.append(state["drive"]["closing"])
+
+    drive = _destination("drive")
+    drive.close_export.side_effect = record_closing
+
+    _exports(run, drive).close()
+
+    assert seen == [True]
+
+
+def test_an_interrupted_closing_is_aborted_not_run_again(run):
+    """A destination whose closing was cut short, e.g. with a dead worker, may
+    be half closed: the finish taking over aborts it instead of closing it a
+    second time, and closes the others."""
+    drive, other = _destination("drive"), _destination("other")
+    drive.close_export.side_effect = SystemExit
+    with pytest.raises(SystemExit):
+        _exports(run, drive, other).close()
+
+    drive, other = _destination("drive"), _destination("other")
+    exports = _reloaded(run, drive, other)
+    failures = exports.close()
+
+    drive.close_export.assert_not_called()
+    drive.abort_export.assert_called_once_with(run)
+    other.close_export.assert_called_once_with(exports.user, run)
+    assert list(failures) == ["drive"]
+    assert FileExports(run, exports.user, [drive, other]).failed() == ["drive"]
+
+
+def test_the_failed_destinations_are_those_not_closed_cleanly(run):
+    """Read from the saved state, whatever task aborted them: a destination
+    in error or aborted failed, one closed cleanly did not."""
+    drive, resana, other = (
+        _destination("drive"),
+        _destination("resana"),
+        _destination("other"),
+    )
+    drive.close_export.side_effect = RuntimeError("Drive down")
+    exports = _exports(run, drive, resana, other)
+    exports.close()
+    FileExports(run, exports.user, [other]).abort()
+
+    assert FileExports(run, exports.user, [drive, resana, other]).failed() == ["drive"]
 
 
 def test_a_success_resets_the_consecutive_failures(run, settings):

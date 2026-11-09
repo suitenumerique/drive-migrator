@@ -248,6 +248,11 @@ def _sized(file_id, size):
     )
 
 
+def _batch_done(run):
+    """Every file of the batch in flight is done: the next one can be taken."""
+    MigrationRun.objects.filter(pk=run.pk).update(in_flight=0)
+
+
 def _batch_limits(settings, max_files=0, max_bytes=0):
     settings.MIGRATION_BATCH_MAX_FILES = max_files
     settings.MIGRATION_BATCH_MAX_BYTES = max_bytes
@@ -272,11 +277,12 @@ def test_take_next_batch_stops_at_the_files_limit(settings):
     run = _run_with_files(*(_sized(f"f{i}", 10) for i in range(3)))
 
     assert take_next_batch(run) == [0, 1]
+    _batch_done(run)
     assert take_next_batch(run) == [2]
 
     run.refresh_from_db()
     assert run.cursor == 3
-    assert run.in_flight == 3
+    assert run.in_flight == 1
 
 
 def test_take_next_batch_stops_before_the_bytes_limit(settings):
@@ -285,6 +291,7 @@ def test_take_next_batch_stops_before_the_bytes_limit(settings):
     run = _run_with_files(_sized("f0", 10), _sized("f1", 10), _sized("f2", 10))
 
     assert take_next_batch(run) == [0, 1]
+    _batch_done(run)
     assert take_next_batch(run) == [2]
 
 
@@ -294,7 +301,17 @@ def test_take_next_batch_always_takes_one_file(settings):
     run = _run_with_files(_sized("f0", 10), _sized("f1", 10))
 
     assert take_next_batch(run) == [0]
+    _batch_done(run)
     assert take_next_batch(run) == [1]
+
+
+def test_take_next_batch_takes_nothing_while_a_batch_is_in_flight(settings):
+    """One batch at a time: none is taken until the one in flight is done."""
+    _batch_limits(settings, max_files=1)
+    run = _run_with_files(_sized("f0", 10), _sized("f1", 10))
+
+    assert take_next_batch(run) == [0]
+    assert take_next_batch(run) is None
 
 
 def test_take_next_batch_counts_an_unknown_size_as_zero(settings):

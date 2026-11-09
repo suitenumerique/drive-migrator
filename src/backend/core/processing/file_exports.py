@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 
 from django.conf import settings
-from django.db import transaction
+from django.db import InterfaceError, OperationalError, transaction
 
 from celery.utils.log import get_task_logger
 
@@ -22,6 +22,10 @@ class _Session:
         self.error = None
         self.consecutive_failures = 0
         self.closed = False
+        # Closed by an abort, not by its own closing.
+        self.aborted = False
+        # Its closing started, maybe cut short with a dead worker.
+        self.closing = False
 
     @property
     def active(self) -> bool:
@@ -32,6 +36,8 @@ class _Session:
         and an error or a closing, which are final."""
         self.consecutive_failures = state.get("consecutive_failures", 0)
         self.closed = self.closed or state.get("closed", False)
+        self.aborted = self.aborted or state.get("aborted", False)
+        self.closing = self.closing or state.get("closing", False)
         if self.error is None and state.get("error") is not None:
             self.error = RuntimeError(state["error"])
 
@@ -40,7 +46,13 @@ class _Session:
             "error": None if self.error is None else str(self.error),
             "consecutive_failures": self.consecutive_failures,
             "closed": self.closed,
+            "aborted": self.aborted,
+            "closing": self.closing,
         }
+
+    @property
+    def failed(self) -> bool:
+        return self.error is not None or self.aborted or not self.closed
 
 
 class FileExports:
@@ -92,12 +104,15 @@ class FileExports:
         """Send one downloaded file to every active destination, then save
         their results on its row in a single UPDATE."""
         # Another task may have disabled a destination meanwhile.
-        self._merge(
-            MigrationRun.objects.values_list("exports_state", flat=True).get(
-                pk=self.run.pk
-            )
-        )
-        receiving = [session for session in self.sessions if session.active]
+        self._reload()
+        # A file task run again does not send its file twice.
+        receiving = [
+            session
+            for session in self.sessions
+            if session.active
+            and migration_file.results.get(session.destination.name, {}).get("status")
+            != FileExportStatus.SENT
+        ]
         for session in receiving:
             self._call(
                 session,
@@ -106,6 +121,8 @@ class FileExports:
                 self.run,
                 migration_file,
                 local_path,
+                # Not the destination's: the file task is retried.
+                reraise=(OperationalError, InterfaceError),
             )
         with self._saving():
             for session in receiving:
@@ -118,17 +135,19 @@ class FileExports:
         """Close the destinations still active, abort the failed ones, and
         return the error of each failed destination by name."""
         for session in self.sessions:
-            if session.active:
-                # Closing may take long: show the watchdog the run goes on.
-                mark_run_alive(self.run)
-                self._call(
-                    session,
-                    session.destination.close_export,
-                    self.user,
-                    self.run,
-                )
-                session.closed = session.error is None
-        self._save()
+            if not self._start_closing(session):
+                continue
+            # Closing may take long: show the watchdog the run goes on.
+            mark_run_alive(self.run)
+            self._call(
+                session,
+                session.destination.close_export,
+                self.user,
+                self.run,
+            )
+            session.closed = session.error is None
+            # At once: a finish taken over later must not abort it.
+            self._save()
         self.abort()
         return {
             session.destination.name: session.error
@@ -136,12 +155,20 @@ class FileExports:
             if session.error is not None
         }
 
+    def failed(self) -> list[str]:
+        """The destinations not closed cleanly, from the state saved by every
+        task of the run: in error, aborted or never closed."""
+        self._reload()
+        return [s.destination.name for s in self.sessions if s.failed]
+
     def abort(self) -> None:
         """Abort every destination not closed, e.g. after a fatal run error."""
+        # A task running alongside may have closed one meanwhile.
+        self._reload()
         for session in self.sessions:
             if session.closed:
                 continue
-            session.closed = True
+            session.closed = session.aborted = True
             try:
                 session.destination.abort_export(self.run)
             # Best effort: the first error is the one worth reporting.
@@ -150,6 +177,29 @@ class FileExports:
                     "Could not abort the %s export", session.destination.name
                 )
         self._save()
+
+    def _start_closing(self, session: _Session) -> bool:
+        """Save the closing of an active destination as started. A closing a
+        former finish started may have stopped halfway: the destination is
+        failed, then aborted, rather than closed twice."""
+        with self._saving():
+            if not session.active:
+                return False
+            if session.closing:
+                session.error = RuntimeError("Its closing was cut short")
+                return False
+            session.closing = True
+        return True
+
+    def _reload(self) -> None:
+        """Take in the state saved by the other tasks of the run."""
+        if not self.sessions:
+            return
+        self._merge(
+            MigrationRun.objects.values_list("exports_state", flat=True).get(
+                pk=self.run.pk
+            )
+        )
 
     def _merge(self, exports_state: dict) -> None:
         for session in self.sessions:
@@ -184,9 +234,11 @@ class FileExports:
                 exports_state=self.run.exports_state
             )
 
-    def _call(self, session: _Session, method, *args) -> None:
+    def _call(self, session: _Session, method, *args, reraise=()) -> None:
         try:
             method(*args)
+        except reraise:
+            raise
         # Broad on purpose: whatever a destination raises, it must not stop the
         # others, and the error is reported once the run is over.
         except Exception as error:  # pylint: disable=broad-exception-caught

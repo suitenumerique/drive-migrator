@@ -64,6 +64,16 @@ logger = get_task_logger(__name__)
 EXPORT_CLAIM_TIMEOUT = 30 * 24 * 3600
 
 
+class DestinationsFailed(RuntimeError):
+    """Destinations of the run failed while the others closed."""
+
+    def __init__(self, names, workspace_id):
+        super().__init__(
+            f"Export failed for {', '.join(names)} on workspace {workspace_id}"
+        )
+        self.names = list(names)
+
+
 class RunStalled(RuntimeError):
     """The run stopped making progress, and the watchdog failed it."""
 
@@ -198,17 +208,26 @@ def export(self, data):
                 _abort_export(run, user)
                 raise
         except BaseException:
-            _clean_up_run(self.request.id, run, integrity_tracker, run_failed=True)
+            _save_run_report(self.request.id, run, integrity_tracker, run_failed=True)
             raise
         dispatched = True
     finally:
         if not dispatched:
-            logger.info("Calling finalize_export ...")
-            source_backend.finalize_export(workspace)
+            _undo_start(source_backend, workspace, self.request.id)
 
     logger.info("Run %s started", run.pk)
     # The tasks of the run carry on, and finish_migration reports the outcome.
     raise Ignore()
+
+
+def _undo_start(source_backend, workspace, task_id) -> None:
+    """Release the source of a run that failed to start, then purge it."""
+    try:
+        logger.info("Calling finalize_export ...")
+        source_backend.finalize_export(workspace)
+    finally:
+        # Last: a worker dying before leaves the run to the watchdog.
+        delete_migration_run(task_id)
 
 
 def claim_export(task_id) -> bool:
@@ -221,6 +240,8 @@ def dispatch_batch(run, user) -> None:
     """Queue a task for each file of the next batch of the run, or the finish of
     the run when it has no file left to dispatch."""
     positions = take_next_batch(run)
+    if positions is None:
+        return
     for position in positions:
         publish_file(run, user, position)
     if not positions:
@@ -267,8 +288,10 @@ def _load_run(run_id, *deferred):
 @app.task(
     ignore_result=True,
     autoretry_for=(OperationalError, InterfaceError),
-    retry_backoff=True,
-    max_retries=3,
+    # 15, 30, 60, 120 then 240 s: long enough for a database failover.
+    retry_backoff=15,
+    retry_jitter=False,
+    max_retries=5,
 )
 def export_file(run_id, user_id, position):
     """Export one file of a run, then queue what comes next once its batch, or
@@ -315,7 +338,8 @@ def _queue_next(run, user) -> None:
 
 def run_file(run, user, source_backend, migration_file):
     """Export one file of the run. Whatever goes wrong, the run goes on with
-    its next files, except on an expired source token, which stops it."""
+    its next files, except on an expired source token, which stops it, and on
+    a database error, which retries the task."""
     try:
         source_backend.resume_export(run.workspace)
         _export_file(run, user, source_backend, migration_file)
@@ -352,9 +376,17 @@ def finish_migration(run_id, user_id):
 
 
 def finish_run(run, user, source_backend):
-    """Raise the error of a failed run once it is reported."""
+    """Raise the error of a failed run once it is reported. The run is purged
+    last: a finish dying before is taken over by the watchdog."""
+    if _reported(run.task_id):
+        # A former finish reported it, then died before purging the run.
+        logger.warning("Run %s was reported already: purging it", run.pk)
+        delete_migration_run(run.task_id)
+        return
     integrity_tracker = IntegrityTracker.from_run(run)
     error = None
+    # None: every destination still pending failed.
+    failed_destinations = None
     try:
         run_failed = True
         try:
@@ -362,33 +394,59 @@ def finish_run(run, user, source_backend):
                 _abort_export(run, user)
                 # The files left were skipped: tell those that failed before.
                 _save_download_errors(run.workspace, run)
-            if run.source_token_expired:
-                raise SourceTokenExpired("The source token expired during the run.")
-            if run.stalled:
-                raise RunStalled("The migration stopped making progress.")
+                raise _stop_error(run)
             _finish_export(run, user)
             run_failed = False
         # Broad on purpose: reported to the user first, then raised again.
         except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             error = exc
         finally:
+            if run_failed:
+                failed_destinations = _failed_destinations(run, user)
             # The integrity check may wait for the analysis of the destinations.
             mark_run_alive(run)
-            _clean_up_run(run.task_id, run, integrity_tracker, run_failed)
+            _save_run_report(run.task_id, run, integrity_tracker, run_failed)
     finally:
-        logger.info("Calling finalize_export ...")
-        source_backend.finalize_export(run.workspace)
+        _release_source(source_backend, run)
 
-    _record_outcome(run.task_id, error)
-    extra_task = _extra_task_of(run.task_id)
-    if extra_task is not None:
-        if error is None:
-            on_export_success(extra_task)
-        else:
-            on_export_failure(extra_task, error)
+    _report(run, error, failed_destinations)
     if error is not None:
         raise error
     logger.info("Run %s done", run.pk)
+
+
+def _failed_destinations(run, user) -> list[str] | None:
+    """The destinations of a failed run not closed cleanly: one a former
+    finish closed, e.g. a Resana import running, is not failed. None when
+    unknown: every pending one is failed then."""
+    try:
+        return FileExports(run, user, _pending_destinations(run.workspace)).failed()
+    # Broad on purpose: the run must be purged and its error reported anyway.
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("Could not read the failed destinations of run %s", run.pk)
+        return None
+
+
+def _report(run, error, failed_destinations) -> None:
+    """Tell the user, then record the outcome of the run and purge it. The run
+    is kept when its outcome is not recorded: the watchdog finishes it again."""
+    try:
+        extra_task = _extra_task_of(run.task_id)
+        if extra_task is not None:
+            if error is None:
+                on_export_success(extra_task)
+            else:
+                on_export_failure(extra_task, error, failed_destinations)
+    finally:
+        _record_outcome(run.task_id, error)
+        delete_migration_run(run.task_id)
+
+
+def _stop_error(run) -> Exception:
+    """The error a stopped run fails with."""
+    if run.source_token_expired:
+        return SourceTokenExpired("The source token expired during the run.")
+    return RunStalled("The migration stopped making progress.")
 
 
 def _start_export(run, user, source_backend, integrity_tracker):
@@ -452,9 +510,9 @@ def _finish_export(run, user):
 
     failures = file_exports.close()
     if failures:
-        raise RuntimeError(
-            f"Export failed for {', '.join(failures)} on workspace {workspace.id}"
-        ) from next(iter(failures.values()))
+        raise DestinationsFailed(failures, workspace.id) from next(
+            iter(failures.values())
+        )
 
 
 def _abort_export(run, user):
@@ -462,16 +520,33 @@ def _abort_export(run, user):
     FileExports(run, user, _pending_destinations(run.workspace)).abort()
 
 
-def _clean_up_run(task_id, run, integrity_tracker, run_failed):
-    """Save what the task handlers read, then purge the working rows of the
-    run, whatever its outcome."""
+def _save_run_report(task_id, run, integrity_tracker, run_failed):
+    """Save what the outcome handlers read from the working rows of the run,
+    before they are purged."""
     # Before the task_success/task_failure handlers delete the local folder.
     integrity_tracker.save(task_id, run_failed=run_failed)
     if run is not None:
         # Read from the run's rows, for the task handlers.
         save_run_files_stats(task_id, run)
         drop_unlinked_kept_files(run)
-    delete_migration_run(task_id)
+
+
+def _release_source(source_backend, run) -> None:
+    """Unlock the source workspace; an error is logged, so that the outcome is
+    reported and the run purged all the same."""
+    logger.info("Calling finalize_export ...")
+    try:
+        source_backend.finalize_export(run.workspace)
+    # Broad on purpose: the source is left to unlock by hand, as logged.
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("Could not release the source of run %s", run.pk)
+
+
+def _reported(task_id) -> bool:
+    """Whether the outcome of the migration is recorded already."""
+    return TaskResult.objects.filter(
+        task_id=task_id, status__in=states.READY_STATES
+    ).exists()
 
 
 def _hand_over(file_exports, migration_file, local_path):
@@ -578,26 +653,37 @@ def on_export_success(extra_task: ExtraTaskInfo) -> None:
 
 
 def on_export_failure(
-    extra_task: ExtraTaskInfo, exception: BaseException | None = None
+    extra_task: ExtraTaskInfo,
+    exception: BaseException | None = None,
+    failed_destinations: list[str] | None = None,
 ) -> None:
     """Mark the destinations still pending as failed, delete the local folder
     of the run and tell the user."""
     workspace = extra_task.workspace
 
+    # The others closed: a Resana import still pending goes on.
+    if failed_destinations is None and isinstance(exception, DestinationsFailed):
+        failed_destinations = exception.names
+    failed = (
+        workspace.destination_statuses
+        if failed_destinations is None
+        else failed_destinations
+    )
     for dest_name, status in workspace.destination_statuses.items():
-        if status == Workspace.Status.PENDING:
+        if status == Workspace.Status.PENDING and dest_name in failed:
             workspace.set_destination_status(dest_name, Workspace.Status.FAILURE)
     workspace.save()
     capture_migration_finished(extra_task, "failure")
 
-    cleanup_workspace_dir(workspace)
-
-    mail_manager = MailsManager()
-    mail_manager.send_fail_mail(
-        extra_task.user,
-        workspace,
-        source_token_expired=isinstance(exception, SourceTokenExpired),
-    )
+    try:
+        MailsManager().send_fail_mail(
+            extra_task.user,
+            workspace,
+            source_token_expired=isinstance(exception, SourceTokenExpired),
+        )
+    finally:
+        # Last: an error deleting the folder must not keep the user uninformed.
+        cleanup_workspace_dir(workspace)
 
 
 @task_success.connect

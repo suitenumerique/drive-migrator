@@ -27,8 +27,11 @@ def watch_runs() -> None:
     stalled_since = timezone.now() - timedelta(
         seconds=settings.MIGRATION_RUN_STALL_SECONDS
     )
-    runs = MigrationRun.objects.select_related("workspace__migration_user").filter(
-        updated_at__lt=stalled_since
+    runs = (
+        MigrationRun.objects.select_related("workspace__migration_user")
+        # Read by the finish only, which loads them when it runs here.
+        .defer("integrity_state", "dirs")
+        .filter(updated_at__lt=stalled_since)
     )
     for run in runs:
         try:
@@ -65,21 +68,26 @@ def watch_run(run: MigrationRun) -> None:
 
 def _watch_finish(run: MigrationRun, user) -> None:
     """A finish never started is queued again, as files are. One that started
-    gets the patience of the files, the stall time once per redispatch, then
-    is done here, as failed."""
-    redispatches_left = run.redispatches < settings.MIGRATION_RUN_MAX_REDISPATCHES
-    if not run.finish_started:
-        if not redispatches_left:
-            _fail(run, user)
-        elif _touch(run, redispatches=F("redispatches") + 1):
-            logger.warning("The finish of run %s never started: queuing it", run.pk)
+    gets the patience of the files, the stall time once per redispatch, plus
+    once. A lost finish of a done run is queued again, to close its
+    destinations in a worker, up to twice the redispatches; otherwise, or then,
+    it is done here, as failed."""
+    if run.finish_started:
+        patience = settings.MIGRATION_RUN_STALL_SECONDS * (
+            settings.MIGRATION_RUN_MAX_REDISPATCHES + 1
+        )
+        if run.updated_at >= timezone.now() - timedelta(seconds=patience):
+            return
+    # Every file done: the migration succeeded, only its finish was lost.
+    done = not run.remaining_files and not run.stopped
+    redispatches = settings.MIGRATION_RUN_MAX_REDISPATCHES * (2 if done else 1)
+    if (done or not run.finish_started) and run.redispatches < redispatches:
+        # claim_finish() lets the finish queued take it over.
+        if _touch(run, finish_started=False, redispatches=F("redispatches") + 1):
+            logger.warning("The finish of run %s was lost: queuing it", run.pk)
             publish_finish_again(run, user)
         return
-    patience = settings.MIGRATION_RUN_STALL_SECONDS * (
-        settings.MIGRATION_RUN_MAX_REDISPATCHES + 1
-    )
-    if run.updated_at < timezone.now() - timedelta(seconds=patience):
-        _fail(run, user)
+    _fail(run, user)
 
 
 def _relaunch(run: MigrationRun, user) -> bool:

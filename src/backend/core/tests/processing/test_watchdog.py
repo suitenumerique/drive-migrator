@@ -293,6 +293,85 @@ def test_a_stalled_run_whose_token_also_expired_is_failed_without_error(
     assert not published
 
 
+def _done_run():
+    """A run whose every file is done."""
+    run = _dispatched_run(files_count=2)
+    finish_file(run, 0)
+    finish_file(run, 1)
+    return run
+
+
+@pytest.mark.parametrize(
+    "lost",
+    [
+        {"finish_started": True, "hours": 4},
+        {"finish_started": False, "redispatches": 2},
+    ],
+    ids=["silent", "never_started"],
+)
+def test_the_lost_finish_of_a_done_run_is_queued_again(published, watch, lost):
+    """Every file is done: the migration succeeded, so its finish is queued
+    again, to close the destinations in a worker, rather than failed."""
+    run = _done_run()
+    _idle(run, finish_published=True, **lost)
+
+    with patch("core.processing.watchdog.finish_run") as finish_run:
+        watch()
+
+    finish_run.assert_not_called()
+    assert published == [("finish_migration", *_ids(run))]
+    run.refresh_from_db()
+    # Claimed again by the finish queued.
+    assert not run.finish_started
+    assert not run.stalled
+    assert run.redispatches == lost.get("redispatches", 0) + 1
+
+
+@pytest.mark.parametrize("finish_started", [False, True])
+def test_the_finish_of_a_done_run_lost_again_and_again_is_failed(
+    published, watch, finish_started
+):
+    """A finish lost each time it is queued, e.g. killing its worker, is
+    queued twice the redispatches, then done here, as failed: the source
+    workspace is not left locked."""
+    run = _done_run()
+    _idle(
+        run,
+        hours=4,
+        finish_published=True,
+        finish_started=finish_started,
+        redispatches=4,
+    )
+
+    with (
+        patch("core.processing.watchdog.SourceManager"),
+        patch("core.processing.watchdog.finish_run") as finish_run,
+    ):
+        finish_run.side_effect = tasks.RunStalled("stalled")
+        watch()
+
+    assert finish_run.call_args.args[0].stalled
+    assert not published
+
+
+def test_the_lost_finish_of_a_done_run_whose_token_expired_fails_it(watch):
+    """A run stopped by an expired source token is failed all the same, even
+    with every file done: its destinations were never told to close."""
+    run = _done_run()
+    _idle(run, hours=4, finish_published=True, finish_started=True)
+    MigrationRun.objects.filter(pk=run.pk).update(source_token_expired=True)
+
+    with (
+        patch("core.processing.watchdog.SourceManager"),
+        patch("core.processing.watchdog.finish_run") as finish_run,
+    ):
+        finish_run.side_effect = SourceTokenExpired("token expired")
+        watch()
+
+    run.refresh_from_db()
+    assert run.stalled
+
+
 def test_a_run_failing_to_be_watched_does_not_stop_the_others(published, watch):
     """One run the watchdog cannot handle leaves the next ones watched."""
     first = _dispatched_run(task_id="task-1")
@@ -306,6 +385,18 @@ def test_a_run_failing_to_be_watched_does_not_stop_the_others(published, watch):
         watch()
 
     assert published == [("finish_migration", *_ids(second))]
+
+
+def test_the_runs_are_read_without_their_big_states(watch):
+    """Every pass reads the runs without news: not the states only their
+    finish needs."""
+    _idle(_dispatched_run())
+
+    with patch("core.processing.watchdog.watch_run") as watch_run:
+        watch()
+
+    watched = watch_run.call_args.args[0]
+    assert {"integrity_state", "dirs"} <= watched.get_deferred_fields()
 
 
 def test_the_command_watches_the_runs():

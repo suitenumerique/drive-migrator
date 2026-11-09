@@ -10,8 +10,9 @@ workers.
 - `export_file`, one per file: downloads the file, hands it to the
   destinations, then deletes the local copy.
 - `finish_migration`, once every file is done: closes the destinations,
-  purges the rows of the run, releases the source workspace, then records the
-  outcome and tells the user.
+  releases the source workspace, tells the user and records the outcome, then
+  purges the rows of the run. Purged last, a run whose finish died midway is
+  still there for the watchdog; one recorded already is only purged.
 
 Only `export` gets a row in the Django admin (`Task results`). It stays
 `STARTED` while the run goes on, until `finish_migration` sets its status,
@@ -70,22 +71,29 @@ minutes by the `watch-migration-runs-job` CronJob of the Helm chart, handles
 every run without news for `MIGRATION_RUN_STALL_SECONDS`:
 
 - a run whose files are all done gets its finish queued, when it was lost;
-- its files queued and never finished, its next batch when it was never
-  queued, or its finish queued and never started, are queued again, up to
-  `MIGRATION_RUN_MAX_REDISPATCHES` times without progress: each file done
-  gives the run its redispatches back;
+- its files queued and never finished, or its next batch when it was never
+  queued, are queued again, up to `MIGRATION_RUN_MAX_REDISPATCHES` times
+  without progress: each file done gives the run its redispatches back;
 - then, or when its start was lost, the run is marked stalled and its finish
   queued: its destinations are aborted, its source workspace released, and
   the migration fails telling the user;
-- a finish that started and went silent is done by the command itself, as
-  failed, after the stall time once per redispatch, plus once. A destination
-  that finish closed already, such as a Resana import running, is left as it
-  is.
+- a finish is lost when it was queued and never started, or when it started
+  and went silent for the stall time once per redispatch, plus once. With
+  every file done, the migration succeeded: a lost finish is queued again,
+  up to twice `MIGRATION_RUN_MAX_REDISPATCHES` times, to close the
+  destinations left in a worker. Otherwise, only a finish never started is
+  queued again, up to `MIGRATION_RUN_MAX_REDISPATCHES` times: these count
+  with the run's own, so the finish of a run stalled once its redispatches
+  are spent is not. Past that, or
+  for one that went silent, the finish is done by the command itself, as
+  failed: the destinations left are aborted. Either way, a destination a
+  former finish closed, such as a Resana import running, is left as it is,
+  and one whose closing was cut short is aborted rather than closed twice.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `MIGRATION_RUN_STALL_SECONDS` | `10800` (3 hours) | Time without news after which a run is stalled. |
-| `MIGRATION_RUN_MAX_REDISPATCHES` | `2` | Times a stalled run is queued again without progress before it fails. |
+| `MIGRATION_RUN_MAX_REDISPATCHES` | `2` | Times a stalled run is queued again without progress before it fails; twice that for the finish of a run whose files are all done. |
 
 A run shows alive each time one of its files, or its finish, starts, and
 before each of its destinations opens or closes. Waiting in the queue behind

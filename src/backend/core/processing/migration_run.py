@@ -75,9 +75,10 @@ def create_migration_run(
     return run
 
 
-def take_next_batch(run: MigrationRun) -> list[int]:
+def take_next_batch(run: MigrationRun) -> list[int] | None:
     """Take the next pending files of the run from its cursor, within the batch
-    limits, and count them in flight. Return their positions.
+    limits, and count them in flight. Return their positions, or None while a
+    batch is still in flight.
 
     A batch holds at least one file, even one bigger than the bytes limit; a
     size the source did not announce counts as 0.
@@ -88,6 +89,9 @@ def take_next_batch(run: MigrationRun) -> list[int]:
         locked = (
             MigrationRun.objects.select_for_update().only(*_COUNTERS).get(pk=run.pk)
         )
+        # One batch at a time, even when two tasks ask for the next one.
+        if locked.in_flight:
+            return None
         rows = (
             locked.files.filter(
                 position__gte=locked.cursor, status=MigrationFile.Status.PENDING

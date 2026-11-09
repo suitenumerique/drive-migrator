@@ -17,7 +17,7 @@ from django_celery_results.models import TaskResult
 
 from core.backends.source import SourceFile, SourceFolder, SourceTokenExpired
 from core.factories import UserFactory, WorkspaceFactory
-from core.models import MigrationFile, MigrationRun
+from core.models import MigrationFile, MigrationRun, Workspace
 from core.processing import tasks
 from core.processing.migration_run import create_migration_run, finish_file
 from core.processing.plan import build_plan
@@ -222,6 +222,21 @@ def test_dispatch_batch_publishes_once_the_transaction_commits(
 
     assert not published
     assert len(callbacks) == 2
+
+
+def test_dispatch_batch_takes_no_batch_while_one_is_in_flight(
+    settings, published, user, committed
+):
+    """A run has one batch in flight at a time, whoever asks for the next."""
+    run = _run(3, 1, settings)
+
+    with committed():
+        tasks.dispatch_batch(run, user)
+        tasks.dispatch_batch(run, user)
+
+    assert published == [_file_task(run, user, 0)]
+    run.refresh_from_db()
+    assert (run.cursor, run.in_flight) == (1, 1)
 
 
 def test_dispatch_batch_publishes_the_finish_of_a_run_without_files(
@@ -506,6 +521,14 @@ def test_a_file_task_retried_once_its_file_counted_queues_the_next_batch(
     assert worker.published[-1] == _file_task(run, worker.user, 1)
 
 
+def test_a_file_task_is_retried_long_enough_for_a_database_failover():
+    """Spaced retries, not seconds apart: a database failing over for a
+    minute does not leave its batch to the watchdog."""
+    assert tasks.export_file.max_retries == 5
+    assert tasks.export_file.retry_backoff == 15
+    assert tasks.export_file.retry_jitter is False
+
+
 def test_a_database_error_exporting_a_file_retries_it(settings, worker):
     """A database error is no error of the file: the task is retried rather
     than the file counted failed."""
@@ -544,13 +567,15 @@ def fixture_finish_steps(source_backend):
     with (
         patch("core.processing.tasks._finish_export") as finish_export,
         patch("core.processing.tasks._abort_export") as abort,
-        patch("core.processing.tasks._clean_up_run") as clean_up,
+        patch("core.processing.tasks._save_run_report") as clean_up,
+        patch("core.processing.tasks.delete_migration_run") as purge,
         patch("core.processing.tasks.IntegrityTracker") as tracker_cls,
         patch("core.processing.tasks._extra_task_of", return_value=extra_task),
         patch("core.processing.tasks.on_export_success") as on_success,
         patch("core.processing.tasks.on_export_failure") as on_failure,
     ):
         clean_up.side_effect = lambda *args: order.append("clean_up")
+        purge.side_effect = lambda *args: order.append("purge")
         source_backend.finalize_export.side_effect = lambda *args: order.append(
             "finalize"
         )
@@ -562,6 +587,7 @@ def fixture_finish_steps(source_backend):
             finish_export=finish_export,
             abort=abort,
             clean_up=clean_up,
+            purge=purge,
             tracker=tracker_cls.from_run.return_value,
             on_success=on_success,
             on_failure=on_failure,
@@ -571,8 +597,8 @@ def fixture_finish_steps(source_backend):
 def test_finish_migration_closes_purges_then_reports_a_success(
     settings, user, source_backend, finish_steps
 ):
-    """The destinations close, the run is purged, the source released, then the
-    success is reported."""
+    """The destinations close, the source is released, the success reported,
+    then the run purged: a finish dying before is taken over by the watchdog."""
     run = _run(1, 0, settings)
 
     tasks.finish_migration(*_ids(run, user))
@@ -583,7 +609,7 @@ def test_finish_migration_closes_purges_then_reports_a_success(
         "task-1", ANY, finish_steps.tracker, False
     )
     finish_steps.on_success.assert_called_once_with(finish_steps.extra_task)
-    assert finish_steps.order == ["clean_up", "finalize", "success"]
+    assert finish_steps.order == ["clean_up", "finalize", "success", "purge"]
 
 
 def test_finish_migration_reports_a_failure_then_raises_it(
@@ -601,8 +627,42 @@ def test_finish_migration_reports_a_failure_then_raises_it(
     finish_steps.clean_up.assert_called_once_with(
         "task-1", ANY, finish_steps.tracker, True
     )
-    finish_steps.on_failure.assert_called_once_with(finish_steps.extra_task, error)
-    assert finish_steps.order == ["clean_up", "finalize", "failure"]
+    finish_steps.on_failure.assert_called_once_with(finish_steps.extra_task, error, ANY)
+    assert finish_steps.order == ["clean_up", "finalize", "failure", "purge"]
+
+
+def test_finish_migration_reports_and_purges_even_if_the_source_stays_locked(
+    settings, user, source_backend, finish_steps
+):
+    """The source failing to be released is logged: the outcome is reported
+    and the run purged all the same."""
+    run = _run(1, 0, settings)
+
+    def locked(*_args):
+        finish_steps.order.append("finalize")
+        raise RuntimeError("Resana down")
+
+    source_backend.finalize_export.side_effect = locked
+
+    tasks.finish_migration(*_ids(run, user))
+
+    assert finish_steps.order == ["clean_up", "finalize", "success", "purge"]
+
+
+def test_finish_migration_of_a_run_reported_already_only_purges_it(
+    settings, user, finish_steps
+):
+    """A finish that died after reporting, taken over: the run is purged,
+    nothing closed nor reported twice."""
+    run = _run(1, 0, settings)
+    TaskResult.objects.create(
+        task_id="task-1", task_name=tasks.export.name, status=states.SUCCESS
+    )
+
+    tasks.finish_migration(*_ids(run, user))
+
+    finish_steps.finish_export.assert_not_called()
+    assert finish_steps.order == ["purge"]
 
 
 def test_finish_migration_of_a_stopped_run_asks_to_log_in_again(
@@ -618,7 +678,7 @@ def test_finish_migration_of_a_stopped_run_asks_to_log_in_again(
 
     finish_steps.finish_export.assert_not_called()
     finish_steps.abort.assert_called_once_with(ANY, user)
-    extra_task, error = finish_steps.on_failure.call_args.args
+    extra_task, error, _ = finish_steps.on_failure.call_args.args
     assert extra_task is finish_steps.extra_task
     assert isinstance(error, SourceTokenExpired)
 
@@ -719,6 +779,89 @@ def test_finish_migration_of_a_run_already_finishing_does_nothing(
     assert not finish_steps.order
 
 
+def test_finish_migration_of_a_stalled_run_fails_only_the_destinations_aborted(
+    settings, user, finish_steps
+):
+    """A destination its first finish closed, e.g. a Resana import running,
+    is not failed when the watchdog finishes the run again; one a former
+    finish aborted is."""
+    run = _run(1, 0, settings)
+    pending = Workspace.Status.PENDING
+    run.workspace.destination_statuses = {"drive": pending, "resana": pending}
+    run.workspace.save()
+    MigrationRun.objects.filter(pk=run.pk).update(
+        stalled=True,
+        exports_state={
+            "drive": {"closed": True, "aborted": True},
+            "resana": {"closed": True},
+        },
+    )
+
+    with pytest.raises(tasks.RunStalled):
+        tasks.finish_migration(*_ids(run, user))
+
+    _, error, failed = finish_steps.on_failure.call_args.args
+    assert isinstance(error, tasks.RunStalled)
+    assert failed == ["drive"]
+
+
+def test_finish_migration_still_purges_when_its_failed_destinations_are_unknown(
+    settings, user, finish_steps
+):
+    """An error reading which destinations failed purges the run all the
+    same, and reports the error of the run with every pending one failed."""
+    run = _run(1, 0, settings)
+    error = RuntimeError("Export failed for drive")
+    finish_steps.finish_export.side_effect = error
+
+    with (
+        patch.object(
+            tasks.FileExports, "failed", side_effect=RuntimeError("database down")
+        ),
+        pytest.raises(RuntimeError, match="drive"),
+    ):
+        tasks.finish_migration(*_ids(run, user))
+
+    finish_steps.clean_up.assert_called_once()
+    finish_steps.on_failure.assert_called_once_with(
+        finish_steps.extra_task, error, None
+    )
+
+
+def test_a_finish_queued_again_closes_what_is_left_then_succeeds(
+    settings, user, source_backend
+):
+    """The finish of a done run, queued again by the watchdog: a destination
+    a former finish closed is left as it is, the others are closed, and the
+    migration succeeded."""
+    run = _run(1, 0, settings)
+    MigrationRun.objects.filter(pk=run.pk).update(
+        exports_state={"drive": {"closing": True, "closed": True}}
+    )
+    drive, resana = MagicMock(), MagicMock()
+    drive.name, resana.name = "drive", "resana"
+
+    with (
+        patch(
+            "core.processing.tasks._pending_destinations",
+            return_value=[drive, resana],
+        ),
+        patch("core.processing.tasks._save_run_report"),
+        patch("core.processing.tasks.IntegrityTracker"),
+        patch("core.processing.tasks._extra_task_of") as extra_task_of,
+        patch("core.processing.tasks.on_export_success") as on_success,
+        patch("core.processing.tasks.on_export_failure") as on_failure,
+    ):
+        tasks.finish_migration(*_ids(run, user))
+
+    drive.close_export.assert_not_called()
+    drive.abort_export.assert_not_called()
+    resana.close_export.assert_called_once_with(user, ANY)
+    on_success.assert_called_once_with(extra_task_of.return_value)
+    on_failure.assert_not_called()
+    source_backend.finalize_export.assert_called_once()
+
+
 def test_finish_migration_of_a_purged_run_does_nothing(user, finish_steps):
     """A finish delivered once its run was purged, e.g. by the watchdog, ends
     without touching the destinations nor the source."""
@@ -802,3 +945,52 @@ def test_finish_migration_records_the_failure_of_the_migration(
         "exc_module": "builtins",
     }
     assert "RuntimeError: Export failed for drive" in task_result.traceback
+
+
+def test_finish_migration_tells_the_user_before_recording_the_outcome(
+    settings, user, task_result, finish_steps
+):
+    """A finish dying between the two is taken over and tells the user again,
+    rather than leaving the workspace exporting with nobody told."""
+    run = _run(1, 0, settings)
+    finish_steps.on_success.side_effect = lambda *args: finish_steps.order.append(
+        TaskResult.objects.get(pk=task_result.pk).status
+    )
+
+    tasks.finish_migration(*_ids(run, user))
+
+    assert finish_steps.order == ["clean_up", "finalize", states.PENDING, "purge"]
+
+
+@pytest.mark.usefixtures("task_result")
+def test_finish_migration_keeps_the_run_when_its_outcome_is_not_recorded(
+    settings, user, finish_steps
+):
+    """The run is left to the watchdog, which finishes it again."""
+    run = _run(1, 0, settings)
+
+    with (
+        patch(
+            "core.processing.tasks._record_outcome",
+            side_effect=OperationalError("server closed the connection"),
+        ),
+        pytest.raises(OperationalError),
+    ):
+        tasks.finish_migration(*_ids(run, user))
+
+    finish_steps.purge.assert_not_called()
+
+
+def test_finish_migration_records_and_purges_when_telling_the_user_fails(
+    settings, user, task_result, finish_steps
+):
+    """The error of the handler is raised once the run is recorded and purged."""
+    run = _run(1, 0, settings)
+    finish_steps.on_success.side_effect = RuntimeError("SMTP down")
+
+    with pytest.raises(RuntimeError, match="SMTP"):
+        tasks.finish_migration(*_ids(run, user))
+
+    task_result.refresh_from_db()
+    assert task_result.status == states.SUCCESS
+    finish_steps.purge.assert_called_once_with("task-1")
