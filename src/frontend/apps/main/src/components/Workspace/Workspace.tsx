@@ -32,7 +32,7 @@ export interface WorkspaceIntegrity {
   source_files_count: number;
   // null when no destination was checked file by file (e.g. archive).
   sent_files_count: number | null;
-  check_passed: boolean | null;
+  is_check_passed: boolean | null;
 }
 
 export interface Workspace {
@@ -52,7 +52,7 @@ export const hasIntegrityGap = (integrity: WorkspaceIntegrity | null) =>
   !!integrity &&
   ((integrity.sent_files_count ?? integrity.migrated_files_count) !==
     integrity.source_files_count ||
-    integrity.check_passed === false);
+    integrity.is_check_passed === false);
 
 const WorkspaceStatusBadge = ({
   children,
