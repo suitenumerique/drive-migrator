@@ -1,6 +1,5 @@
 """DriveBackend — HTTP client for La Suite Drive API."""
 
-import json
 import logging
 import time
 import uuid
@@ -10,18 +9,8 @@ from enum import StrEnum
 from django.conf import settings
 from django.utils import timezone
 
-import requests
 from celery.utils.log import get_task_logger
-from menshen_client import (
-    APIError,
-    MenshenClientError,
-    ResponseParsingError,
-    ServerUnavailableError,
-    TokenExchangeRequest,
-    TokenType,
-)
 from requests.auth import AuthBase
-from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError, RequestException
 from tenacity import (
     before_sleep_log,
@@ -32,14 +21,14 @@ from tenacity import (
 
 from core.backends.destination import DestinationTokenExpired
 from core.encryption import decrypt_token, encrypt_token
-from core.menshen import get_menshen_client
+from core.menshen import exchange_token
 from core.retry_utils import log_final_failure_and_reraise
 from core.retrying_session import RetryingSession, is_transient_error
 from core.utils import (
     describe_access_expiry,
     describe_oauth_error,
-    describe_oauth_failure,
     describe_request_error,
+    is_invalid_grant_payload,
 )
 
 logger = get_task_logger(__name__)
@@ -205,37 +194,7 @@ def _is_invalid_grant(response) -> bool:
         payload = response.json()
     except ValueError:
         payload = None
-    return _is_invalid_grant_payload(response.status_code, payload)
-
-
-def _is_invalid_grant_payload(status_code: int, payload) -> bool:
-    """Whether a token endpoint status and decoded JSON payload are OAuth2's
-    invalid_grant."""
-    return (
-        status_code == 400
-        and isinstance(payload, dict)
-        and payload.get("error") == "invalid_grant"
-    )
-
-
-def _menshen_error_payload(error: APIError):
-    """The decoded JSON body of a Menshen error response, None when not JSON."""
-    try:
-        return json.loads(error.body)
-    except ValueError:
-        return None
-
-
-def _menshen_error_response(error: APIError) -> requests.Response:
-    """A minimal requests.Response carrying Menshen's error body, so the
-    translated HTTPError behaves like the ones callers already handle."""
-    response = requests.Response()
-    response.status_code = error.status_code
-    response.url = error.url
-    response.headers["Content-Type"] = "application/json"
-    # pylint: disable-next=protected-access
-    response._content = error.body.encode()  # noqa: SLF001
-    return response
+    return is_invalid_grant_payload(response.status_code, payload)
 
 
 def clear_drive_tokens(user) -> None:
@@ -791,56 +750,12 @@ class DriveUserExchangedTokenBackend(DriveBackend):
         """Exchange the user's ProConnect token for a Drive token, and store it."""
         # Refreshes, and stores, the ProConnect token when it has expired.
         subject_token = DriveUserTokenBackend(self._user)._get_token()  # noqa: SLF001  # pylint: disable=protected-access
-        try:
-            response = get_menshen_client().exchange(
-                TokenExchangeRequest(
-                    subject_token=subject_token,
-                    subject_token_type=TokenType.ACCESS_TOKEN,
-                    audience=settings.DRIVE_TOKEN_EXCHANGE_AUDIENCE or None,
-                    scope=settings.DRIVE_TOKEN_EXCHANGE_SCOPE or None,
-                )
-            )
-        except APIError as error:
-            payload = _menshen_error_payload(error)
-            self._log_exchange_failure(
-                f"Menshen returned {describe_oauth_failure(error.status_code, payload)}"
-            )
-            # Menshen refuses an expired or revoked ProConnect token: logging in
-            # again gives a fresh one.
-            if _is_invalid_grant_payload(error.status_code, payload):
-                raise DriveTokenExpired(
-                    f"Menshen refused the ProConnect token of user {self._user.email}."
-                ) from error
-            # Raised as requests errors, which callers already handle: 5xx are
-            # transient, other refusals are configuration errors. The translated
-            # HTTPError carries Menshen's response, so callers reading it (status,
-            # body) do not break.
-            if error.status_code >= 500:
-                raise RequestsConnectionError(
-                    f"Menshen returned {error.status_code}"
-                ) from error
-            raise HTTPError(
-                f"Menshen returned {error.status_code}",
-                response=_menshen_error_response(error),
-            ) from error
-        except ServerUnavailableError as error:
-            self._log_exchange_failure(
-                f"Menshen request failed ({type(error).__name__})"
-            )
-            raise RequestsConnectionError(
-                f"Menshen request failed ({type(error).__name__})"
-            ) from error
-        except ResponseParsingError as error:
-            # Menshen answered something the client cannot parse (unexpected
-            # body, wrong URL): a server-side problem, raised as the request
-            # errors callers already handle.
-            self._log_exchange_failure("Menshen returned an invalid response")
-            raise RequestsConnectionError(
-                f"Menshen request failed ({type(error).__name__})"
-            ) from error
-        except MenshenClientError as error:
-            self._log_exchange_failure(f"Menshen client error ({type(error).__name__})")
-            raise
+        response = exchange_token(
+            self._user,
+            subject_token,
+            settings.DRIVE_TOKEN_EXCHANGE_AUDIENCE,
+            settings.DRIVE_TOKEN_EXCHANGE_SCOPE,
+        )
         self._access_token = response.access_token
         self._token_expires_at = timezone.now() + timedelta(seconds=response.expires_in)
         self._user.drive_exchanged_token = encrypt_token(self._access_token)
@@ -873,13 +788,6 @@ class DriveUserExchangedTokenBackend(DriveBackend):
             else f"exchanged token {describe_access_expiry(self._token_expires_at)}",
         )
         self.exchange()
-
-    def _log_exchange_failure(self, reason: str) -> None:
-        logger.warning(
-            "Drive (Menshen) token exchange failed for user %s: %s",
-            self._user.id,
-            reason,
-        )
 
 
 def make_user_drive_backend(user) -> DriveBackend:

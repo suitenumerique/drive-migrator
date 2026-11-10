@@ -69,6 +69,16 @@ def describe_oauth_failure(status_code: int, payload) -> str:
     return f"{status_code} {oauth_error}" + (f" ({description})" if description else "")
 
 
+def is_invalid_grant_payload(status_code: int, payload) -> bool:
+    """Whether a token endpoint status and decoded JSON payload are OAuth2's
+    invalid_grant."""
+    return (
+        status_code == 400
+        and isinstance(payload, dict)
+        and payload.get("error") == "invalid_grant"
+    )
+
+
 def _one_line(value, limit: int) -> str:
     """Keep a value sent by a remote server on one bounded line in the logs."""
     return " ".join(str(value).split())[:limit]

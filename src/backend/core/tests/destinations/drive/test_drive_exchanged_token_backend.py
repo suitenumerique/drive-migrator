@@ -24,7 +24,7 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError
 
 from core import factories
-from core.destinations.drive import drive_backend
+from core.backends.destination import DestinationTokenExpired
 from core.destinations.drive.drive_backend import (
     DriveAuthMode,
     DriveTokenExpired,
@@ -69,7 +69,7 @@ def fixture_menshen():
     client.exchange.return_value = MagicMock(
         access_token="exchanged-tok", expires_in=3 * 24 * 3600
     )
-    with patch.object(drive_backend, "get_menshen_client", return_value=client):
+    with patch("core.menshen.get_menshen_client", return_value=client):
         yield client
 
 
@@ -178,7 +178,7 @@ def test_exchange_refreshes_an_expired_proconnect_token_first(menshen):
 @pytest.mark.parametrize(
     "error, expected",
     [
-        (_menshen_error(400, {"error": "invalid_grant"}), DriveTokenExpired),
+        (_menshen_error(400, {"error": "invalid_grant"}), DestinationTokenExpired),
         (_menshen_error(401, {"error": "invalid_client"}), HTTPError),
         (_menshen_error(400, body="<html>Bad Request</html>"), HTTPError),
         (_menshen_error(503), RequestsConnectionError),
@@ -198,7 +198,7 @@ def test_exchange_failures_are_mapped_and_store_nothing(menshen, error, expected
     user = _make_user()
 
     with (
-        patch.object(drive_backend, "logger") as mock_logger,
+        patch("core.menshen.logger") as mock_logger,
         pytest.raises(expected) as exc_info,
     ):
         DriveUserExchangedTokenBackend(user).exchange()
@@ -206,8 +206,10 @@ def test_exchange_failures_are_mapped_and_store_nothing(menshen, error, expected
     user.refresh_from_db()
     assert user.drive_exchanged_token == ""
     assert user.drive_exchanged_token_expires_at is None
-    assert mock_logger.warning.call_args.args[0] == (
-        "Drive (Menshen) token exchange failed for user %s: %s"
+    assert mock_logger.warning.call_args.args[:3] == (
+        "Menshen token exchange for audience %r failed for user %s: %s",
+        "drive",
+        user.id,
     )
     if expected is HTTPError:
         assert exc_info.value.response.status_code == error.status_code
