@@ -22,6 +22,8 @@ and this project adheres to
 - Ask to log in to Resana again as soon as its offline token is refused,
   instead of showing the user as connected #304
 
+- Add unicity on user email
+
 ## [v0.12.1] - 2026-11-03
 
 - Drop name columns from the Drive members CSV
