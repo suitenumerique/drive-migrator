@@ -42,8 +42,8 @@ def with_latest_integrity(queryset):
         integrity_migrated=latest("integrity_report__summary__migrated_files_count"),
         integrity_source=latest("integrity_report__summary__source_files_count"),
         integrity_sent=latest("integrity_report__summary__sent_files_count"),
-        integrity_check_passed=Subquery(
-            latest_run.values("integrity_check_passed")[:1]
+        is_integrity_check_passed=Subquery(
+            latest_run.values("is_integrity_check_passed")[:1]
         ),
     )
 

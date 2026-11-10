@@ -236,7 +236,10 @@ class ExtraTaskInfo(models.Model):
 
     # False when a file was lost for a reason nothing else accounts for.
     # None when the integrity check did not run for this task.
+    # Written together with is_integrity_check_passed until every worker
+    # uses the new column, then this one is removed (#126).
     integrity_check_passed = models.BooleanField(null=True, blank=True)
+    is_integrity_check_passed = models.BooleanField(null=True, blank=True)
 
     def __str__(self):
         return f"TaskResult {self.task_result.task_id} for {self.workspace.source_id} "

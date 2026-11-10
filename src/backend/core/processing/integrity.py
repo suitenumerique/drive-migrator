@@ -170,10 +170,20 @@ class IntegrityTracker:
         )
 
         extra_task.integrity_report = report
-        extra_task.integrity_check_passed = not has_unexplained_discrepancy(
+        # Both columns stay equal so a worker still on the old code, or a
+        # rollback, keeps seeing the result (#126).
+        passed = not has_unexplained_discrepancy(
             report["summary"]["stages"], run_failed=run_failed
         )
-        extra_task.save(update_fields=["integrity_report", "integrity_check_passed"])
+        extra_task.integrity_check_passed = passed
+        extra_task.is_integrity_check_passed = passed
+        extra_task.save(
+            update_fields=[
+                "integrity_report",
+                "integrity_check_passed",
+                "is_integrity_check_passed",
+            ]
+        )
 
 
 def snapshot_source_files(folder: SourceFolder) -> list[dict]:

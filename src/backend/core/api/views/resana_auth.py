@@ -167,7 +167,7 @@ class ResanaAuthStatusView(APIView):
         expires_at = user.resana_token_expires_at
         return Response(
             {
-                "connected": manager.is_connected(),
+                "is_connected": manager.is_connected(),
                 "expires_at": expires_at.isoformat() if expires_at else None,
             }
         )

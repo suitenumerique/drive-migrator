@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { fetchAPI } from '@/api/fetchApi';
 
 interface ResanaAuthStatus {
-  connected: boolean;
+  is_connected: boolean;
   expires_at: string | null;
 }
 
@@ -22,8 +22,8 @@ export const useResanaAuthStatus = () => {
       }
 
       const data = (await response.json()) as ResanaAuthStatus;
-      setConnected(data.connected);
-      return data.connected;
+      setConnected(data.is_connected);
+      return data.is_connected;
     } catch (error) {
       console.error(error);
       setConnected(false);

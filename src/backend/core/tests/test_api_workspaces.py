@@ -149,7 +149,7 @@ def _run(workspace, task_id, report=None, check_passed=None):
         task_result=TaskResult.objects.create(task_id=task_id),
         workspace=workspace,
         integrity_report=report or {},
-        integrity_check_passed=check_passed,
+        is_integrity_check_passed=check_passed,
     )
 
 
@@ -191,7 +191,7 @@ def test_workspace_integrity_comes_from_the_latest_run():
         "migrated_files_count": 5,
         "source_files_count": 7,
         "sent_files_count": 6,
-        "check_passed": False,
+        "is_check_passed": False,
     }
 
 
