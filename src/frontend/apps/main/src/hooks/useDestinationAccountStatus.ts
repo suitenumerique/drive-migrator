@@ -10,7 +10,7 @@ const RELOGIN_DELAY_MS = 5 * 60 * 1000;
 export type AccountStatusError = 'unavailable' | 'session_expired';
 
 interface DestinationAccountStatus {
-  exists?: boolean;
+  has_account?: boolean;
   error_name?: string;
 }
 
@@ -51,7 +51,7 @@ export const useDestinationAccountStatus = (destination: string) => {
 
         if (response.ok) {
           sessionStorage.removeItem(RELOGIN_STORAGE_KEY);
-          setExists(Boolean(data.exists));
+          setExists(Boolean(data.has_account));
           setError(null);
           return;
         }

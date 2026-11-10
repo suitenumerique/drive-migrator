@@ -126,7 +126,7 @@ def test_account_status_tells_whether_the_account_exists(exists, monkeypatch):
 
     response = client.get("/api/v1.0/available-destinations/drive/account-status/")
     assert response.status_code == 200
-    assert response.json() == {"exists": exists}
+    assert response.json() == {"has_account": exists}
 
 
 @override_settings(DESTINATION_BACKENDS=[_ARCHIVE_PATH])
@@ -138,7 +138,7 @@ def test_account_status_of_a_destination_without_account():
 
     response = client.get("/api/v1.0/available-destinations/archive/account-status/")
     assert response.status_code == 200
-    assert response.json() == {"exists": True}
+    assert response.json() == {"has_account": True}
 
 
 @override_settings(DESTINATION_BACKENDS=[_ARCHIVE_PATH])

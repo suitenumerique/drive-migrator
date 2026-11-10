@@ -7,6 +7,8 @@ and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- ✨(backend) add is_integrity_check_passed beside the old field #126
+- ♻️(backend) rename boolean API fields to is_/has_ #126
 - Split the backend settings into configuration mixins
 
 ### Fixed

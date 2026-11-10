@@ -94,7 +94,7 @@ def test_status_returns_not_connected_when_no_token():
     user = UserFactory()
     response = _auth_client(user).get(STATUS_URL)
     assert response.status_code == 200
-    assert response.data["connected"] is False
+    assert response.data["is_connected"] is False
     assert response.data["expires_at"] is None
 
 
@@ -109,7 +109,7 @@ def test_status_returns_connected_when_token_present():
     )
     response = _auth_client(user).get(STATUS_URL)
     assert response.status_code == 200
-    assert response.data["connected"] is True
+    assert response.data["is_connected"] is True
     assert response.data["expires_at"] is not None
 
 
@@ -121,7 +121,7 @@ def test_status_returns_disconnected_without_offline_token():
         resana_token_expires_at=timezone.now() + timedelta(hours=2),
     )
     response = _auth_client(user).get(STATUS_URL)
-    assert response.data["connected"] is False
+    assert response.data["is_connected"] is False
 
 
 # ---------------------------------------------------------------------------

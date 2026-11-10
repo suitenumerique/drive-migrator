@@ -92,7 +92,8 @@ def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
             "is_truncated": workspace.is_truncated,
             "download_errors_count": len(workspace.download_errors),
             "upload_errors_count": len(workspace.upload_errors),
-            "integrity_check_passed": extra_task.integrity_check_passed,
+            "integrity_check_passed": extra_task.is_integrity_check_passed,
+            "is_integrity_check_passed": extra_task.is_integrity_check_passed,
             "migrated_files_count": integrity_summary.get("migrated_files_count"),
             "source_files_count": integrity_summary.get("source_files_count"),
             "analysis_unfinished_count": (

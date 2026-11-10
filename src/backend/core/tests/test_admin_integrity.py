@@ -63,7 +63,7 @@ def _extra_task(workspace=None, report=None, check_passed=None, task_id="task-1"
         workspace=workspace or WorkspaceFactory(),
         user=UserFactory(),
         integrity_report=report or {},
-        integrity_check_passed=check_passed,
+        is_integrity_check_passed=check_passed,
     )
 
 
@@ -130,12 +130,12 @@ def test_extra_task_changelist_filters_on_failed_integrity_check(admin_client):
     clean = _extra_task(check_passed=True, task_id="task-ok")
 
     response = admin_client.get(
-        "/admin/core/extrataskinfo/?integrity_check_passed__exact=0"
+        "/admin/core/extrataskinfo/?is_integrity_check_passed__exact=0"
     )
 
     assert response.status_code == 200
     content = response.content.decode()
-    assert "By integrity check passed" in content
+    assert "By is integrity check passed" in content
     assert f"/admin/core/extrataskinfo/{suspicious.id}/change/" in content
     assert f"/admin/core/extrataskinfo/{clean.id}/change/" not in content
 

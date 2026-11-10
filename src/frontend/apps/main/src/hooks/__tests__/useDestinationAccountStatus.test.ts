@@ -28,7 +28,7 @@ describe('useDestinationAccountStatus', () => {
       const { result } = renderHook(() => useDestinationAccountStatus('drive'));
 
       mockFetchAPI.mockResolvedValueOnce(
-        mockResponse(200, { exists: lastExists }),
+        mockResponse(200, { has_account: lastExists }),
       );
       await act(() => result.current.check());
       expect(result.current.exists).toBe(lastExists);
