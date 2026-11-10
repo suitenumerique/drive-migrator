@@ -206,8 +206,10 @@ def test_exchange_failures_are_mapped_and_store_nothing(menshen, error, expected
     user.refresh_from_db()
     assert user.drive_exchanged_token == ""
     assert user.drive_exchanged_token_expires_at is None
-    assert mock_logger.warning.call_args.args[0] == (
-        "Drive (Menshen) token exchange failed for user %s: %s"
+    assert mock_logger.warning.call_args.args[:3] == (
+        "Menshen token exchange for audience %r failed for user %s: %s",
+        "drive",
+        user.id,
     )
 
 

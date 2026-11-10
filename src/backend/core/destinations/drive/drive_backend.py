@@ -752,6 +752,59 @@ def _get_menshen_client() -> TokenExchangeClient:
     )
 
 
+def exchange_proconnect_token(user, audience: str, scope: str):
+    """Exchange the user's ProConnect token with Menshen (RFC 8693).
+
+    Failures are raised as the request errors callers already handle.
+    """
+    # Refreshes, and stores, the ProConnect token when it has expired.
+    subject_token = DriveUserTokenBackend(user)._get_token()  # noqa: SLF001  # pylint: disable=protected-access
+    try:
+        return _get_menshen_client().exchange(
+            TokenExchangeRequest(
+                subject_token=subject_token,
+                subject_token_type=TokenType.ACCESS_TOKEN,
+                audience=audience or None,
+                scope=scope or None,
+            )
+        )
+    except httpx2.HTTPStatusError as error:
+        _log_exchange_failure(
+            user, audience, f"Menshen returned {describe_oauth_error(error)}"
+        )
+        # Menshen refuses an expired or revoked ProConnect token: logging in
+        # again gives a fresh one.
+        if _is_invalid_grant(error.response):
+            raise DriveTokenExpired(
+                f"Menshen refused the ProConnect token of user {user.email}."
+            ) from error
+        # 5xx are transient, other refusals are configuration errors.
+        if error.response.status_code >= 500:
+            raise RequestsConnectionError(
+                f"Menshen returned {error.response.status_code}"
+            ) from error
+        raise HTTPError(f"Menshen returned {error.response.status_code}") from error
+    except httpx2.TransportError as error:
+        _log_exchange_failure(
+            user, audience, f"Menshen request failed ({type(error).__name__})"
+        )
+        raise RequestsConnectionError(
+            f"Menshen request failed ({type(error).__name__})"
+        ) from error
+    except ResponseParsingError:
+        _log_exchange_failure(user, audience, "Menshen returned an invalid response")
+        raise
+
+
+def _log_exchange_failure(user, audience: str, reason: str) -> None:
+    logger.warning(
+        "Menshen token exchange for audience %r failed for user %s: %s",
+        audience,
+        user.id,
+        reason,
+    )
+
+
 class DriveUserExchangedTokenBackend(DriveBackend):
     """Uses a Drive token exchanged with Menshen (RFC 8693) for the user's
     ProConnect token. Targets /external_api/v1.0/.
@@ -770,44 +823,11 @@ class DriveUserExchangedTokenBackend(DriveBackend):
 
     def exchange(self) -> None:
         """Exchange the user's ProConnect token for a Drive token, and store it."""
-        # Refreshes, and stores, the ProConnect token when it has expired.
-        subject_token = DriveUserTokenBackend(self._user)._get_token()  # noqa: SLF001  # pylint: disable=protected-access
-        try:
-            response = _get_menshen_client().exchange(
-                TokenExchangeRequest(
-                    subject_token=subject_token,
-                    subject_token_type=TokenType.ACCESS_TOKEN,
-                    audience=settings.DRIVE_TOKEN_EXCHANGE_AUDIENCE or None,
-                    scope=settings.DRIVE_TOKEN_EXCHANGE_SCOPE or None,
-                )
-            )
-        except httpx2.HTTPStatusError as error:
-            self._log_exchange_failure(
-                f"Menshen returned {describe_oauth_error(error)}"
-            )
-            # Menshen refuses an expired or revoked ProConnect token: logging in
-            # again gives a fresh one.
-            if _is_invalid_grant(error.response):
-                raise DriveTokenExpired(
-                    f"Menshen refused the ProConnect token of user {self._user.email}."
-                ) from error
-            # Raised as requests errors, which callers already handle: 5xx are
-            # transient, other refusals are configuration errors.
-            if error.response.status_code >= 500:
-                raise RequestsConnectionError(
-                    f"Menshen returned {error.response.status_code}"
-                ) from error
-            raise HTTPError(f"Menshen returned {error.response.status_code}") from error
-        except httpx2.TransportError as error:
-            self._log_exchange_failure(
-                f"Menshen request failed ({type(error).__name__})"
-            )
-            raise RequestsConnectionError(
-                f"Menshen request failed ({type(error).__name__})"
-            ) from error
-        except ResponseParsingError:
-            self._log_exchange_failure("Menshen returned an invalid response")
-            raise
+        response = exchange_proconnect_token(
+            self._user,
+            settings.DRIVE_TOKEN_EXCHANGE_AUDIENCE,
+            settings.DRIVE_TOKEN_EXCHANGE_SCOPE,
+        )
         self._access_token = response.access_token
         self._token_expires_at = timezone.now() + timedelta(seconds=response.expires_in)
         self._user.drive_exchanged_token = encrypt_token(self._access_token)
@@ -840,13 +860,6 @@ class DriveUserExchangedTokenBackend(DriveBackend):
             else f"exchanged token {describe_access_expiry(self._token_expires_at)}",
         )
         self.exchange()
-
-    def _log_exchange_failure(self, reason: str) -> None:
-        logger.warning(
-            "Drive (Menshen) token exchange failed for user %s: %s",
-            self._user.id,
-            reason,
-        )
 
 
 def make_user_drive_backend(user) -> DriveBackend:
