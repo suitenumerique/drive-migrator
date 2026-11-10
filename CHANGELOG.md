@@ -12,6 +12,11 @@ and this project adheres to
 
 - Drop Resana folder permissions and email the list before exporting #321 
 
+### Changed
+
+- backend: add has_integrity_check_passed beside the old field #126
+- backend: rename boolean API fields to is_/has_ #126
+
 ## [v0.13.0] - 2026-11-19
 
 ### Added
