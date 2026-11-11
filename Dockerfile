@@ -4,7 +4,7 @@
 FROM ghcr.io/astral-sh/uv:0.13.4 AS uv
 
 # ---- base image to inherit from ----
-FROM python:3.14.6-alpine AS base
+FROM python:3.15.2-alpine AS base
 
 # Upgrade pip to its latest release to speed up dependencies installation
 RUN python -m pip install --upgrade pip && \
