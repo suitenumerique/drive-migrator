@@ -9,6 +9,12 @@ and this project adheres to
 ## [Unreleased]
 - Split the backend settings into configuration mixins
 
+### Added
+
+- Show the progress of the running migrations in the admin #242
+- Watch the migration runs every 10 minutes: a stalled run gets its
+  files queued again, then fails and releases its source workspace #242
+
 ### Changed
 
 - Track each file of a migration in its own database row, the first step
@@ -18,6 +24,9 @@ and this project adheres to
   destination no longer stops the others #242
 - Build the archive and rejected files zips from S3 at download time,
   instead of storing them #242
+- Migrate each file in its own task, queued batch by batch, so a lost
+  worker no longer loses the whole migration, and other migrations get
+  workers between two batches #242
 
 ### Fixed
 

@@ -12,6 +12,8 @@ from core.processing.migration_run import (
     create_migration_run,
     delete_migration_run,
     download_migration_file,
+    failed_downloads,
+    take_next_batch,
 )
 from core.processing.plan import build_plan
 
@@ -63,6 +65,18 @@ def test_create_migration_run_stores_the_plan():
     assert [(row.position, row.source, row.path) for row in run.files.all()] == [
         (0, doc.to_dict(), os.path.join("sub", "doc.txt")),
         (1, notes.to_dict(), "notes.txt"),
+    ]
+
+
+def test_create_migration_run_stores_the_size_the_source_expects():
+    """Each row keeps the size given by the source, None when it gives none."""
+    sized = SourceFile(id="f1", name="a", extension=".txt", download_url="x", size=12)
+
+    run = _run_with_files(sized, _source("f2", "b"))
+
+    assert list(run.files.values_list("path", "expected_size")) == [
+        ("a.txt", 12),
+        ("b.txt", None),
     ]
 
 
@@ -197,3 +211,140 @@ def test_delete_migration_run_purges_the_run_and_its_files():
 def test_delete_migration_run_is_safe_when_there_is_none():
     """A task that failed before creating its run has nothing to purge."""
     delete_migration_run("unknown-task")  # must not raise
+
+
+def test_failed_downloads_lists_the_files_that_did_not_reach_the_disk():
+    """Refused, failed and unwritten files are listed in the plan order, as
+    Workspace.download_errors keeps them."""
+    escaping = SourceFile(id="f4", name="..", extension="", download_url="x")
+    run = _run_with_files(
+        _source("f1", "a"), _source("f2", "b"), _source("f3", "c"), escaping
+    )
+    run.files.filter(path="a.txt").update(status=MigrationFile.Status.DOWNLOADED)
+    run.files.filter(path="b.txt").update(
+        status=MigrationFile.Status.DOWNLOAD_FAILED, error="403"
+    )
+    run.files.filter(path="c.txt").update(
+        status=MigrationFile.Status.NOT_WRITTEN, error="no file"
+    )
+
+    failed = failed_downloads(run)
+
+    assert [error["id"] for error in failed] == ["f2", "f3", "f4"]
+    assert failed[0] == {"id": "f2", "name": "b.txt", "path": "b.txt", "error": "403"}
+
+
+def test_failed_downloads_is_empty_when_every_file_was_downloaded():
+    """A run without loss has no download error."""
+    run = _run_with_files(_source("f1", "a"))
+    run.files.update(status=MigrationFile.Status.DOWNLOADED)
+
+    assert not failed_downloads(run)
+
+
+def _sized(file_id, size):
+    return SourceFile(
+        id=file_id, name=file_id, extension=".txt", download_url="x", size=size
+    )
+
+
+def _batch_done(run):
+    """Every file of the batch in flight is done: the next one can be taken."""
+    MigrationRun.objects.filter(pk=run.pk).update(in_flight=0)
+
+
+def _batch_limits(settings, max_files=0, max_bytes=0):
+    settings.MIGRATION_BATCH_MAX_FILES = max_files
+    settings.MIGRATION_BATCH_MAX_BYTES = max_bytes
+
+
+def test_take_next_batch_takes_the_whole_run_without_limits(settings):
+    """With both limits at 0, the first batch is every file of the run."""
+    _batch_limits(settings)
+    run = _run_with_files(*(_sized(f"f{i}", 10) for i in range(3)))
+
+    assert take_next_batch(run) == [0, 1, 2]
+
+    run.refresh_from_db()
+    assert run.cursor == 3
+    assert run.in_flight == 3
+
+
+def test_take_next_batch_stops_at_the_files_limit(settings):
+    """A batch holds at most MIGRATION_BATCH_MAX_FILES files, and the next one
+    goes on from where it stopped."""
+    _batch_limits(settings, max_files=2)
+    run = _run_with_files(*(_sized(f"f{i}", 10) for i in range(3)))
+
+    assert take_next_batch(run) == [0, 1]
+    _batch_done(run)
+    assert take_next_batch(run) == [2]
+
+    run.refresh_from_db()
+    assert run.cursor == 3
+    assert run.in_flight == 1
+
+
+def test_take_next_batch_stops_before_the_bytes_limit(settings):
+    """The files announced sizes add up to at most MIGRATION_BATCH_MAX_BYTES."""
+    _batch_limits(settings, max_bytes=25)
+    run = _run_with_files(_sized("f0", 10), _sized("f1", 10), _sized("f2", 10))
+
+    assert take_next_batch(run) == [0, 1]
+    _batch_done(run)
+    assert take_next_batch(run) == [2]
+
+
+def test_take_next_batch_always_takes_one_file(settings):
+    """A file bigger than the bytes limit still makes a batch on its own."""
+    _batch_limits(settings, max_bytes=5)
+    run = _run_with_files(_sized("f0", 10), _sized("f1", 10))
+
+    assert take_next_batch(run) == [0]
+    _batch_done(run)
+    assert take_next_batch(run) == [1]
+
+
+def test_take_next_batch_takes_nothing_while_a_batch_is_in_flight(settings):
+    """One batch at a time: none is taken until the one in flight is done."""
+    _batch_limits(settings, max_files=1)
+    run = _run_with_files(_sized("f0", 10), _sized("f1", 10))
+
+    assert take_next_batch(run) == [0]
+    assert take_next_batch(run) is None
+
+
+def test_take_next_batch_counts_an_unknown_size_as_zero(settings):
+    """A file the source gave no size for does not count toward the bytes limit."""
+    _batch_limits(settings, max_bytes=10)
+    run = _run_with_files(_sized("f0", 10), _sized("f1", None), _sized("f2", 1))
+
+    assert take_next_batch(run) == [0, 1]
+
+
+def test_take_next_batch_skips_the_refused_files(settings):
+    """Files refused at plan time are already failed: they are never dispatched."""
+    _batch_limits(settings)
+    plan = build_plan(
+        SourceFolder(
+            name="root",
+            files=[_sized("f0", 1)],
+            children=[SourceFolder(name="../evil", files=[_sized("f9", 1)])],
+        )
+    )
+    run = create_migration_run(WorkspaceFactory(), "task-1", plan)
+
+    assert take_next_batch(run) == [0]
+
+
+def test_take_next_batch_is_empty_once_every_file_is_taken(settings):
+    """Nothing is left after the last batch, and the run counters stay put."""
+    _batch_limits(settings)
+    run = _run_with_files(_sized("f0", 1))
+    take_next_batch(run)
+
+    assert not take_next_batch(run)
+
+    run.refresh_from_db()
+    assert run.cursor == 1
+    assert run.in_flight == 1

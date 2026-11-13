@@ -3,7 +3,9 @@
 import itertools
 import os
 
+from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 
 import magic
 from celery.utils.log import get_task_logger
@@ -19,6 +21,17 @@ from core.processing.plan import MigrationPlan
 logger = get_task_logger(__name__)
 
 BULK_BATCH_SIZE = 1000
+
+# What the counting of a run reads, under its lock: not its big JSON states.
+_COUNTERS = (
+    "cursor",
+    "in_flight",
+    "remaining_files",
+    "redispatches",
+    "source_token_expired",
+    "stalled",
+    "updated_at",
+)
 
 
 @transaction.atomic
@@ -41,6 +54,7 @@ def create_migration_run(
             position=position,
             source=planned.source.to_dict(),
             path=planned.path,
+            expected_size=planned.source.size,
         )
         for position, planned in enumerate(plan.files)
     )
@@ -59,6 +73,115 @@ def create_migration_run(
         itertools.chain(planned_rows, refused_rows), batch_size=BULK_BATCH_SIZE
     )
     return run
+
+
+def take_next_batch(run: MigrationRun) -> list[int] | None:
+    """Take the next pending files of the run from its cursor, within the batch
+    limits, and count them in flight. Return their positions, or None while a
+    batch is still in flight.
+
+    A batch holds at least one file, even one bigger than the bytes limit; a
+    size the source did not announce counts as 0.
+    """
+    max_files = settings.MIGRATION_BATCH_MAX_FILES
+    max_bytes = settings.MIGRATION_BATCH_MAX_BYTES
+    with transaction.atomic():
+        locked = (
+            MigrationRun.objects.select_for_update().only(*_COUNTERS).get(pk=run.pk)
+        )
+        # One batch at a time, even when two tasks ask for the next one.
+        if locked.in_flight:
+            return None
+        rows = (
+            locked.files.filter(
+                position__gte=locked.cursor, status=MigrationFile.Status.PENDING
+            )
+            .order_by("position")
+            .values_list("position", "expected_size")
+        )
+        if max_files:
+            rows = rows[:max_files]
+        positions = []
+        total_bytes = 0
+        for position, expected_size in rows.iterator():
+            total_bytes += expected_size or 0
+            if positions and max_bytes and total_bytes > max_bytes:
+                break
+            positions.append(position)
+        if positions:
+            _update(
+                locked,
+                cursor=positions[-1] + 1,
+                in_flight=locked.in_flight + len(positions),
+            )
+    return positions
+
+
+def _update(locked: MigrationRun, **fields) -> None:
+    """Save counters of a run read with only them: save() would validate the
+    whole row, reading back each deferred field."""
+    fields["updated_at"] = timezone.now()
+    for name, value in fields.items():
+        setattr(locked, name, value)
+    MigrationRun.objects.filter(pk=locked.pk).update(**fields)
+
+
+def finish_file(run: MigrationRun, position: int) -> MigrationRun | None:
+    """Count a dispatched file of the run done; return the run as it stands
+    then, so that a single file task sees its batch, or the run, done. None
+    when the file was already counted, its task delivered twice, or when the
+    run was purged meanwhile."""
+    with transaction.atomic():
+        locked = (
+            MigrationRun.objects.select_for_update()
+            .only(*_COUNTERS)
+            .filter(pk=run.pk)
+            .first()
+        )
+        if locked is None or not locked.files.filter(
+            position=position, finished_at=None
+        ).update(finished_at=timezone.now()):
+            return None
+        # The run made progress: the watchdog counts relaunches without any.
+        _update(
+            locked,
+            in_flight=locked.in_flight - 1,
+            remaining_files=locked.remaining_files - 1,
+            redispatches=0,
+        )
+    return locked
+
+
+def claim_finish(run: MigrationRun) -> bool:
+    """Claim the finish of the run, showing it alive; False when a finish of
+    it already started."""
+    return bool(
+        MigrationRun.objects.filter(pk=run.pk, finish_started=False).update(
+            finish_started=True, updated_at=timezone.now()
+        )
+    )
+
+
+def mark_run_alive(run: MigrationRun) -> None:
+    """Show the run is making progress, for the watchdog."""
+    MigrationRun.objects.filter(pk=run.pk).update(updated_at=timezone.now())
+
+
+def stop_run(run: MigrationRun) -> None:
+    """Stop the run on an expired source token: its files left are skipped."""
+    run.source_token_expired = True
+    MigrationRun.objects.filter(pk=run.pk).update(source_token_expired=True)
+
+
+def record_file_error(migration_file: MigrationFile, error: Exception) -> None:
+    """Keep an unexpected error on the row of its file; a file not downloaded
+    yet counts as failed to download."""
+    fields = {"error": str(error)}
+    if migration_file.status == MigrationFile.Status.PENDING:
+        fields["status"] = MigrationFile.Status.DOWNLOAD_FAILED
+    for name, value in fields.items():
+        setattr(migration_file, name, value)
+    MigrationFile.objects.filter(pk=migration_file.pk).update(**fields)
 
 
 def download_migration_file(
@@ -110,6 +233,32 @@ def download_migration_file(
     )
     if token_expired is not None:
         raise token_expired
+
+
+def failed_downloads(run: MigrationRun) -> list[dict]:
+    """The files of the run that did not reach the local disk, refused ones
+    included, as Workspace.download_errors lists them."""
+    return [
+        {
+            "id": source["id"],
+            "name": source["name"] + source["extension"],
+            "path": path,
+            "error": error,
+        }
+        for source, path, error in run.files.filter(
+            status__in=[
+                MigrationFile.Status.DOWNLOAD_FAILED,
+                MigrationFile.Status.NOT_WRITTEN,
+            ]
+        )
+        .order_by("position")
+        .values_list("source", "path", "error")
+    ]
+
+
+def run_exists(task_id: str) -> bool:
+    """Whether the task already planned its run, e.g. delivered twice."""
+    return MigrationRun.objects.filter(task_id=task_id).exists()
 
 
 def delete_migration_run(task_id: str) -> None:

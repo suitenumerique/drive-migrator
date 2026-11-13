@@ -11,11 +11,13 @@ from django_celery_results.models import TaskResult
 from core.backends.source import SourceFolder
 from core.models import ExtraTaskInfo, Workspace
 from core.processing.tasks import (
+    DestinationsFailed,
     cleanup_workspace_dir,
     create_task_result_on_publish,
     debug_folder,
+    export,
     list_work_dir,
-    list_workspace_dir,
+    on_export_failure,
 )
 from core.processing.tasks import (
     task_failure as task_failure_handler,
@@ -37,23 +39,6 @@ def test_list_work_dir_logs_files(tmp_path, settings):
     (tmp_path / "subdir").mkdir()
 
     list_work_dir()  # must not raise — logging is the side effect
-
-
-# ---------------------------------------------------------------------------
-# list_workspace_dir
-# ---------------------------------------------------------------------------
-
-
-def test_list_workspace_dir_logs_files(tmp_path, settings):
-    """list_workspace_dir() walks the workspace directory and logs each file."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    ws = MagicMock(spec=Workspace)
-    ws.id = "ws-log"
-    workspace_dir = tmp_path / "workspace_ws-log"
-    workspace_dir.mkdir()
-    (workspace_dir / "doc.pdf").write_text("data")
-
-    list_workspace_dir(ws)  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +96,21 @@ def test_create_task_result_on_publish_stores_result():
     mock_task_result_cls.objects.store_result.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    "task_name",
+    ["core.processing.tasks.export_file", "core.processing.tasks.finish_migration"],
+)
+def test_create_task_result_on_publish_skips_the_tasks_of_a_run(task_name):
+    """Only the migration gets a TaskResult, the admin listing one row per
+    migration: not each of its files, nor its finish."""
+    with patch("core.processing.tasks.TaskResult") as mock_task_result_cls:
+        create_task_result_on_publish(
+            headers={"task": task_name, "id": "t", "argsrepr": "", "kwargsrepr": ""}
+        )
+
+    mock_task_result_cls.objects.store_result.assert_not_called()
+
+
 def test_create_task_result_on_publish_skips_when_no_task_key():
     """create_task_result_on_publish() returns early when 'task' is not in headers."""
     with patch("core.processing.tasks.TaskResult") as mock_task_result_cls:
@@ -127,6 +127,7 @@ def test_create_task_result_on_publish_skips_when_no_task_key():
 def test_task_success_handler_saves_workspace_and_cleans_up():
     """task_success() saves the workspace and calls cleanup_workspace_dir."""
     mock_sender = MagicMock()
+    mock_sender.name = export.name
     mock_sender.request.id = "task-id-1"
 
     mock_task_result = MagicMock(spec=TaskResult)
@@ -156,6 +157,7 @@ def test_task_success_handler_saves_workspace_and_cleans_up():
 def test_task_failure_handler_sets_pending_statuses_to_failure():
     """task_failure() sets PENDING destination statuses to FAILURE."""
     mock_sender = MagicMock()
+    mock_sender.name = export.name
     mock_sender.request.id = "task-id-2"
 
     mock_task_result = MagicMock(spec=TaskResult)
@@ -184,9 +186,53 @@ def test_task_failure_handler_sets_pending_statuses_to_failure():
     mock_workspace.save.assert_called_once()
 
 
+def test_a_failed_destination_leaves_the_resana_import_pending():
+    """Resana closed, its import job runs: when another destination failed,
+    only that one is failed, so that the job is still followed."""
+    extra_task = MagicMock(spec=ExtraTaskInfo)
+    extra_task.workspace = MagicMock(spec=Workspace)
+    extra_task.workspace.destination_statuses = {
+        "archive": Workspace.Status.PENDING,
+        "resana": Workspace.Status.PENDING,
+    }
+
+    with (
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.capture_migration_finished"),
+        patch("core.processing.tasks.MailsManager"),
+    ):
+        on_export_failure(extra_task, DestinationsFailed(["archive"], "ws-1"))
+
+    extra_task.workspace.set_destination_status.assert_called_once_with(
+        "archive", Workspace.Status.FAILURE
+    )
+
+
+def test_only_the_destinations_named_failed_are_failed():
+    """The finish names the destinations that failed: the others closed."""
+    extra_task = MagicMock(spec=ExtraTaskInfo)
+    extra_task.workspace = MagicMock(spec=Workspace)
+    extra_task.workspace.destination_statuses = {
+        "drive": Workspace.Status.PENDING,
+        "resana": Workspace.Status.PENDING,
+    }
+
+    with (
+        patch("core.processing.tasks.cleanup_workspace_dir"),
+        patch("core.processing.tasks.capture_migration_finished"),
+        patch("core.processing.tasks.MailsManager"),
+    ):
+        on_export_failure(extra_task, RuntimeError("stalled"), ["drive"])
+
+    extra_task.workspace.set_destination_status.assert_called_once_with(
+        "drive", Workspace.Status.FAILURE
+    )
+
+
 def test_task_failure_handler_sends_fail_mail():
     """task_failure() sends a failure notification email."""
     mock_sender = MagicMock()
+    mock_sender.name = export.name
     mock_sender.request.id = "task-id-3"
 
     mock_task_result = MagicMock(spec=TaskResult)
@@ -211,10 +257,50 @@ def test_task_failure_handler_sends_fail_mail():
     )
 
 
+def test_a_failure_is_told_to_the_user_before_the_local_folder_is_deleted():
+    """Deleting the local folder may fail, e.g. on the watchdog's pod: the
+    user is told of the failure all the same."""
+    extra_task = MagicMock(spec=ExtraTaskInfo)
+    extra_task.workspace = MagicMock(spec=Workspace)
+    extra_task.workspace.destination_statuses = {}
+
+    with (
+        patch(
+            "core.processing.tasks.cleanup_workspace_dir",
+            side_effect=OSError("read-only file system"),
+        ),
+        patch("core.processing.tasks.MailsManager") as mock_mails_cls,
+        pytest.raises(OSError),
+    ):
+        on_export_failure(extra_task, RuntimeError("Export failed"))
+
+    mock_mails_cls.return_value.send_fail_mail.assert_called_once()
+
+
+def test_the_local_folder_of_a_failure_is_deleted_even_if_the_mail_fails():
+    """A mail server down still leaves no local folder behind."""
+    extra_task = MagicMock(spec=ExtraTaskInfo)
+    extra_task.workspace = MagicMock(spec=Workspace)
+    extra_task.workspace.destination_statuses = {}
+
+    with (
+        patch("core.processing.tasks.cleanup_workspace_dir") as cleanup,
+        patch("core.processing.tasks.MailsManager") as mock_mails_cls,
+        pytest.raises(ConnectionRefusedError),
+    ):
+        mock_mails_cls.return_value.send_fail_mail.side_effect = ConnectionRefusedError(
+            "SMTP down"
+        )
+        on_export_failure(extra_task, RuntimeError("Export failed"))
+
+    cleanup.assert_called_once_with(extra_task.workspace)
+
+
 def test_task_failure_handler_asks_to_log_in_again_on_expired_source_token():
     """A run that failed on an expired source token tells the user to log in
     to the source again before relaunching."""
     mock_sender = MagicMock()
+    mock_sender.name = export.name
     mock_sender.request.id = "task-id-4"
     mock_extra_task = MagicMock(spec=ExtraTaskInfo)
     mock_workspace = MagicMock(spec=Workspace)
@@ -254,6 +340,7 @@ def test_task_failure_handler_asks_to_log_in_again_on_expired_source_token():
 def test_task_handlers_capture_migration_finished(handler, status):
     """Both end-of-task handlers emit migration_finished with the final status."""
     mock_sender = MagicMock()
+    mock_sender.name = export.name
     mock_sender.request.id = "task-id-4"
 
     mock_task_result = MagicMock(spec=TaskResult)
@@ -310,6 +397,7 @@ def test_task_handlers_capture_migration_finished(handler, status):
 def test_migration_finished_file_counts_are_none_without_integrity_report():
     """Without integrity check, the file counts are sent as None."""
     mock_sender = MagicMock()
+    mock_sender.name = export.name
     mock_sender.request.id = "task-id-5"
     mock_task_result = MagicMock(spec=TaskResult)
     mock_task_result.date_created = timezone.now()
@@ -341,6 +429,7 @@ def test_migration_finished_file_counts_are_none_without_integrity_report():
 def test_migration_finished_counts_zero_unfinished_analyses_in_a_report():
     """A report without file under analysis sends 0, not None."""
     mock_sender = MagicMock()
+    mock_sender.name = export.name
     mock_sender.request.id = "task-id-6"
     mock_task_result = MagicMock(spec=TaskResult)
     mock_task_result.date_created = timezone.now()
@@ -370,3 +459,16 @@ def test_migration_finished_counts_zero_unfinished_analyses_in_a_report():
         task_success_handler(sender=mock_sender)
 
     assert capture.call_args.args[2]["analysis_unfinished_count"] == 0
+
+
+@pytest.mark.parametrize("handler", [task_success_handler, task_failure_handler])
+def test_task_handlers_ignore_the_tasks_of_a_run(handler):
+    """finish_migration reports the outcome of a run: the end of its file
+    tasks, or of itself, reports nothing."""
+    mock_sender = MagicMock()
+    mock_sender.name = "core.processing.tasks.export_file"
+
+    with patch("core.processing.tasks._extra_task_of") as extra_task_of:
+        handler(sender=mock_sender)
+
+    extra_task_of.assert_not_called()

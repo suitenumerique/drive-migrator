@@ -41,7 +41,7 @@ class RejectedFile:
 
 
 class FileExportStatus(StrEnum):
-    """What a file-by-file destination did with one file, see put_file()."""
+    """What a destination did with one file, see put_file()."""
 
     SENT = "sent"
     # Refused by the destination because of the file itself (e.g. its type).
@@ -96,7 +96,7 @@ class AbstractDestinationBackend(ABC):
         """Where the user creates their account, under USER_CREATED."""
         return None
 
-    # --- File-by-file export ---
+    # --- Export of a run, file by file ---
 
     @abstractmethod
     def open_export(self, user, run) -> None:
@@ -118,8 +118,9 @@ class AbstractDestinationBackend(ABC):
     def close_export(self, user, run) -> None:
         """
         Finish the export once every file was put: generated files, sharing,
-        mail. Must update workspace.destination_statuses[self.name] and save
-        the workspace.
+        mail. Must update workspace.destination_statuses[self.name] and call
+        workspace.save(): PENDING for an asynchronous destination (e.g. the
+        Resana job), SUCCESS otherwise.
         """
 
     def abort_export(self, run) -> None:  # noqa: B027

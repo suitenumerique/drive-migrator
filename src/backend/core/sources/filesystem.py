@@ -82,6 +82,7 @@ class FileSystemSourceBackend(AbstractSourceBackend):
                         name=name,
                         extension=ext,
                         download_url=entry.path,
+                        size=entry.stat().st_size,
                     )
                 )
         return folder

@@ -261,10 +261,29 @@ class MigrationRun(BaseModel):
     remaining_files = models.PositiveIntegerField(default=0)
     # Guards against finishing the run twice when its last files end together.
     finish_published = models.BooleanField(default=False)
+    # Position of the next file to dispatch, see take_next_batch.
+    cursor = models.PositiveIntegerField(default=0)
+    # Files dispatched and not finished yet: the batch is done at 0.
+    in_flight = models.PositiveIntegerField(default=0)
+    # The source token expired: the files left are skipped and the run fails.
+    source_token_expired = models.BooleanField(default=False)
+    # Times the watchdog queued the unfinished files of the run again.
+    redispatches = models.PositiveIntegerField(default=0)
+    # The run stopped making progress: the files left are skipped and it fails.
+    stalled = models.BooleanField(default=False)
+    # A finish of the run started: another one, or the watchdog's, keeps out.
+    finish_started = models.BooleanField(default=False)
     # Destination state shared by the file tasks (e.g. Drive folder ids).
     destinations_state = models.JSONField(default=dict, blank=True)
     # Each destination's error, failures in a row and closing, see FileExports.
     exports_state = models.JSONField(default=dict, blank=True)
+    # Source files and destinations of the integrity report, see IntegrityTracker.
+    integrity_state = models.JSONField(default=dict, blank=True)
+
+    @property
+    def stopped(self) -> bool:
+        """The run goes no further: its files left are skipped."""
+        return self.source_token_expired or self.stalled
 
 
 class MigrationFile(BaseModel):
@@ -290,6 +309,8 @@ class MigrationFile(BaseModel):
         max_length=20, choices=Status.choices, default=Status.PENDING
     )
     size = models.BigIntegerField(null=True, blank=True)
+    # Announced by the source before the download, see SourceFile.size.
+    expected_size = models.BigIntegerField(null=True, blank=True)
     # Detected from the downloaded content, for the analytics.
     mime_type = models.CharField(max_length=255, blank=True, default="")
     error = models.TextField(blank=True, default="")

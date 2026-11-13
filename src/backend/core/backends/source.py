@@ -23,6 +23,8 @@ class SourceFile:
     extension: str  # With leading dot, e.g. ".pdf", or ""
     download_url: str  # Opaque URL or path — passed back to backend.download_file()
     raw_data: dict = field(default_factory=dict)
+    # In bytes as the source announces it, maybe approximate; None when unknown.
+    size: int | None = None
 
     @property
     def name_with_extension(self) -> str:
@@ -152,6 +154,17 @@ class AbstractSourceBackend(ABC):
         Implementations may use this to freeze the source workspace against
         concurrent edits and/or grant the migration account access it would
         otherwise lack, so the migration doesn't silently miss files (#215).
+
+        Default implementation is a no-op.
+        """
+
+    def resume_export(self, workspace) -> None:  # noqa: B027
+        """
+        Optional hook called in a task carrying on a run begin_export() began in
+        another task, e.g. a task downloading one file of the run.
+
+        Implementations should set up only what download_file() needs: what
+        begin_export() did to the source workspace holds for the whole run.
 
         Default implementation is a no-op.
         """

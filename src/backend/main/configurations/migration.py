@@ -42,6 +42,33 @@ class MigrationBackendsMixin:
         environ_name="MIGRATION_DESTINATION_MAX_CONSECUTIVE_FAILURES",
         environ_prefix=None,
     )
+    # The file tasks of a run are queued one batch at a time, the next batch once
+    # the previous one is done, so other migrations get workers in between.
+    # Bytes are the sizes the source announces. 0 = no limit; both 0 queue the
+    # whole run at once.
+    MIGRATION_BATCH_MAX_FILES = values.PositiveIntegerValue(
+        100,
+        environ_name="MIGRATION_BATCH_MAX_FILES",
+        environ_prefix=None,
+    )
+    MIGRATION_BATCH_MAX_BYTES = values.PositiveIntegerValue(
+        1024**3,
+        environ_name="MIGRATION_BATCH_MAX_BYTES",
+        environ_prefix=None,
+    )
+    # A run without news for this long is stalled, see core.processing.watchdog:
+    # its unfinished files are queued again, up to MIGRATION_RUN_MAX_REDISPATCHES
+    # times, then it fails. Keep it above the transfer of the biggest file.
+    MIGRATION_RUN_STALL_SECONDS = values.PositiveIntegerValue(
+        3 * 3600,
+        environ_name="MIGRATION_RUN_STALL_SECONDS",
+        environ_prefix=None,
+    )
+    MIGRATION_RUN_MAX_REDISPATCHES = values.PositiveIntegerValue(
+        2,
+        environ_name="MIGRATION_RUN_MAX_REDISPATCHES",
+        environ_prefix=None,
+    )
 
     # Archive downloads streamed at once, each holding a gunicorn thread for
     # its whole length: beyond, a download is refused, so the API keeps threads.
