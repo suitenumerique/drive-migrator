@@ -1,7 +1,5 @@
 """Shared fixtures for the Drive destination tests."""
 
-# pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
-
 from unittest.mock import patch
 
 import pytest
@@ -45,8 +43,8 @@ def drive_client(settings):
         yield client
 
 
-@pytest.fixture()
-def user():
+@pytest.fixture(name="user")
+def fixture_user():
     return UserFactory()
 
 
