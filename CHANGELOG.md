@@ -9,6 +9,11 @@ and this project adheres to
 ## [Unreleased]
 - Split the backend settings into configuration mixins
 
+### Added
+
+- Add the architecture documentation
+- Add a guide to run the migrator with a local La Suite Drive
+
 ### Fixed
 
 - Refresh the Resana offline token before its 1 h idle timeout, so long
