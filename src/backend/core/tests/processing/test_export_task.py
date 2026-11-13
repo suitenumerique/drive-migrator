@@ -11,7 +11,7 @@ from django.utils import timezone
 import pytest
 from django_celery_results.models import TaskResult
 
-from core.backends.source import SourceFile, SourceFolder
+from core.backends.source import SourceFolder
 from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.plan import build_plan
 from core.processing.tasks import (
