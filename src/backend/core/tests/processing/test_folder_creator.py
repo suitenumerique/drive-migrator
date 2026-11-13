@@ -706,7 +706,7 @@ def test_create_folder_flags_download_that_wrote_no_file(tmp_path, settings):
 
 
 def test_create_folder_hands_each_downloaded_file_over(tmp_path, settings):
-    """on_downloaded gets every downloaded file with its local path, and only those."""
+    """after_download gets every downloaded file with its local path, and only those."""
     settings.APP_WORK_DIR = str(tmp_path)
     workspace = _make_workspace("ws26")
     files = [
@@ -727,7 +727,7 @@ def test_create_folder_hands_each_downloaded_file_over(tmp_path, settings):
         workspace,
         _run(SourceFolder(name="root", files=files)),
         backend,
-        on_downloaded=lambda row, path: handed_over.append(
+        after_download=lambda row, path: handed_over.append(
             (row.path, path, os.path.isfile(path))
         ),
     )

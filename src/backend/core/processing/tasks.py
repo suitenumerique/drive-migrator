@@ -215,7 +215,7 @@ def _export_workspace(run, user, source_backend, integrity_tracker):
                 workspace,
                 run,
                 source_backend,
-                on_downloaded=_file_handover(file_exports, file_by_file, legacy),
+                after_download=_file_handover(file_exports, file_by_file, legacy),
             )
         except SourceTokenExpired:
             # Also keep the files that failed before the token expired.

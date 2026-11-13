@@ -26,10 +26,10 @@ class FolderCreator:
         workspace: Workspace,
         run: MigrationRun,
         source_backend: AbstractSourceBackend,
-        on_downloaded=None,
+        after_download=None,
     ) -> str:
         """
-        Download every file of the run into the local folder. on_downloaded, if
+        Download every file of the run into the local folder. after_download, if
         given, gets each downloaded file with its local path.
         """
         self.workspace = workspace
@@ -51,8 +51,8 @@ class FolderCreator:
             self.__download_file(migration_file, local_path, source_backend)
             if migration_file.status != MigrationFile.Status.DOWNLOADED:
                 continue
-            if on_downloaded is not None:
-                on_downloaded(migration_file, local_path)
+            if after_download is not None:
+                after_download(migration_file, local_path)
 
         return path
 

@@ -171,7 +171,7 @@ def test_export_builds_local_folder_from_its_migration_run(
         workspace, ANY, build_plan(folder_tree)
     )
     creator.create_folder.assert_called_once_with(
-        workspace, ANY, source_backend, on_downloaded=None
+        workspace, ANY, source_backend, after_download=None
     )
     assert creator.create_folder.call_args.args[1].workspace is workspace
     migration_run.delete.assert_called_once_with(migration_run.create.call_args.args[1])
@@ -537,7 +537,7 @@ def test_export_streams_files_to_file_by_file_destinations(workspace, user, tmp_
     exports.close.assert_called_once_with()
     drive.export.assert_not_called()
 
-    on_downloaded = creator.create_folder.call_args.kwargs["on_downloaded"]
+    after_download = creator.create_folder.call_args.kwargs["after_download"]
     local_file = tmp_path / "doc.txt"
     local_file.write_text("content")
     row = SimpleNamespace(results={"drive": {"status": FileExportStatus.SENT}})
@@ -583,7 +583,7 @@ def test_export_keeps_local_files_for_legacy_destinations(workspace, user):
 
     exports_cls.assert_called_once_with(ANY, user, [drive])
     creator.create_folder.assert_called_once_with(
-        workspace, ANY, ANY, on_downloaded=exports.put
+        workspace, ANY, ANY, after_download=exports.put
     )
     archive.export.assert_called_once_with(workspace, user, "/tmp/ws-1")
     assert calls == ["close", "archive"]
