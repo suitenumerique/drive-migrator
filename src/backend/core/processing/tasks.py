@@ -215,7 +215,7 @@ def _export_workspace(
         # Registered first so a destination that fails midway is still checked.
         integrity_tracker.add_exported_destination(destination)
     file_by_file = [d for d in destinations if d.exports_file_by_file]
-    legacy = [d for d in destinations if not d.exports_file_by_file]
+    whole_folder = [d for d in destinations if not d.exports_file_by_file]
     file_exports = FileExports(run, user, file_by_file)
 
     try:
@@ -226,7 +226,7 @@ def _export_workspace(
                 workspace,
                 run,
                 source_backend,
-                after_download=_file_handover(file_exports, file_by_file, legacy),
+                after_download=_file_handover(file_exports, file_by_file, whole_folder),
             )
         except SourceTokenExpired:
             # Also keep the files that failed before the token expired.
@@ -239,7 +239,7 @@ def _export_workspace(
         raise
 
     failures = file_exports.close()
-    for destination in legacy:
+    for destination in whole_folder:
         logger.info("Calling %s export ...", destination.name)
         destination.export(workspace, user, local_path)
 
@@ -252,14 +252,14 @@ def _export_workspace(
 def _file_handover(
     file_exports: FileExports,
     file_by_file: list[AbstractDestinationBackend],
-    legacy: list[AbstractDestinationBackend],
+    whole_folder: list[AbstractDestinationBackend],
 ) -> Callable[[MigrationFile, str], None] | None:
     """What to do with each downloaded file: hand it to the file-by-file
     destinations, and drop it unless a legacy destination reads it back. A file
     a destination did not take is kept on S3 first, for the user."""
     if not file_by_file:
         return None
-    if legacy:
+    if whole_folder:
         return file_exports.put
 
     def put_and_drop(migration_file: MigrationFile, local_path: str) -> None:

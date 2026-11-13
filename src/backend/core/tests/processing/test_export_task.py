@@ -526,7 +526,7 @@ def _run_export_with_creator(
 
 def test_export_streams_files_to_file_by_file_destinations(workspace, user, tmp_path):
     """With only file-by-file destinations, each file is handed over then
-    dropped from the disk, and no legacy export() runs."""
+    dropped from the disk, and no whole-folder export() runs."""
     drive = _file_by_file_destination("drive")
 
     exports_cls, creator = _run_file_by_file_export(workspace, user, [drive])
@@ -569,8 +569,8 @@ def test_export_keeps_the_files_a_destination_did_not_take(
     assert not local_file.exists()
 
 
-def test_export_keeps_local_files_for_legacy_destinations(workspace, user):
-    """A legacy destination still reads the local folder, after the others close."""
+def test_export_keeps_local_files_for_whole_folder_destinations(workspace, user):
+    """A whole-folder destination still reads the local folder, after the others close."""
     drive = _file_by_file_destination("drive")
     archive = _destination("archive")
     calls = []
