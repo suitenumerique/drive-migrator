@@ -206,7 +206,7 @@ def _export_workspace(
     local_path = creator.get_workspace_path(workspace)
     integrity_tracker.set_retrieval(run)
 
-    # Before the downloads: file-by-file destinations need the members to close.
+    # Before the downloads: the destinations need the members to close.
     logger.info("Calling prepare_export ...")
     source_backend.prepare_export(workspace, local_path)
 
@@ -214,19 +214,17 @@ def _export_workspace(
     for destination in destinations:
         # Registered first so a destination that fails midway is still checked.
         integrity_tracker.add_exported_destination(destination)
-    file_by_file = [d for d in destinations if d.exports_file_by_file]
-    whole_folder = [d for d in destinations if not d.exports_file_by_file]
-    file_exports = FileExports(run, user, file_by_file)
+    file_exports = FileExports(run, user, destinations)
 
     try:
         file_exports.open()
         logger.info("Calling create_folder ...")
         try:
-            local_path = creator.create_folder(
+            creator.create_folder(
                 workspace,
                 run,
                 source_backend,
-                after_download=_file_handover(file_exports, file_by_file, whole_folder),
+                after_download=_file_handover(file_exports, destinations),
             )
         except SourceTokenExpired:
             # Also keep the files that failed before the token expired.
@@ -239,10 +237,6 @@ def _export_workspace(
         raise
 
     failures = file_exports.close()
-    for destination in whole_folder:
-        logger.info("Calling %s export ...", destination.name)
-        destination.export(workspace, user, local_path)
-
     if failures:
         raise RuntimeError(
             f"Export failed for {', '.join(failures)} on workspace {workspace.id}"
@@ -250,17 +244,13 @@ def _export_workspace(
 
 
 def _file_handover(
-    file_exports: FileExports,
-    file_by_file: list[AbstractDestinationBackend],
-    whole_folder: list[AbstractDestinationBackend],
+    file_exports: FileExports, destinations: list[AbstractDestinationBackend]
 ) -> Callable[[MigrationFile, str], None] | None:
-    """What to do with each downloaded file: hand it to the file-by-file
-    destinations, and drop it unless a whole-folder destination reads it back. A file
-    a destination did not take is kept on S3 first, for the user."""
-    if not file_by_file:
+    """What to do with each downloaded file: hand it to the destinations, then
+    drop it. A file a destination did not take is kept on S3 first, for the
+    user."""
+    if not destinations:
         return None
-    if whole_folder:
-        return file_exports.put
 
     def put_and_drop(migration_file: MigrationFile, local_path: str) -> None:
         file_exports.put(migration_file, local_path)

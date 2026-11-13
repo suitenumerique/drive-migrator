@@ -179,13 +179,13 @@ def test_export_builds_local_folder_from_its_migration_run(
 
 def test_export_deletes_the_migration_run_when_it_fails(workspace, user, migration_run):
     """The working rows are purged whatever the outcome of the run."""
-    dest_drive = MagicMock()
-    dest_drive.name = "drive"
-    dest_drive.exports_file_by_file = False
-    dest_drive.export.side_effect = RuntimeError("Drive down")
-
-    with pytest.raises(RuntimeError, match="Drive down"):
-        _run_export(workspace, user, dest_backends=[dest_drive])
+    with pytest.raises(RuntimeError, match="drive"):
+        _run_file_by_file_export(
+            workspace,
+            user,
+            [_destination("drive")],
+            failures={"drive": RuntimeError("Drive down")},
+        )
 
     migration_run.delete.assert_called_once()
 
@@ -200,12 +200,12 @@ def test_export_keeps_the_files_stats_before_purging_the_run(
         ("stats", task_id, run)
     )
     migration_run.delete.side_effect = lambda task_id: calls.append(("delete",))
-    destination = _destination("archive")
-    if fails:
-        destination.export.side_effect = RuntimeError("down")
+    failures = {"archive": RuntimeError("down")} if fails else None
 
     try:
-        _run_export(workspace, user, dest_backends=[destination])
+        _run_file_by_file_export(
+            workspace, user, [_destination("archive")], failures=failures
+        )
     except RuntimeError:
         assert fails
 
@@ -223,12 +223,12 @@ def test_export_drops_the_unlinked_kept_files_before_purging_the_run(
     calls = []
     migration_run.drop_kept.side_effect = lambda run: calls.append(("drop", run))
     migration_run.delete.side_effect = lambda task_id: calls.append(("delete",))
-    destination = _destination("archive")
-    if fails:
-        destination.export.side_effect = RuntimeError("down")
+    failures = {"archive": RuntimeError("down")} if fails else None
 
     try:
-        _run_export(workspace, user, dest_backends=[destination])
+        _run_file_by_file_export(
+            workspace, user, [_destination("archive")], failures=failures
+        )
     except RuntimeError:
         assert fails
 
@@ -237,7 +237,7 @@ def test_export_drops_the_unlinked_kept_files_before_purging_the_run(
 
 
 def test_export_calls_prepare_export_before_downloading(workspace, user):
-    """The members are fetched first: file-by-file destinations close with them."""
+    """The members are fetched first: the destinations close with them."""
     calls = []
 
     def record_download(creator):
@@ -411,16 +411,13 @@ def test_export_saves_download_errors_with_update_fields(workspace, user, settin
 
 def test_export_fails_when_all_downloads_fail(workspace, user):
     """export() raises instead of returning True when every download failed,
-    and no destination export runs."""
+    and no destination is closed."""
     failed_files = [
         {"name": "a.docx", "error": "boom"},
         {"name": "b.docx", "error": "boom"},
     ]
-    dest_backend = MagicMock()
-    dest_backend.name = "archive"
-    dest_backend.exports_file_by_file = False
-
     with (
+        patch("core.processing.tasks.FileExports") as exports_cls,
         patch("core.models.Workspace.objects.get", return_value=workspace),
         patch("core.models.User.objects.get", return_value=user),
         patch("core.processing.tasks.SourceManager") as mock_sm,
@@ -434,39 +431,29 @@ def test_export_fails_when_all_downloads_fail(workspace, user):
         mock_fc.return_value.failed_files = failed_files
         mock_fc.return_value.files_count = 2
         mock_fc.return_value.files_success = 0
-        mock_dr.get_all.return_value = [dest_backend]
+        mock_dr.get_all.return_value = [_destination("archive")]
 
         with pytest.raises(RuntimeError):
             export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
 
-    dest_backend.export.assert_not_called()
+    exports_cls.return_value.close.assert_not_called()
 
 
 def test_export_calls_each_pending_destination(workspace, user):
-    """export() calls export() on each destination backend whose status is PENDING."""
+    """export() hands the run to every destination whose status is PENDING."""
     workspace.get_destination_status.return_value = Workspace.Status.PENDING
+    dest_archive, dest_resana = _destination("archive"), _destination("resana")
 
-    dest_archive = MagicMock()
-    dest_archive.name = "archive"
-    dest_archive.exports_file_by_file = False
-    dest_resana = MagicMock()
-    dest_resana.name = "resana"
-    dest_resana.exports_file_by_file = False
+    exports_cls, _ = _run_file_by_file_export(
+        workspace, user, [dest_archive, dest_resana]
+    )
 
-    _run_export(workspace, user, dest_backends=[dest_archive, dest_resana])
-
-    dest_archive.export.assert_called_once_with(workspace, user, "/tmp/ws-1")
-    dest_resana.export.assert_called_once_with(workspace, user, "/tmp/ws-1")
+    exports_cls.assert_called_once_with(ANY, user, [dest_archive, dest_resana])
 
 
 def test_export_skips_non_pending_destinations(workspace, user):
     """export() skips destinations whose status is not PENDING."""
-    dest_archive = MagicMock()
-    dest_archive.name = "archive"
-    dest_archive.exports_file_by_file = False
-    dest_resana = MagicMock()
-    dest_resana.name = "resana"
-    dest_resana.exports_file_by_file = False
+    dest_archive, dest_resana = _destination("archive"), _destination("resana")
 
     def get_status(name):
         if name == "archive":
@@ -475,10 +462,11 @@ def test_export_skips_non_pending_destinations(workspace, user):
 
     workspace.get_destination_status.side_effect = get_status
 
-    _run_export(workspace, user, dest_backends=[dest_archive, dest_resana])
+    exports_cls, _ = _run_file_by_file_export(
+        workspace, user, [dest_archive, dest_resana]
+    )
 
-    dest_archive.export.assert_not_called()
-    dest_resana.export.assert_called_once()
+    exports_cls.assert_called_once_with(ANY, user, [dest_resana])
 
 
 # ---------------------------------------------------------------------------
@@ -486,10 +474,9 @@ def test_export_skips_non_pending_destinations(workspace, user):
 # ---------------------------------------------------------------------------
 
 
-def _file_by_file_destination(name):
+def _destination(name):
     destination = MagicMock()
     destination.name = name
-    destination.exports_file_by_file = True
     return destination
 
 
@@ -525,9 +512,8 @@ def _run_export_with_creator(
 
 
 def test_export_streams_files_to_file_by_file_destinations(workspace, user, tmp_path):
-    """With only file-by-file destinations, each file is handed over then
-    dropped from the disk, and no whole-folder export() runs."""
-    drive = _file_by_file_destination("drive")
+    """Each file is handed over to the destinations, then dropped from the disk."""
+    drive = _destination("drive")
 
     exports_cls, creator = _run_file_by_file_export(workspace, user, [drive])
 
@@ -535,7 +521,6 @@ def test_export_streams_files_to_file_by_file_destinations(workspace, user, tmp_
     exports = exports_cls.return_value
     exports.open.assert_called_once_with()
     exports.close.assert_called_once_with()
-    drive.export.assert_not_called()
 
     after_download = creator.create_folder.call_args.kwargs["after_download"]
     local_file = tmp_path / "doc.txt"
@@ -556,7 +541,7 @@ def test_export_keeps_the_files_a_destination_did_not_take(
     the destination to hand it back to the user once it closes: the disk only
     holds the file being sent."""
     exports_cls, creator = _run_file_by_file_export(
-        workspace, user, [_file_by_file_destination("drive")]
+        workspace, user, [_destination("drive")]
     )
 
     after_download = creator.create_folder.call_args.kwargs["after_download"]
@@ -569,38 +554,16 @@ def test_export_keeps_the_files_a_destination_did_not_take(
     assert not local_file.exists()
 
 
-def test_export_keeps_local_files_for_whole_folder_destinations(workspace, user):
-    """A whole-folder destination still reads the local folder, after the others close."""
-    drive = _file_by_file_destination("drive")
-    archive = _destination("archive")
-    calls = []
-    archive.export.side_effect = lambda *args: calls.append("archive")
-
-    with patch("core.processing.tasks.FileExports") as exports_cls:
-        exports = exports_cls.return_value
-        exports.close.side_effect = lambda: calls.append("close") or {}
-        _, creator, _ = _run_export(workspace, user, dest_backends=[archive, drive])
-
-    exports_cls.assert_called_once_with(ANY, user, [drive])
-    creator.create_folder.assert_called_once_with(
-        workspace, ANY, ANY, after_download=exports.put
-    )
-    archive.export.assert_called_once_with(workspace, user, "/tmp/ws-1")
-    assert calls == ["close", "archive"]
-
-
-def test_export_fails_after_the_others_when_a_destination_failed(workspace, user):
-    """A failed file-by-file destination fails the task, once every other
-    destination is done."""
-    drive = _file_by_file_destination("drive")
-    archive = _destination("archive")
-
+def test_export_fails_when_a_destination_failed(workspace, user):
+    """A failed destination fails the task, with its error as the cause."""
     with pytest.raises(RuntimeError, match="drive") as raised:
         _run_file_by_file_export(
-            workspace, user, [archive, drive], failures={"drive": ValueError("401")}
+            workspace,
+            user,
+            [_destination("drive"), _destination("archive")],
+            failures={"drive": ValueError("401")},
         )
 
-    archive.export.assert_called_once()
     assert isinstance(raised.value.__cause__, ValueError)
 
 
@@ -628,7 +591,7 @@ def test_export_aborts_file_by_file_destinations_when_the_run_fails(
         pytest.raises((OSError, RuntimeError), match=error),
     ):
         _run_export_with_creator(
-            workspace, user, [_file_by_file_destination("drive")], setup_creator
+            workspace, user, [_destination("drive")], setup_creator
         )
 
     exports_cls.return_value.abort.assert_called_once_with()
@@ -646,10 +609,13 @@ def mock_tracker_cls():
         yield tracker_cls
 
 
-def _run_export_with_tracker(workspace, user, dest_backends, setup_creator=None):
+def _run_export_with_tracker(
+    workspace, user, dest_backends, setup_creator=None, failures=None
+):
     """Run export() with standard mocks; return (creator, source folder)."""
     folder = SourceFolder(name="root")
     with (
+        patch("core.processing.tasks.FileExports") as exports_cls,
         patch("core.models.Workspace.objects.get", return_value=workspace),
         patch("core.models.User.objects.get", return_value=user),
         patch("core.processing.tasks.SourceManager") as mock_sm,
@@ -663,16 +629,10 @@ def _run_export_with_tracker(workspace, user, dest_backends, setup_creator=None)
         if setup_creator:
             setup_creator(creator)
         mock_dr.get_all.return_value = dest_backends
+        exports_cls.return_value.close.return_value = failures or {}
 
         export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
     return creator, folder
-
-
-def _destination(name):
-    destination = MagicMock()
-    destination.name = name
-    destination.exports_file_by_file = False
-    return destination
 
 
 def test_export_feeds_integrity_tracker_and_saves_it(workspace, user, mock_tracker_cls):
@@ -700,10 +660,13 @@ def test_export_saves_integrity_report_when_a_destination_fails(
 ):
     """A failing destination is still checked and the original error propagates."""
     dest_drive = _destination("drive")
-    dest_drive.export.side_effect = RuntimeError("Drive down")
 
-    with pytest.raises(RuntimeError, match="Drive down"):
-        _run_export_with_tracker(workspace, user, [dest_drive])
+    with pytest.raises(RuntimeError, match="drive") as raised:
+        _run_export_with_tracker(
+            workspace, user, [dest_drive], failures={"drive": ValueError("down")}
+        )
+
+    assert isinstance(raised.value.__cause__, ValueError)
 
     tracker = mock_tracker_cls.return_value
     tracker.add_exported_destination.assert_called_once_with(dest_drive)

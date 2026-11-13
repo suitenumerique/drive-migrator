@@ -102,11 +102,6 @@ def test_label_is_set():
     assert ArchiveDestinationBackend.label != ""
 
 
-def test_exports_file_by_file():
-    """The archive receives the run file by file, nothing is zipped on disk."""
-    assert ArchiveDestinationBackend.exports_file_by_file is True
-
-
 def test_put_stores_each_file_under_an_opaque_key(bucket, make_run, export_run):
     """Each file lands on S3 under a key made of ids only (file names may be
     personal data), inside the run's own prefix."""

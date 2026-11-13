@@ -44,11 +44,6 @@ class ArchiveDestinationBackend(AbstractDestinationBackend):
 
     name = "archive"
     label = "Archive ZIP"
-    exports_file_by_file = True
-
-    def export(self, workspace, user, local_folder_path: str) -> None:
-        """The archive receives the run file by file, see exports_file_by_file."""
-        raise NotImplementedError
 
     def describe_rejection(self, code: str) -> str:
         if code == _UPLOAD_FAILED:

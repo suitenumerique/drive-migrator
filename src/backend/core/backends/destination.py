@@ -65,9 +65,6 @@ class AbstractDestinationBackend(ABC):
 
     name: str  # e.g. "archive", "resana", "drive"
     label: str  # Human-readable label for UI, e.g. "La Suite Drive"
-    # True when the destination receives the files one by one through
-    # open_export(), put_file() and close_export() instead of export().
-    exports_file_by_file = False
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -78,15 +75,6 @@ class AbstractDestinationBackend(ABC):
                     raise TypeError(
                         f"{cls.__name__} must define class attribute '{attr}'"
                     )
-
-    @abstractmethod
-    def export(self, workspace, user, local_folder_path: str) -> None:
-        """
-        Export the locally assembled workspace to this destination.
-        Must update workspace.destination_statuses[self.name] and call workspace.save().
-        For async destinations (e.g. Resana job), set status to PENDING.
-        For sync destinations (e.g. archive), set status to SUCCESS or FAILURE.
-        """
 
     def describe_rejection(self, code: str) -> str:  # pylint: disable=unused-argument
         """Human-readable reason for a RejectedFile code, shown to the user."""
@@ -108,15 +96,16 @@ class AbstractDestinationBackend(ABC):
         """Where the user creates their account, under USER_CREATED."""
         return None
 
-    # --- File-by-file export (when exports_file_by_file is True) ---
+    # --- File-by-file export ---
 
+    @abstractmethod
     def open_export(self, user, run) -> None:
         """
         Prepare the destination before any file of the run. Whatever the next
         calls need goes to run.destinations_state[self.name].
         """
-        raise NotImplementedError
 
+    @abstractmethod
     def put_file(self, user, run, migration_file, local_path: str) -> None:
         """
         Send one downloaded file, then record what happened to it in
@@ -124,14 +113,14 @@ class AbstractDestinationBackend(ABC):
         Raise only when the destination itself is unusable (e.g. revoked token):
         it then gets no more files.
         """
-        raise NotImplementedError
 
+    @abstractmethod
     def close_export(self, user, run) -> None:
         """
         Finish the export once every file was put: generated files, sharing,
-        mail. Must set the destination status, like export().
+        mail. Must update workspace.destination_statuses[self.name] and save
+        the workspace.
         """
-        raise NotImplementedError
 
     def abort_export(self, run) -> None:  # noqa: B027
         """Best effort, after the export failed: keep a trace of what it did."""

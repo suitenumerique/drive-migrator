@@ -33,7 +33,13 @@ class FakeDestination(AbstractDestinationBackend):
     name = "fake"
     label = "Fake Destination"
 
-    def export(self, workspace, user, local_folder_path):
+    def open_export(self, user, run):
+        pass
+
+    def put_file(self, user, run, migration_file, local_path):
+        pass
+
+    def close_export(self, user, run):
         pass
 
 

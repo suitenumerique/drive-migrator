@@ -38,11 +38,6 @@ def test_label_is_set():
     assert DriveDestinationBackend.label != ""
 
 
-def test_exports_file_by_file():
-    """Drive receives each file as soon as it is downloaded."""
-    assert DriveDestinationBackend.exports_file_by_file is True
-
-
 def _drive_refusal(code, status_code=400):
     """Build the HTTPError Drive raises when it refuses a file."""
     response = MagicMock(status_code=status_code)

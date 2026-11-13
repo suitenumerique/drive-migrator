@@ -37,11 +37,6 @@ class ResanaDestinationBackend(AbstractDestinationBackend):
 
     name = "resana"
     label = "Resana"
-    exports_file_by_file = True
-
-    def export(self, workspace, user, local_folder_path: str) -> None:
-        """Resana receives the run file by file, see exports_file_by_file."""
-        raise NotImplementedError
 
     def describe_rejection(self, code: str) -> str:
         if code == _UPLOAD_FAILED:

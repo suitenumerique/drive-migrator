@@ -74,7 +74,6 @@ class DriveDestinationBackend(AbstractDestinationBackend):
 
     name = "drive"
     label = "La Suite Drive"
-    exports_file_by_file = True
 
     def __init__(self):
         # Backends are cached singletons (DestinationRegistry): one Drive client,
@@ -119,10 +118,6 @@ class DriveDestinationBackend(AbstractDestinationBackend):
             self._client = self._make_backend(user)
             self._client_run_id = run.id
         return self._client
-
-    def export(self, workspace, user, local_folder_path: str) -> None:
-        """Drive receives the run file by file, see exports_file_by_file."""
-        raise NotImplementedError
 
     # --- File-by-file export ---
 

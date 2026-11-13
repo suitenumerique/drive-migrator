@@ -1,4 +1,4 @@
-"""Destinations receiving a run file by file, see exports_file_by_file."""
+"""Destinations receiving a run file by file, see AbstractDestinationBackend."""
 
 from contextlib import contextmanager
 

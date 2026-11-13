@@ -99,11 +99,6 @@ def test_label_is_set():
     assert ResanaDestinationBackend.label != ""
 
 
-def test_exports_file_by_file():
-    """Resana receives the run file by file, nothing waits on disk for it."""
-    assert ResanaDestinationBackend.exports_file_by_file is True
-
-
 @pytest.mark.django_db
 @pytest.mark.usefixtures("bucket")
 def test_open_checks_resana_before_any_file(resana, make_run):
