@@ -1,5 +1,6 @@
 import os
 import shutil
+from typing import Callable
 
 from django.conf import settings
 
@@ -26,7 +27,7 @@ class FolderCreator:
         workspace: Workspace,
         run: MigrationRun,
         source_backend: AbstractSourceBackend,
-        after_download=None,
+        after_download: Callable[[MigrationFile, str], None] | None = None,
     ) -> str:
         """
         Download every file of the run into the local folder. after_download, if

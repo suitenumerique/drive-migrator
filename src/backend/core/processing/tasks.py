@@ -1,4 +1,5 @@
 import os
+from typing import Callable
 
 from django.conf import settings
 from django.utils import timezone
@@ -13,15 +14,20 @@ from core.analytics import (
     save_run_files_stats,
     workspaces_counts,
 )
-from core.backends.destination import DestinationRegistry, FileExportStatus
+from core.backends.destination import (
+    AbstractDestinationBackend,
+    DestinationRegistry,
+    FileExportStatus,
+)
 from core.backends.source import (
+    AbstractSourceBackend,
     SourceFolder,
     SourceManager,
     SourceTokenExpired,
     truncate_folder_files,
 )
 from core.mails_manager import MailsManager
-from core.models import ExtraTaskInfo, User, Workspace
+from core.models import ExtraTaskInfo, MigrationFile, MigrationRun, User, Workspace
 from core.processing.file_exports import FileExports
 from core.processing.folder_creator import FolderCreator
 from core.processing.integrity import IntegrityTracker, Stage
@@ -189,7 +195,12 @@ def export(self, data):  # pylint: disable=unused-argument
     return True
 
 
-def _export_workspace(run, user, source_backend, integrity_tracker):
+def _export_workspace(
+    run: MigrationRun,
+    user: User,
+    source_backend: AbstractSourceBackend,
+    integrity_tracker: IntegrityTracker,
+) -> None:
     workspace = run.workspace
     creator = FolderCreator()
     local_path = creator.get_workspace_path(workspace)
@@ -238,7 +249,11 @@ def _export_workspace(run, user, source_backend, integrity_tracker):
         ) from next(iter(failures.values()))
 
 
-def _file_handover(file_exports, file_by_file, legacy):
+def _file_handover(
+    file_exports: FileExports,
+    file_by_file: list[AbstractDestinationBackend],
+    legacy: list[AbstractDestinationBackend],
+) -> Callable[[MigrationFile, str], None] | None:
     """What to do with each downloaded file: hand it to the file-by-file
     destinations, and drop it unless a legacy destination reads it back. A file
     a destination did not take is kept on S3 first, for the user."""
@@ -247,7 +262,7 @@ def _file_handover(file_exports, file_by_file, legacy):
     if legacy:
         return file_exports.put
 
-    def put_and_drop(migration_file, local_path):
+    def put_and_drop(migration_file: MigrationFile, local_path: str) -> None:
         file_exports.put(migration_file, local_path)
         if not all(
             result.get("status") == FileExportStatus.SENT
@@ -259,7 +274,7 @@ def _file_handover(file_exports, file_by_file, legacy):
     return put_and_drop
 
 
-def _pending_destinations(workspace) -> list:
+def _pending_destinations(workspace: Workspace) -> list[AbstractDestinationBackend]:
     destinations = []
     for destination in DestinationRegistry.get_all():
         status = workspace.get_destination_status(destination.name)
@@ -269,7 +284,7 @@ def _pending_destinations(workspace) -> list:
     return destinations
 
 
-def _save_download_errors(workspace, creator) -> None:
+def _save_download_errors(workspace: Workspace, creator: FolderCreator) -> None:
     if creator.failed_files:
         workspace.download_errors = creator.failed_files
         workspace.save(update_fields=["download_errors"])
@@ -280,7 +295,7 @@ def _save_download_errors(workspace, creator) -> None:
         )
 
 
-def _check_downloads(workspace, creator) -> None:
+def _check_downloads(workspace: Workspace, creator: FolderCreator) -> None:
     """Keep the failed downloads on the workspace; fail when none succeeded."""
     _save_download_errors(workspace, creator)
 
