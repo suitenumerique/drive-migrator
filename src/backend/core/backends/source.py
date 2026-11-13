@@ -32,6 +32,10 @@ class SourceFile:
         """JSON-ready form, e.g. to hand the file over to another Celery task."""
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "SourceFile":
+        return cls(**data)
+
 
 @dataclass
 class SourceFolder:

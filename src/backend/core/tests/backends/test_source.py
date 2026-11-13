@@ -89,3 +89,15 @@ def test_truncate_with_empty_tree_returns_false():
 
     assert truncated is False
 
+
+def test_source_file_round_trips_through_a_dict():
+    """to_dict() gives a JSON-ready dict that from_dict() turns back into the file."""
+    source = SourceFile(
+        id="f1",
+        name="doc",
+        extension=".pdf",
+        download_url="https://source/doc.pdf",
+        raw_data={"uuid": "abc"},
+    )
+
+    assert SourceFile.from_dict(source.to_dict()) == source
