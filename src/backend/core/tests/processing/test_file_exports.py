@@ -186,37 +186,37 @@ def _reloaded(run, user, *destinations):
     return FileExports(MigrationRun.objects.get(pk=run.pk), user, list(destinations))
 
 
-def test_a_disabled_destination_stays_disabled_for_the_next_tasks(run, user):
+def test_a_disabled_destination_stays_disabled_for_the_next_tasks(run):
     """The file tasks each build their FileExports: a destination one of them
     disabled gets no more files, and its error is still reported at close."""
     drive = _destination("drive")
     drive.put_file.side_effect = RuntimeError("401 Unauthorized")
-    _exports(run, user, drive).put(run.files.first(), "/tmp/doc0.txt")
+    _exports(run, drive).put(run.files.first(), "/tmp/doc0.txt")
 
     drive = _destination("drive")
-    exports = _reloaded(run, user, drive)
+    exports = _reloaded(run, drive)
     _put_all(exports, run)
 
     drive.put_file.assert_not_called()
-    assert str(_reloaded(run, user, drive).close()["drive"]) == "401 Unauthorized"
+    assert str(_reloaded(run, drive).close()["drive"]) == "401 Unauthorized"
 
 
-def test_consecutive_failures_add_up_across_tasks(run, user, settings):
+def test_consecutive_failures_add_up_across_tasks(run, settings):
     """Each file in its own task still counts towards the limit."""
     settings.MIGRATION_DESTINATION_MAX_CONSECUTIVE_FAILURES = 2
-    _exports(run, user)
+    _exports(run)
     drive = _destination("drive", [FileExportStatus.FAILED] * 4)
 
     for migration_file in run.files.all():
-        _reloaded(run, user, drive).put(migration_file, "/tmp/x")
+        _reloaded(run, drive).put(migration_file, "/tmp/x")
 
     assert drive.put_file.call_count == 2
 
 
-def test_a_destination_disabled_meanwhile_gets_no_more_files(run, user):
+def test_a_destination_disabled_meanwhile_gets_no_more_files(run):
     """A destination disabled by a task running alongside is skipped from then on."""
     drive = _destination("drive")
-    first, second = _exports(run, user, drive), _reloaded(run, user, drive)
+    first, second = _exports(run, drive), _reloaded(run, drive)
     drive.put_file.side_effect = RuntimeError("401 Unauthorized")
     first.put(run.files.first(), "/tmp/doc0.txt")
 
@@ -225,11 +225,11 @@ def test_a_destination_disabled_meanwhile_gets_no_more_files(run, user):
     assert drive.put_file.call_count == 1
 
 
-def test_a_closed_destination_is_not_aborted_by_a_later_task(run, user):
+def test_a_closed_destination_is_not_aborted_by_a_later_task(run):
     """A destination closed once is never aborted afterwards, e.g. by the watchdog."""
     drive = _destination("drive")
-    _exports(run, user, drive).close()
+    _exports(run, drive).close()
 
-    _reloaded(run, user, drive).abort()
+    _reloaded(run, drive).abort()
 
     drive.abort_export.assert_not_called()
