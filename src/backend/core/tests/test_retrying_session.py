@@ -349,3 +349,45 @@ def test_query_with_unencoded_quotes_is_fully_redacted(base_request, caplog):
     for record in caplog.records:
         assert "Brien" not in record.getMessage()
         assert "token=abc" not in record.getMessage()
+
+
+def test_a_file_body_is_sent_whole_on_every_attempt(base_request, tmp_path):
+    """A streamed file read by a failed attempt is rewound for the next one,
+    which would otherwise send what is left of it, e.g. nothing."""
+    path = tmp_path / "doc.txt"
+    path.write_bytes(b"12345")
+    sent = []
+
+    def read_body(*_args, data=None, **_kwargs):
+        sent.append(data.read())
+        if len(sent) == 1:
+            raise Timeout("write timed out")
+        return _response(200)
+
+    base_request.side_effect = read_body
+
+    with open(path, "rb") as body:
+        _session().put(URL, data=body, retry=True)
+
+    assert sent == [b"12345", b"12345"]
+
+
+def test_a_file_body_is_rewound_to_where_it_started(base_request, tmp_path):
+    """A body handed over mid-file is replayed from that position only."""
+    path = tmp_path / "doc.txt"
+    path.write_bytes(b"skip-12345")
+    sent = []
+
+    def read_body(*_args, data=None, **_kwargs):
+        sent.append(data.read())
+        if len(sent) == 1:
+            raise Timeout("write timed out")
+        return _response(200)
+
+    base_request.side_effect = read_body
+
+    with open(path, "rb") as body:
+        body.seek(5)
+        _session().put(URL, data=body, retry=True)
+
+    assert sent == [b"12345", b"12345"]

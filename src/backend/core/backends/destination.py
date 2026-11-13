@@ -40,6 +40,16 @@ class RejectedFile:
     item_id: str | None = None
 
 
+class FileExportStatus(StrEnum):
+    """What a file-by-file destination did with one file, see put_file()."""
+
+    SENT = "sent"
+    # Refused by the destination because of the file itself (e.g. its type).
+    REJECTED = "rejected"
+    # Lost for another reason; several in a row disable the destination.
+    FAILED = "failed"
+
+
 class AbstractDestinationBackend(ABC):
     """
     Contract for any platform that can receive a migrated workspace.
@@ -66,15 +76,6 @@ class AbstractDestinationBackend(ABC):
                         f"{cls.__name__} must define class attribute '{attr}'"
                     )
 
-    @abstractmethod
-    def export(self, workspace, user, local_folder_path: str) -> None:
-        """
-        Export the locally assembled workspace to this destination.
-        Must update workspace.destination_statuses[self.name] and call workspace.save().
-        For async destinations (e.g. Resana job), set status to PENDING.
-        For sync destinations (e.g. archive), set status to SUCCESS or FAILURE.
-        """
-
     def describe_rejection(self, code: str) -> str:  # pylint: disable=unused-argument
         """Human-readable reason for a RejectedFile code, shown to the user."""
         # pylint: disable-next=fixme
@@ -94,6 +95,35 @@ class AbstractDestinationBackend(ABC):
     def get_account_creation_url(self) -> str | None:
         """Where the user creates their account, under USER_CREATED."""
         return None
+
+    # --- File-by-file export ---
+
+    @abstractmethod
+    def open_export(self, user, run) -> None:
+        """
+        Prepare the destination before any file of the run. Whatever the next
+        calls need goes to run.destinations_state[self.name].
+        """
+
+    @abstractmethod
+    def put_file(self, user, run, migration_file, local_path: str) -> None:
+        """
+        Send one downloaded file, then record what happened to it in
+        migration_file.results[self.name], with a FileExportStatus as "status".
+        Raise only when the destination itself is unusable (e.g. revoked token):
+        it then gets no more files.
+        """
+
+    @abstractmethod
+    def close_export(self, user, run) -> None:
+        """
+        Finish the export once every file was put: generated files, sharing,
+        mail. Must update workspace.destination_statuses[self.name] and save
+        the workspace.
+        """
+
+    def abort_export(self, run) -> None:  # noqa: B027
+        """Best effort, after the export failed: keep a trace of what it did."""
 
     # --- Optional hooks (default: raise NotImplementedError) ---
 
@@ -116,14 +146,12 @@ class AbstractDestinationBackend(ABC):
         """
         raise NotImplementedError
 
-    def check_integrity(
-        self, workspace, local_folder_path: str, wait_for_analysis: bool
-    ) -> dict:
+    def check_integrity(self, workspace, run, wait_for_analysis: bool) -> dict:
         """
-        Re-read the destination to report what it actually holds for each local
-        file sent by the last export() of this workspace in this process.
-        Returns {"files": {local relative path: {..., "stage": Stage}},
-        "extra": [destination items with no local file], "error": str (optional)}.
+        Re-read the destination to report what it actually holds for each file
+        the run sent it (run is None when the run failed before planning).
+        Returns {"files": {path in the run: {..., "stage": Stage}},
+        "extra": [destination items matching no file], "error": str (optional)}.
         wait_for_analysis is False after a failed run, to avoid delaying it.
         """
         raise NotImplementedError

@@ -11,7 +11,13 @@ class _FakeArchive(AbstractDestinationBackend):
     name = "archive"
     label = "Archive ZIP"
 
-    def export(self, workspace, user, local_folder_path):
+    def open_export(self, user, run):
+        pass
+
+    def put_file(self, user, run, migration_file, local_path):
+        pass
+
+    def close_export(self, user, run):
         pass
 
 
@@ -19,7 +25,13 @@ class _FakeDrive(AbstractDestinationBackend):
     name = "drive"
     label = "La Suite Drive"
 
-    def export(self, workspace, user, local_folder_path):
+    def open_export(self, user, run):
+        pass
+
+    def put_file(self, user, run, migration_file, local_path):
+        pass
+
+    def close_export(self, user, run):
         pass
 
 

@@ -2,32 +2,17 @@
 
 # pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
 
-from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
-from django.utils import timezone
-
 import pytest
-from django_celery_results.models import TaskResult
 
+from core.backends.destination import FileExportStatus
 from core.backends.source import SourceFolder
-from core.models import ExtraTaskInfo, User, Workspace
+from core.factories import UserFactory, WorkspaceFactory
+from core.models import User, Workspace
 from core.processing.plan import build_plan
-from core.processing.tasks import (
-    cleanup_workspace_dir,
-    create_task_result_on_publish,
-    debug_folder,
-    export,
-    list_work_dir,
-    list_workspace_dir,
-)
-from core.processing.tasks import (
-    task_failure as task_failure_handler,
-)
-from core.processing.tasks import (
-    task_success as task_success_handler,
-)
+from core.processing.tasks import export
 from core.sources.resana.token_manager import ResanaTokenExpired
 
 
@@ -38,16 +23,27 @@ def work_directory(settings, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _rejected_files_bucket():
+    """Keep the rejected files cleanup away from S3."""
+    with patch("core.processing.rejected_files.ArchiveManager"):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def migration_run():
     """Keep the run's working rows out of the database: workspaces are mocks here."""
     with (
         patch("core.processing.tasks.create_migration_run") as create,
         patch("core.processing.tasks.delete_migration_run") as delete,
+        patch("core.processing.tasks.save_run_files_stats") as save_stats,
+        patch("core.processing.tasks.drop_unlinked_kept_files") as drop_kept,
     ):
         create.side_effect = lambda workspace, task_id, plan: SimpleNamespace(
-            workspace=workspace
+            workspace=workspace, exports_state={}
         )
-        yield SimpleNamespace(create=create, delete=delete)
+        yield SimpleNamespace(
+            create=create, delete=delete, save_stats=save_stats, drop_kept=drop_kept
+        )
 
 
 @pytest.fixture()
@@ -175,27 +171,101 @@ def test_export_builds_local_folder_from_its_migration_run(
     migration_run.create.assert_called_once_with(
         workspace, ANY, build_plan(folder_tree)
     )
-    creator.create_folder.assert_called_once_with(workspace, ANY, source_backend)
+    creator.create_folder.assert_called_once_with(
+        workspace, ANY, source_backend, after_download=None
+    )
     assert creator.create_folder.call_args.args[1].workspace is workspace
     migration_run.delete.assert_called_once_with(migration_run.create.call_args.args[1])
 
 
-def test_export_deletes_the_migration_run_when_it_fails(workspace, user, migration_run):
+@pytest.mark.django_db
+def test_export_deletes_the_migration_run_when_it_fails(migration_run):
     """The working rows are purged whatever the outcome of the run."""
-    dest_drive = MagicMock()
-    dest_drive.name = "drive"
-    dest_drive.export.side_effect = RuntimeError("Drive down")
-
-    with pytest.raises(RuntimeError, match="Drive down"):
-        _run_export(workspace, user, dest_backends=[dest_drive])
+    with pytest.raises(RuntimeError, match="drive"):
+        _run_file_by_file_export(
+            _saved_workspace("drive"),
+            UserFactory(),
+            [_destination("drive")],
+            failures={"drive": RuntimeError("Drive down")},
+        )
 
     migration_run.delete.assert_called_once()
 
 
-def test_export_calls_prepare_export(workspace, user):
-    """export() calls source_backend.prepare_export() with the local folder path."""
-    source_backend, _, _ = _run_export(workspace, user)
-    source_backend.prepare_export.assert_called_once_with(workspace, "/tmp/ws-1")
+@pytest.mark.django_db
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+def test_export_keeps_the_files_stats_before_purging_the_run(migration_run, fails):
+    """The analytics stats are read from the run's rows, so before they go."""
+    calls = []
+    migration_run.save_stats.side_effect = lambda task_id, run: calls.append(
+        ("stats", task_id, run)
+    )
+    migration_run.delete.side_effect = lambda task_id: calls.append(("delete",))
+    failures = {"archive": RuntimeError("down")} if fails else None
+    workspace = _saved_workspace("archive")
+
+    try:
+        _run_file_by_file_export(
+            workspace, UserFactory(), [_destination("archive")], failures=failures
+        )
+    except RuntimeError:
+        assert fails
+
+    task_id = migration_run.create.call_args.args[1]
+    assert calls == [("stats", task_id, ANY), ("delete",)]
+    assert calls[0][2].workspace == workspace
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+def test_export_drops_the_unlinked_kept_files_before_purging_the_run(
+    migration_run, fails
+):
+    """The files kept for a destination that failed are deleted, while the
+    run's rows still tell which ones it kept."""
+    calls = []
+    migration_run.drop_kept.side_effect = lambda run: calls.append(("drop", run))
+    migration_run.delete.side_effect = lambda task_id: calls.append(("delete",))
+    failures = {"archive": RuntimeError("down")} if fails else None
+    workspace = _saved_workspace("archive")
+
+    try:
+        _run_file_by_file_export(
+            workspace, UserFactory(), [_destination("archive")], failures=failures
+        )
+    except RuntimeError:
+        assert fails
+
+    assert calls == [("drop", ANY), ("delete",)]
+    assert calls[0][1].workspace == workspace
+
+
+@pytest.mark.django_db
+def test_export_calls_prepare_export_before_downloading():
+    """The members are fetched first: the destinations close with them."""
+    workspace = WorkspaceFactory()
+    calls = []
+
+    def record_download(creator):
+        creator.create_folder.side_effect = lambda *args, **kwargs: calls.append(
+            "download"
+        )
+        creator.failed_files = []
+
+    source_backend, creator = _run_export_with_creator(
+        workspace,
+        UserFactory(),
+        [],
+        record_download,
+        setup_source=lambda source: setattr(
+            source.prepare_export, "side_effect", lambda *args: calls.append("prepare")
+        ),
+    )
+
+    source_backend.prepare_export.assert_called_once_with(
+        workspace, creator.get_workspace_path.return_value
+    )
+    assert calls == ["prepare", "download"]
 
 
 def test_export_persists_download_errors_on_workspace(workspace, user):
@@ -347,15 +417,13 @@ def test_export_saves_download_errors_with_update_fields(workspace, user, settin
 
 def test_export_fails_when_all_downloads_fail(workspace, user):
     """export() raises instead of returning True when every download failed,
-    and no destination export runs."""
+    and no destination is closed."""
     failed_files = [
         {"name": "a.docx", "error": "boom"},
         {"name": "b.docx", "error": "boom"},
     ]
-    dest_backend = MagicMock()
-    dest_backend.name = "archive"
-
     with (
+        patch("core.processing.tasks.FileExports") as exports_cls,
         patch("core.models.Workspace.objects.get", return_value=workspace),
         patch("core.models.User.objects.get", return_value=user),
         patch("core.processing.tasks.SourceManager") as mock_sm,
@@ -369,47 +437,190 @@ def test_export_fails_when_all_downloads_fail(workspace, user):
         mock_fc.return_value.failed_files = failed_files
         mock_fc.return_value.files_count = 2
         mock_fc.return_value.files_success = 0
-        mock_dr.get_all.return_value = [dest_backend]
+        mock_dr.get_all.return_value = [_destination("archive")]
 
         with pytest.raises(RuntimeError):
             export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
 
-    dest_backend.export.assert_not_called()
+    exports_cls.return_value.close.assert_not_called()
 
 
-def test_export_calls_each_pending_destination(workspace, user):
-    """export() calls export() on each destination backend whose status is PENDING."""
-    workspace.get_destination_status.return_value = Workspace.Status.PENDING
+@pytest.mark.django_db
+def test_export_calls_each_pending_destination():
+    """export() hands the run to every destination whose status is PENDING."""
+    user = UserFactory()
+    dest_archive, dest_resana = _destination("archive"), _destination("resana")
 
-    dest_archive = MagicMock()
-    dest_archive.name = "archive"
-    dest_resana = MagicMock()
-    dest_resana.name = "resana"
+    exports_cls, _ = _run_file_by_file_export(
+        _saved_workspace("archive", "resana"), user, [dest_archive, dest_resana]
+    )
 
-    _run_export(workspace, user, dest_backends=[dest_archive, dest_resana])
-
-    dest_archive.export.assert_called_once_with(workspace, user, "/tmp/ws-1")
-    dest_resana.export.assert_called_once_with(workspace, user, "/tmp/ws-1")
+    exports_cls.assert_called_once_with(ANY, user, [dest_archive, dest_resana])
 
 
-def test_export_skips_non_pending_destinations(workspace, user):
+@pytest.mark.django_db
+def test_export_skips_non_pending_destinations():
     """export() skips destinations whose status is not PENDING."""
-    dest_archive = MagicMock()
-    dest_archive.name = "archive"
-    dest_resana = MagicMock()
-    dest_resana.name = "resana"
+    user = UserFactory()
+    workspace = WorkspaceFactory(
+        destination_statuses={
+            "archive": Workspace.Status.SUCCESS,
+            "resana": Workspace.Status.PENDING,
+        }
+    )
+    dest_archive, dest_resana = _destination("archive"), _destination("resana")
 
-    def get_status(name):
-        if name == "archive":
-            return Workspace.Status.SUCCESS
-        return Workspace.Status.PENDING
+    exports_cls, _ = _run_file_by_file_export(
+        workspace, user, [dest_archive, dest_resana]
+    )
 
-    workspace.get_destination_status.side_effect = get_status
+    exports_cls.assert_called_once_with(ANY, user, [dest_resana])
 
-    _run_export(workspace, user, dest_backends=[dest_archive, dest_resana])
 
-    dest_archive.export.assert_not_called()
-    dest_resana.export.assert_called_once()
+# ---------------------------------------------------------------------------
+# File-by-file destinations
+# ---------------------------------------------------------------------------
+
+
+def _destination(name):
+    destination = MagicMock()
+    destination.name = name
+    return destination
+
+
+def _saved_workspace(*pending):
+    """A saved workspace whose given destinations are pending."""
+    return WorkspaceFactory(
+        destination_statuses=dict.fromkeys(pending, Workspace.Status.PENDING)
+    )
+
+
+def _run_file_by_file_export(workspace, user, dest_backends, failures=None):
+    """Run export() with FileExports mocked; return (exports class, creator)."""
+    with patch("core.processing.tasks.FileExports") as exports_cls:
+        exports_cls.return_value.close.return_value = failures or {}
+        _, creator = _run_export_with_creator(workspace, user, dest_backends)
+    return exports_cls, creator
+
+
+def _no_failed_download(creator):
+    creator.failed_files = []
+
+
+def _run_export_with_creator(
+    workspace, user, dest_backends, setup_creator=_no_failed_download, setup_source=None
+):
+    """Run export() for a saved workspace and user, with the creator (and
+    source) set up by the caller; return (source backend, creator)."""
+    with (
+        patch("core.processing.tasks.FolderCreator") as mock_fc,
+        patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
+    ):
+        source_backend = mock_sm.return_value.get_backend.return_value
+        source_backend.get_workspace_structure.return_value = SourceFolder(name="root")
+        if setup_source:
+            setup_source(source_backend)
+        setup_creator(mock_fc.return_value)
+        mock_dr.get_all.return_value = dest_backends
+
+        export({"workspace": {"id": workspace.id}, "user": {"id": user.id}})  # pylint: disable=no-value-for-parameter
+    return source_backend, mock_fc.return_value
+
+
+@pytest.mark.django_db
+def test_export_streams_files_to_file_by_file_destinations(tmp_path):
+    """Each file is handed over to the destinations, then dropped from the disk."""
+    user = UserFactory()
+    drive = _destination("drive")
+
+    exports_cls, creator = _run_file_by_file_export(
+        _saved_workspace("drive"), user, [drive]
+    )
+
+    exports_cls.assert_called_once_with(ANY, user, [drive])
+    exports = exports_cls.return_value
+    exports.open.assert_called_once_with()
+    exports.close.assert_called_once_with()
+
+    after_download = creator.create_folder.call_args.kwargs["after_download"]
+    local_file = tmp_path / "doc.txt"
+    local_file.write_text("content")
+    row = SimpleNamespace(results={"drive": {"status": FileExportStatus.SENT}})
+    with patch("core.processing.tasks.keep_refused_file") as keep:
+        after_download(row, str(local_file))
+    exports.put.assert_called_once_with(row, str(local_file))
+    keep.assert_not_called()
+    assert not local_file.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", [FileExportStatus.REJECTED, FileExportStatus.FAILED])
+def test_export_keeps_the_files_a_destination_did_not_take(tmp_path, status):
+    """A file a destination refused or failed to receive is kept on S3, for
+    the destination to hand it back to the user once it closes: the disk only
+    holds the file being sent."""
+    exports_cls, creator = _run_file_by_file_export(
+        _saved_workspace("drive"), UserFactory(), [_destination("drive")]
+    )
+
+    after_download = creator.create_folder.call_args.kwargs["after_download"]
+    local_file = tmp_path / "doc.txt"
+    local_file.write_text("content")
+    row = SimpleNamespace(results={"drive": {"status": status}})
+    with patch("core.processing.tasks.keep_refused_file") as keep:
+        after_download(row, str(local_file))
+    keep.assert_called_once_with(exports_cls.return_value.run, row, str(local_file))
+    assert not local_file.exists()
+
+
+@pytest.mark.django_db
+def test_export_fails_when_a_destination_failed():
+    """A failed destination fails the task, with its error as the cause."""
+    with pytest.raises(RuntimeError, match="drive") as raised:
+        _run_file_by_file_export(
+            _saved_workspace("drive", "archive"),
+            UserFactory(),
+            [_destination("drive"), _destination("archive")],
+            failures={"drive": ValueError("401")},
+        )
+
+    assert isinstance(raised.value.__cause__, ValueError)
+
+
+def _disk_full(creator):
+    creator.create_folder.side_effect = OSError("disk full")
+
+
+def _every_download_failed(creator):
+    creator.create_folder.return_value = "/tmp/ws-1"
+    creator.failed_files = [{"id": "f1", "error": "403"}]
+    creator.files_count = 1
+    creator.files_success = 0
+
+
+@pytest.mark.parametrize(
+    "setup_creator,error",
+    [(_disk_full, "disk full"), (_every_download_failed, "failed to download")],
+)
+@pytest.mark.django_db
+def test_export_aborts_file_by_file_destinations_when_the_run_fails(
+    setup_creator, error
+):
+    """A run failing before the end leaves no destination half open."""
+    with (
+        patch("core.processing.tasks.FileExports") as exports_cls,
+        pytest.raises((OSError, RuntimeError), match=error),
+    ):
+        _run_export_with_creator(
+            _saved_workspace("drive"),
+            UserFactory(),
+            [_destination("drive")],
+            setup_creator,
+        )
+
+    exports_cls.return_value.abort.assert_called_once_with()
+    exports_cls.return_value.close.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -423,10 +634,13 @@ def mock_tracker_cls():
         yield tracker_cls
 
 
-def _run_export_with_tracker(workspace, user, dest_backends, setup_creator=None):
+def _run_export_with_tracker(
+    workspace, user, dest_backends, setup_creator=None, failures=None
+):
     """Run export() with standard mocks; return (creator, source folder)."""
     folder = SourceFolder(name="root")
     with (
+        patch("core.processing.tasks.FileExports") as exports_cls,
         patch("core.models.Workspace.objects.get", return_value=workspace),
         patch("core.models.User.objects.get", return_value=user),
         patch("core.processing.tasks.SourceManager") as mock_sm,
@@ -440,15 +654,10 @@ def _run_export_with_tracker(workspace, user, dest_backends, setup_creator=None)
         if setup_creator:
             setup_creator(creator)
         mock_dr.get_all.return_value = dest_backends
+        exports_cls.return_value.close.return_value = failures or {}
 
         export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
     return creator, folder
-
-
-def _destination(name):
-    destination = MagicMock()
-    destination.name = name
-    return destination
 
 
 def test_export_feeds_integrity_tracker_and_saves_it(workspace, user, mock_tracker_cls):
@@ -460,16 +669,12 @@ def test_export_feeds_integrity_tracker_and_saves_it(workspace, user, mock_track
         Workspace.Status.SUCCESS if name == "archive" else Workspace.Status.PENDING
     )
 
-    creator, folder = _run_export_with_tracker(
-        workspace, user, [dest_archive, dest_drive]
-    )
+    _, folder = _run_export_with_tracker(workspace, user, [dest_archive, dest_drive])
 
     mock_tracker_cls.assert_called_once_with(workspace, folder)
     tracker = mock_tracker_cls.return_value
     tracker.set_kept_files.assert_called_once_with(folder)
-    tracker.set_retrieval.assert_called_once_with(
-        ANY, creator.get_workspace_path.return_value
-    )
+    tracker.set_retrieval.assert_called_once_with(ANY)
     assert tracker.set_retrieval.call_args.args[0].workspace is workspace
     tracker.add_exported_destination.assert_called_once_with(dest_drive)
     tracker.save.assert_called_once_with(ANY, run_failed=False)
@@ -480,10 +685,13 @@ def test_export_saves_integrity_report_when_a_destination_fails(
 ):
     """A failing destination is still checked and the original error propagates."""
     dest_drive = _destination("drive")
-    dest_drive.export.side_effect = RuntimeError("Drive down")
 
-    with pytest.raises(RuntimeError, match="Drive down"):
-        _run_export_with_tracker(workspace, user, [dest_drive])
+    with pytest.raises(RuntimeError, match="drive") as raised:
+        _run_export_with_tracker(
+            workspace, user, [dest_drive], failures={"drive": ValueError("down")}
+        )
+
+    assert isinstance(raised.value.__cause__, ValueError)
 
     tracker = mock_tracker_cls.return_value
     tracker.add_exported_destination.assert_called_once_with(dest_drive)
@@ -586,358 +794,6 @@ def test_export_calls_begin_export_with_workspace(workspace, user):
     """begin_export() receives the workspace being migrated."""
     source_backend, _, _ = _run_export(workspace, user)
     source_backend.begin_export.assert_called_once_with(workspace)
-
-
-# ---------------------------------------------------------------------------
-# list_work_dir
-# ---------------------------------------------------------------------------
-
-
-def test_list_work_dir_logs_files(tmp_path, settings):
-    """list_work_dir() iterates over files and directories in APP_WORK_DIR."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    (tmp_path / "file.txt").write_text("content")
-    (tmp_path / "subdir").mkdir()
-
-    list_work_dir()  # must not raise — logging is the side effect
-
-
-# ---------------------------------------------------------------------------
-# list_workspace_dir
-# ---------------------------------------------------------------------------
-
-
-def test_list_workspace_dir_logs_files(tmp_path, settings):
-    """list_workspace_dir() walks the workspace directory and logs each file."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    ws = MagicMock(spec=Workspace)
-    ws.id = "ws-log"
-    workspace_dir = tmp_path / "workspace_ws-log"
-    workspace_dir.mkdir()
-    (workspace_dir / "doc.pdf").write_text("data")
-
-    list_workspace_dir(ws)  # must not raise
-
-
-# ---------------------------------------------------------------------------
-# cleanup_workspace_dir
-# ---------------------------------------------------------------------------
-
-
-def test_cleanup_workspace_dir_deletes_folder_and_archive(tmp_path, settings):
-    """cleanup_workspace_dir() deletes the local folder and the S3 archive."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    ws = MagicMock(spec=Workspace)
-    ws.id = "ws-clean"
-    workspace_dir = tmp_path / "workspace_ws-clean"
-    workspace_dir.mkdir()
-
-    with patch("core.processing.tasks.ArchiveManager") as mock_archive_cls:
-        cleanup_workspace_dir(ws)
-
-    assert not workspace_dir.exists()
-    mock_archive_cls.return_value.delete_archive.assert_called_once_with(ws)
-
-
-# ---------------------------------------------------------------------------
-# debug_folder
-# ---------------------------------------------------------------------------
-
-
-def test_debug_folder_recurses_into_children():
-    """debug_folder() recurses into nested SourceFolders without error."""
-    folder = SourceFolder(
-        name="root",
-        children=[
-            SourceFolder(name="child", children=[SourceFolder(name="grandchild")])
-        ],
-    )
-
-    debug_folder(folder)  # must not raise
-
-
-# ---------------------------------------------------------------------------
-# create_task_result_on_publish
-# ---------------------------------------------------------------------------
-
-
-def test_create_task_result_on_publish_stores_result():
-    """create_task_result_on_publish() calls TaskResult.store_result when 'task' is in headers."""
-    headers = {
-        "task": "core.processing.tasks.export",
-        "id": "task-uuid-123",
-        "argsrepr": "[]",
-        "kwargsrepr": "{}",
-    }
-
-    with patch("core.processing.tasks.TaskResult") as mock_task_result_cls:
-        create_task_result_on_publish(headers=headers)
-
-    mock_task_result_cls.objects.store_result.assert_called_once()
-
-
-def test_create_task_result_on_publish_skips_when_no_task_key():
-    """create_task_result_on_publish() returns early when 'task' is not in headers."""
-    with patch("core.processing.tasks.TaskResult") as mock_task_result_cls:
-        create_task_result_on_publish(headers={"id": "some-id"})
-
-    mock_task_result_cls.objects.store_result.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# task_success signal handler
-# ---------------------------------------------------------------------------
-
-
-def test_task_success_handler_saves_workspace_and_cleans_up():
-    """task_success() saves the workspace and calls cleanup_workspace_dir."""
-    mock_sender = MagicMock()
-    mock_sender.request.id = "task-id-1"
-
-    mock_task_result = MagicMock(spec=TaskResult)
-    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
-    mock_workspace = MagicMock(spec=Workspace)
-    mock_extra_task.workspace = mock_workspace
-
-    with (
-        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
-        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
-        patch("core.processing.tasks.cleanup_workspace_dir") as mock_cleanup,
-    ):
-        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
-        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
-
-        task_success_handler(sender=mock_sender)
-
-    mock_workspace.save.assert_called_once()
-    mock_cleanup.assert_called_once_with(mock_workspace)
-
-
-# ---------------------------------------------------------------------------
-# task_failure signal handler
-# ---------------------------------------------------------------------------
-
-
-def test_task_failure_handler_sets_pending_statuses_to_failure():
-    """task_failure() sets PENDING destination statuses to FAILURE."""
-    mock_sender = MagicMock()
-    mock_sender.request.id = "task-id-2"
-
-    mock_task_result = MagicMock(spec=TaskResult)
-    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
-    mock_workspace = MagicMock(spec=Workspace)
-    mock_workspace.destination_statuses = {
-        "archive": Workspace.Status.PENDING,
-        "resana": Workspace.Status.SUCCESS,
-    }
-    mock_extra_task.workspace = mock_workspace
-
-    with (
-        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
-        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
-        patch("core.processing.tasks.cleanup_workspace_dir"),
-        patch("core.processing.tasks.MailsManager"),
-    ):
-        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
-        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
-
-        task_failure_handler(sender=mock_sender)
-
-    mock_workspace.set_destination_status.assert_called_once_with(
-        "archive", Workspace.Status.FAILURE
-    )
-    mock_workspace.save.assert_called_once()
-
-
-def test_task_failure_handler_sends_fail_mail():
-    """task_failure() sends a failure notification email."""
-    mock_sender = MagicMock()
-    mock_sender.request.id = "task-id-3"
-
-    mock_task_result = MagicMock(spec=TaskResult)
-    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
-    mock_workspace = MagicMock(spec=Workspace)
-    mock_workspace.destination_statuses = {}
-    mock_extra_task.workspace = mock_workspace
-
-    with (
-        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
-        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
-        patch("core.processing.tasks.cleanup_workspace_dir"),
-        patch("core.processing.tasks.MailsManager") as mock_mails_cls,
-    ):
-        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
-        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
-
-        task_failure_handler(sender=mock_sender)
-
-    mock_mails_cls.return_value.send_fail_mail.assert_called_once_with(
-        mock_extra_task.user, mock_workspace, source_token_expired=False
-    )
-
-
-def test_task_failure_handler_asks_to_log_in_again_on_expired_source_token():
-    """A run that failed on an expired source token tells the user to log in
-    to the source again before relaunching."""
-    mock_sender = MagicMock()
-    mock_sender.request.id = "task-id-4"
-    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
-    mock_workspace = MagicMock(spec=Workspace)
-    mock_workspace.destination_statuses = {}
-    mock_extra_task.workspace = mock_workspace
-
-    with (
-        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
-        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
-        patch("core.processing.tasks.cleanup_workspace_dir"),
-        patch("core.processing.tasks.MailsManager") as mock_mails_cls,
-    ):
-        mock_tr_cls.objects.filter.return_value.first.return_value = MagicMock(
-            spec=TaskResult
-        )
-        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
-
-        task_failure_handler(
-            sender=mock_sender,
-            exception=ResanaTokenExpired("Resana offline token is no longer valid."),
-        )
-
-    mock_mails_cls.return_value.send_fail_mail.assert_called_once_with(
-        mock_extra_task.user, mock_workspace, source_token_expired=True
-    )
-
-
-# ---------------------------------------------------------------------------
-# migration_finished analytics
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "handler,status",
-    [(task_success_handler, "success"), (task_failure_handler, "failure")],
-)
-def test_task_handlers_capture_migration_finished(handler, status):
-    """Both end-of-task handlers emit migration_finished with the final status."""
-    mock_sender = MagicMock()
-    mock_sender.request.id = "task-id-4"
-
-    mock_task_result = MagicMock(spec=TaskResult)
-    mock_task_result.date_created = timezone.now() - timedelta(seconds=42)
-    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
-    mock_extra_task.task_result = mock_task_result
-    mock_workspace = MagicMock(spec=Workspace)
-    mock_workspace.destination_statuses = {}
-    mock_workspace.is_truncated = True
-    mock_workspace.download_errors = [{"name": "a"}, {"name": "b"}]
-    mock_workspace.upload_errors = [{"path": "c"}]
-    mock_extra_task.workspace = mock_workspace
-    mock_extra_task.integrity_check_passed = False
-    mock_extra_task.integrity_report = {
-        "summary": {
-            "source_files_count": 7,
-            "migrated_files_count": 5,
-            "stages": {"ok": 5, "analysis_unfinished": 2},
-        }
-    }
-
-    with (
-        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
-        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
-        patch("core.processing.tasks.cleanup_workspace_dir"),
-        patch("core.processing.tasks.MailsManager"),
-        patch("core.processing.tasks.workspaces_counts", return_value={"c": 1}),
-        patch(
-            "core.processing.tasks.local_files_stats",
-            return_value={"workspace_size_bytes": 3},
-        ),
-        patch("core.processing.tasks.posthog_capture") as capture,
-    ):
-        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
-        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
-
-        handler(sender=mock_sender)
-
-    capture.assert_called_once()
-    event, user, properties = capture.call_args.args
-    assert event == "migration_finished"
-    assert user is mock_extra_task.user
-    assert capture.call_args.kwargs == {"workspace": mock_workspace}
-    assert properties["status"] == status
-    assert properties["is_truncated"] is True
-    assert properties["download_errors_count"] == 2
-    assert properties["upload_errors_count"] == 1
-    assert properties["integrity_check_passed"] is False
-    assert properties["migrated_files_count"] == 5
-    assert properties["source_files_count"] == 7
-    assert properties["analysis_unfinished_count"] == 2
-    assert 42 <= properties["duration_seconds"] < 60
-    assert properties["$set"] == {"c": 1}
-    assert properties["workspace_size_bytes"] == 3
-
-
-def test_migration_finished_file_counts_are_none_without_integrity_report():
-    """Without integrity check, the file counts are sent as None."""
-    mock_sender = MagicMock()
-    mock_sender.request.id = "task-id-5"
-    mock_task_result = MagicMock(spec=TaskResult)
-    mock_task_result.date_created = timezone.now()
-    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
-    mock_extra_task.task_result = mock_task_result
-    mock_extra_task.integrity_report = {}
-    mock_workspace = MagicMock(spec=Workspace)
-    mock_workspace.download_errors = []
-    mock_extra_task.workspace = mock_workspace
-
-    with (
-        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
-        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
-        patch("core.processing.tasks.cleanup_workspace_dir"),
-        patch("core.processing.tasks.workspaces_counts", return_value={}),
-        patch("core.processing.tasks.posthog_capture") as capture,
-    ):
-        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
-        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
-
-        task_success_handler(sender=mock_sender)
-
-    properties = capture.call_args.args[2]
-    assert properties["migrated_files_count"] is None
-    assert properties["source_files_count"] is None
-    assert properties["analysis_unfinished_count"] is None
-
-
-def test_migration_finished_counts_zero_unfinished_analyses_in_a_report():
-    """A report without file under analysis sends 0, not None."""
-    mock_sender = MagicMock()
-    mock_sender.request.id = "task-id-6"
-    mock_task_result = MagicMock(spec=TaskResult)
-    mock_task_result.date_created = timezone.now()
-    mock_extra_task = MagicMock(spec=ExtraTaskInfo)
-    mock_extra_task.task_result = mock_task_result
-    mock_extra_task.integrity_report = {
-        "summary": {
-            "source_files_count": 1,
-            "migrated_files_count": 1,
-            "stages": {"ok": 1},
-        }
-    }
-    mock_workspace = MagicMock(spec=Workspace)
-    mock_workspace.download_errors = []
-    mock_extra_task.workspace = mock_workspace
-
-    with (
-        patch("core.processing.tasks.TaskResult") as mock_tr_cls,
-        patch("core.processing.tasks.ExtraTaskInfo") as mock_et_cls,
-        patch("core.processing.tasks.cleanup_workspace_dir"),
-        patch("core.processing.tasks.workspaces_counts", return_value={}),
-        patch("core.processing.tasks.posthog_capture") as capture,
-    ):
-        mock_tr_cls.objects.filter.return_value.first.return_value = mock_task_result
-        mock_et_cls.objects.filter.return_value.first.return_value = mock_extra_task
-
-        task_success_handler(sender=mock_sender)
-
-    assert capture.call_args.args[2]["analysis_unfinished_count"] == 0
 
 
 def test_export_logs_token_status_before_migrating(workspace, user):

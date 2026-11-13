@@ -1,5 +1,6 @@
 import os
 import shutil
+from typing import Callable
 
 from django.conf import settings
 
@@ -26,7 +27,12 @@ class FolderCreator:
         workspace: Workspace,
         run: MigrationRun,
         source_backend: AbstractSourceBackend,
+        after_download: Callable[[MigrationFile, str], None] | None = None,
     ) -> str:
+        """
+        Download every file of the run into the local folder. after_download, if
+        given, gets each downloaded file with its local path.
+        """
         self.workspace = workspace
         self.files_count = run.files.count()
         self.delete_folder(workspace)
@@ -42,7 +48,12 @@ class FolderCreator:
                 self.__add_failed_file(migration_file)
                 continue
             logger.info("Downloading file %s/%s ...", index, self.files_count)
-            self.__download_file(migration_file, path, source_backend)
+            local_path = os.path.join(path, migration_file.path)
+            self.__download_file(migration_file, local_path, source_backend)
+            if migration_file.status != MigrationFile.Status.DOWNLOADED:
+                continue
+            if after_download is not None:
+                after_download(migration_file, local_path)
 
         return path
 
@@ -57,13 +68,11 @@ class FolderCreator:
     def __download_file(
         self,
         migration_file: MigrationFile,
-        root: str,
+        local_path: str,
         source_backend: AbstractSourceBackend,
     ):
         try:
-            download_migration_file(
-                migration_file, source_backend, os.path.join(root, migration_file.path)
-            )
+            download_migration_file(migration_file, source_backend, local_path)
         except SourceTokenExpired:
             # The run stops, so the user is asked to log in again.
             self.__add_failed_file(migration_file)

@@ -4,13 +4,12 @@
 
 import uuid
 from datetime import timedelta
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 from django.utils import timezone
 
 import pytest
 from cryptography.fernet import Fernet
-from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError, Timeout
 
 from core.destinations.drive.drive_backend import (
@@ -20,6 +19,8 @@ from core.destinations.drive.drive_backend import (
     user_has_usable_drive_token,
 )
 from core.encryption import decrypt_token, encrypt_token
+from core.factories import UserFactory
+from core.models import User
 from core.tests.destinations.drive.drive_http_mock import patch_drive_http
 
 TEST_KEY = Fernet.generate_key().decode()
@@ -301,68 +302,6 @@ def test_service_account_delete_item(settings):
     )
 
 
-def test_service_account_upload_to_s3_puts_file_content():
-    """upload_to_s3() sends a PUT with file content to the presigned URL (no Drive token)."""
-    file_content = b"binary content"
-    policy_url = "https://s3.example.com/file.pdf?sig=x"
-
-    with (
-        patch_drive_http() as mock_requests,
-        patch("builtins.open", mock_open(read_data=file_content)),
-    ):
-        mock_requests.put.return_value.raise_for_status = MagicMock()
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
-
-    mock_requests.put.assert_called_once_with(
-        policy_url,
-        data=file_content,
-        timeout=300,
-    )
-
-
-def test_service_account_upload_to_s3_logs_response_body_on_error():
-    """A failed S3 PUT logs the error response body before raising."""
-    policy_url = "https://s3.example.com/file.pdf?sig=x"
-    error_response = MagicMock()
-    error_response.ok = False
-    error_response.status_code = 400
-    error_response.text = "<Error><Code>SignatureDoesNotMatch</Code></Error>"
-    error_response.raise_for_status.side_effect = HTTPError(response=error_response)
-
-    with (
-        patch_drive_http() as mock_requests,
-        patch("core.destinations.drive.drive_backend.logger") as mock_logger,
-        patch("builtins.open", mock_open(read_data=b"binary content")),
-        pytest.raises(HTTPError),
-    ):
-        mock_requests.put.return_value = error_response
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
-
-    mock_logger.error.assert_called_once()
-    assert "SignatureDoesNotMatch" in mock_logger.error.call_args[0][3]
-
-
-def test_service_account_upload_to_s3_retries_on_connection_error_then_succeeds():
-    """A transient ConnectionError on the S3 PUT is retried and succeeds."""
-    file_content = b"binary content"
-    policy_url = "https://s3.example.com/file.pdf?sig=x"
-
-    success_response = MagicMock()
-    success_response.raise_for_status = MagicMock()
-
-    with (
-        patch_drive_http() as mock_requests,
-        patch("builtins.open", mock_open(read_data=file_content)),
-    ):
-        mock_requests.put.side_effect = [
-            RequestsConnectionError("connection reset"),
-            success_response,
-        ]
-        DriveServiceAccountBackend().upload_to_s3(policy_url, "/tmp/doc.pdf")
-
-    assert mock_requests.put.call_count == 2
-
-
 def test_service_account_notify_upload_ended(settings):
     """notify_upload_ended() posts to /external_api/v1.0/items/{id}/upload-ended/."""
     settings.DRIVE_API_BASE_URL = "https://drive.example.com"
@@ -638,6 +577,82 @@ def test_user_token_refresh_keeps_old_refresh_token_when_none_returned(settings)
         DriveUserTokenBackend(user)._get_token()
 
     assert decrypt_token(user.oidc_refresh_token) == "keep-this-refresh"
+
+
+def _oidc_settings(settings):
+    settings.OIDC_OP_TOKEN_ENDPOINT = "https://oidc.example.com/token"
+    settings.OIDC_RP_CLIENT_ID = "osmose-client"
+    settings.OIDC_RP_CLIENT_SECRET = "osmose-secret"
+
+
+def _store_tokens(user, access_token, refresh_token, expires_at):
+    user.oidc_access_token = encrypt_token(access_token)
+    user.oidc_refresh_token = encrypt_token(refresh_token)
+    user.oidc_token_expires_at = expires_at
+    user.save()
+
+
+def _token_response(access_token, refresh_token):
+    response = MagicMock()
+    response.json.return_value = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_in": 60,
+    }
+    return response
+
+
+@pytest.mark.django_db
+def test_user_token_reuses_the_token_another_process_refreshed(settings):
+    """Two processes holding the same expired token: the second one takes the
+    token the first stored, instead of spending the refresh token again."""
+    _oidc_settings(settings)
+    user = UserFactory()
+    _store_tokens(user, "expired", "r1", timezone.now() - timedelta(seconds=1))
+    first = DriveUserTokenBackend(User.objects.get(pk=user.pk))
+    second = DriveUserTokenBackend(User.objects.get(pk=user.pk))
+
+    with patch_drive_http() as mock_requests:
+        mock_requests.post.return_value = _token_response("new", "r2")
+        assert first._get_token() == "new"
+        assert second._get_token() == "new"
+
+    mock_requests.post.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_user_token_refreshes_with_the_refresh_token_stored_meanwhile(settings):
+    """A refresh token another process replaced is never sent: the provider
+    may have revoked it."""
+    _oidc_settings(settings)
+    user = UserFactory()
+    _store_tokens(user, "expired", "r1", timezone.now() - timedelta(seconds=1))
+    backend = DriveUserTokenBackend(User.objects.get(pk=user.pk))
+    _store_tokens(user, "expired-too", "r2", timezone.now() - timedelta(seconds=1))
+
+    with patch_drive_http() as mock_requests:
+        mock_requests.post.return_value = _token_response("new", "r3")
+        assert backend._get_token() == "new"
+
+    assert mock_requests.post.call_args.kwargs["data"]["refresh_token"] == "r2"
+
+
+@pytest.mark.django_db
+def test_user_token_refused_by_drive_is_refreshed_even_if_not_expired(settings):
+    """A token Drive refused (401) is refreshed, though its expiry is ahead."""
+    _oidc_settings(settings)
+    user = UserFactory()
+    _store_tokens(user, "revoked", "r1", timezone.now() + timedelta(hours=1))
+    backend = DriveUserTokenBackend(User.objects.get(pk=user.pk))
+    refused, accepted = MagicMock(status_code=401), MagicMock(status_code=200)
+    accepted.json.return_value = {"id": "me"}
+
+    with patch_drive_http() as mock_requests:
+        mock_requests.get.side_effect = [refused, accepted]
+        mock_requests.post.return_value = _token_response("new", "r2")
+        assert backend.get_me() == {"id": "me"}
+
+    mock_requests.post.assert_called_once()
 
 
 def test_user_token_raises_when_no_refresh_token():

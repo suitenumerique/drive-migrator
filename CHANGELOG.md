@@ -13,9 +13,16 @@ and this project adheres to
 
 - Track each file of a migration in its own database row, the first step
   toward migrating each file in its own task #242
+- Send each file to its destinations as soon as it is downloaded: a
+  migration no longer keeps the whole workspace on disk, and a failing
+  destination no longer stops the others #242
+- Build the archive and rejected files zips from S3 at download time,
+  instead of storing them #242
 
 ### Fixed
 
+- Refresh the ProConnect token one process at a time, so concurrent
+  migrations to Drive no longer revoke each other's token #242
 - Refresh the Resana offline token before its 1 h idle timeout, so long
   migrations no longer fail after 3 h #304
 - Fail a Resana migration before locking the workspace when the offline

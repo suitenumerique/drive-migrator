@@ -12,7 +12,7 @@ from celery.utils.log import get_task_logger
 from core.backends.destination import DestinationRegistry
 from core.backends.source import SourceManager
 from core.models import Workspace
-from core.processing.rejected_files import REJECTED_FILES_S3_KEY
+from core.processing.rejected_files import has_rejected_files
 
 logger = get_task_logger(__name__)
 
@@ -85,7 +85,7 @@ class MailsManager:
                 + urlencode({"workspaceId": workspace.id, "destination": name}),
             }
             for name, metadata in workspace.destination_metadata.items()
-            if metadata.get(REJECTED_FILES_S3_KEY)
+            if has_rejected_files(metadata)
         ]
 
     def send_fail_mail(

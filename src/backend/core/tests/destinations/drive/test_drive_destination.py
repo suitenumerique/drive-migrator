@@ -1,5 +1,8 @@
-"""Tests for DriveDestinationBackend."""
+"""Tests for DriveDestinationBackend, exported file by file."""
 
+# pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
+
+import os
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -9,32 +12,17 @@ from requests.exceptions import HTTPError, Timeout
 from core.backends.destination import (
     AbstractDestinationBackend,
     AccountPolicy,
+    FileExportStatus,
     RejectedFile,
 )
 from core.destinations.drive.backend import DriveDestinationBackend
 from core.destinations.drive.drive_backend import FileRejection
+from core.factories import UserFactory
 from core.models import Workspace
 
+pytestmark = pytest.mark.django_db
 
-@pytest.fixture(autouse=True)
-def _patch_mails_manager():
-    """Prevent real MailsManager calls (DB access) across all tests in this module."""
-    with patch("core.destinations.drive.backend.MailsManager") as mock_cls:
-        mock_cls.return_value.send_migration_mail = MagicMock()
-        yield mock_cls
-
-
-@pytest.fixture(autouse=True, name="rejected_files_archive")
-def fixture_rejected_files_archive():
-    """Capture what export() hands to the rejected files archive."""
-    with patch("core.destinations.drive.backend.RejectedFilesArchive") as mock_cls:
-        yield mock_cls
-
-
-def _recorded(rejected_files_archive):
-    """Files the last export() reported as refused."""
-    _, rejected = rejected_files_archive.return_value.build.call_args.args
-    return rejected
+CSV_NAME = "users_list_by_migrator.csv"
 
 
 def test_implements_abstract_destination():
@@ -50,593 +38,192 @@ def test_label_is_set():
     assert DriveDestinationBackend.label != ""
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_workspace(migration_user=None, members=None):
-    ws = MagicMock(spec=Workspace)
-    ws.title = "My Workspace"
-    ws.destination_statuses = {}
-    ws.migration_user = migration_user
-    ws.members = members or []
-    return ws
-
-
-def _make_migration_user(email="alice@example.com"):
-    member = MagicMock()
-    member.email = email
-    return member
-
-
-# ---------------------------------------------------------------------------
-# service_account mode (DRIVE_AUTH_MODE = "service_account")
-# ---------------------------------------------------------------------------
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_uses_service_account_backend(
-    mock_cls, tmp_path, settings
-):
-    """In service_account mode, export() instantiates DriveServiceAccountBackend."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
-
-    mock_cls.assert_called_once_with()
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_creates_root_folder(mock_cls, tmp_path, settings):
-    """export() creates a root Drive folder named after the workspace title."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace()
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    mock_backend.create_folder.assert_called_once_with("My Workspace")
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_stores_root_id_in_metadata(mock_cls, tmp_path, settings):
-    """export() stores the root folder ID in destination_metadata."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace()
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    workspace.set_destination_metadata.assert_called_once_with(
-        "drive", {"workspace_id": "root-uuid"}
-    )
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_creates_subfolders(mock_cls, tmp_path, settings):
-    """export() mirrors the local folder tree as Drive subfolders."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.create_subfolder.return_value = {"id": "sub-uuid"}
-    (tmp_path / "docs").mkdir()
-
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
-
-    mock_backend.create_subfolder.assert_called_once_with("docs", parent_id="root-uuid")
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_uploads_files(mock_cls, tmp_path, settings):
-    """export() uploads each file via the 3-step Drive upload process."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.create_file_item.return_value = {
-        "id": "file-uuid",
-        "policy": "https://s3.example.com/file.pdf?sig=x",
-    }
-    (tmp_path / "report.pdf").write_bytes(b"content")
-
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
-
-    mock_backend.create_file_item.assert_called_once_with(
-        "report.pdf", parent_id="root-uuid", size=7, item_id=ANY
-    )
-    mock_backend.upload_to_s3.assert_called_once_with(
-        "https://s3.example.com/file.pdf?sig=x", str(tmp_path / "report.pdf")
-    )
-    mock_backend.notify_upload_ended.assert_called_once_with("file-uuid")
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_shares_with_migration_user_in_drive(
-    mock_cls, tmp_path, settings
-):
-    """In service_account mode, migration_user is shared when they exist in Drive."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = {"id": "user-uuid"}
-    workspace = _make_workspace(
-        migration_user=_make_migration_user("alice@example.com")
-    )
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    mock_backend.find_user_by_email.assert_any_call("alice@example.com")
-    mock_backend.share_with_user.assert_any_call("root-uuid", "user-uuid")
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_invites_migration_user_not_in_drive(
-    mock_cls, tmp_path, settings
-):
-    """In service_account mode, migration_user is invited when not registered in Drive."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = None
-    workspace = _make_workspace(migration_user=_make_migration_user("new@example.com"))
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    mock_backend.invite_by_email.assert_any_call("root-uuid", "new@example.com")
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_skips_sharing_when_no_migration_user(
-    mock_cls, tmp_path, settings
-):
-    """In service_account mode, sharing is skipped when migration_user is None."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-
-    DriveDestinationBackend().export(
-        _make_workspace(migration_user=None), MagicMock(), str(tmp_path)
-    )
-
-    mock_backend.find_user_by_email.assert_not_called()
-    mock_backend.share_with_user.assert_not_called()
-    mock_backend.invite_by_email.assert_not_called()
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_shares_with_workspace_members_in_drive(
-    mock_cls, tmp_path, settings
-):
-    """In service_account mode, workspace members who exist in Drive are shared."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = {"id": "user-uuid"}
-    workspace = _make_workspace(
-        members=[
-            {"email": "jean@example.com"},
-            {"email": "alice@example.com"},
-        ]
-    )
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
-    assert "jean@example.com" in emails_queried
-    assert "alice@example.com" in emails_queried
-    assert mock_backend.share_with_user.call_count == 2
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_invites_unknown_workspace_members(
-    mock_cls, tmp_path, settings
-):
-    """In service_account mode, members not in Drive are invited by email."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = None
-    workspace = _make_workspace(members=[{"email": "jean@example.com"}])
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    mock_backend.invite_by_email.assert_called_with("root-uuid", "jean@example.com")
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_sets_status_success(mock_cls, tmp_path, settings):
-    """export() sets destination status to SUCCESS after successful upload."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace()
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
-    )
-    workspace.save.assert_called()
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_service_account_mode_does_not_double_share_migration_user_who_is_also_member(
-    mock_cls, tmp_path, settings
-):
-    """Migration user who is also a workspace member is shared only once."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = {"id": "user-uuid"}
-    workspace = _make_workspace(
-        migration_user=_make_migration_user("alice@example.com"),
-        members=[{"email": "alice@example.com"}],
-    )
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
-    assert emails_queried.count("alice@example.com") == 1
-
-
-# ---------------------------------------------------------------------------
-# user_token mode (DRIVE_AUTH_MODE = "user_token")
-# ---------------------------------------------------------------------------
-
-
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
-def test_user_token_mode_uses_user_token_backend(mock_cls, tmp_path, settings):
-    """In user_token mode, export() instantiates DriveUserTokenBackend with the user."""
-    settings.DRIVE_AUTH_MODE = "user_token"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    user = MagicMock()
-
-    DriveDestinationBackend().export(_make_workspace(), user, str(tmp_path))
-
-    mock_cls.assert_called_once_with(user)
-
-
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
-def test_user_token_mode_does_not_share_with_migration_user(
-    mock_cls, tmp_path, settings
-):
-    """In user_token mode, migration_user is already owner — sharing is skipped."""
-    settings.DRIVE_AUTH_MODE = "user_token"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace(
-        migration_user=_make_migration_user("alice@example.com")
-    )
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
-    assert "alice@example.com" not in emails_queried
-
-
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
-def test_user_token_mode_still_shares_with_other_members(mock_cls, tmp_path, settings):
-    """In user_token mode, other workspace members (not the migration user) are still shared."""
-    settings.DRIVE_AUTH_MODE = "user_token"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = {"id": "other-user-uuid"}
-    workspace = _make_workspace(
-        migration_user=_make_migration_user("alice@example.com"),
-        members=[
-            {"email": "alice@example.com"},  # should be skipped
-            {"email": "bob@example.com"},  # should be shared
-        ],
-    )
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
-    assert "alice@example.com" not in emails_queried
-    assert "bob@example.com" in emails_queried
-
-
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
-def test_user_token_mode_shares_with_members_even_without_migration_user(
-    mock_cls, tmp_path, settings
-):
-    """In user_token mode with no migration_user, members are still shared normally."""
-    settings.DRIVE_AUTH_MODE = "user_token"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.find_user_by_email.return_value = {"id": "user-uuid"}
-    workspace = _make_workspace(
-        migration_user=None,
-        members=[{"email": "bob@example.com"}],
-    )
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
-    assert "bob@example.com" in emails_queried
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_sharing_disabled_skips_share_members(mock_cls, tmp_path, settings):
-    """When DRIVE_SHARE_MEMBERS is False, no sharing or invitation calls are made."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    settings.DRIVE_SHARE_MEMBERS = False
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace(
-        migration_user=_make_migration_user("alice@example.com"),
-        members=[{"email": "bob@example.com"}],
-    )
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    mock_backend.find_user_by_email.assert_not_called()
-    mock_backend.share_with_user.assert_not_called()
-    mock_backend.invite_by_email.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# users_list_by_migrator.csv (shared users list: one email per line)
-# ---------------------------------------------------------------------------
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_uploads_users_csv_when_workspace_has_members(mock_cls, tmp_path, settings):
-    """export() uploads a users_list_by_migrator.csv that lists member emails only."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.create_file_item.return_value = {
-        "id": "file-uuid",
-        "policy": "https://s3.example.com/users_list_by_migrator.csv?sig=x",
-    }
-    captured = {}
-
-    def capture_csv(_policy, path):
-        if str(path).endswith("users_list_by_migrator.csv"):
-            with open(path, encoding="utf-8") as csv_file:
-                captured["lines"] = csv_file.read().splitlines()
-
-    mock_backend.upload_to_s3.side_effect = capture_csv
-    workspace = _make_workspace(
-        members=[
-            {"name": "Doe", "firstName": "Jean", "email": "jean@example.com"},
-            {"name": "Martin", "firstName": "Alice", "email": "alice@example.com"},
-        ]
-    )
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    mock_backend.create_file_item.assert_any_call(
-        "users_list_by_migrator.csv", parent_id="root-uuid", size=ANY, item_id=ANY
-    )
-    mock_backend.upload_to_s3.assert_any_call(
-        "https://s3.example.com/users_list_by_migrator.csv?sig=x",
-        str(tmp_path / "users_list_by_migrator.csv"),
-    )
-    assert captured["lines"] == ["jean@example.com", "alice@example.com"]
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_users_csv_removed_from_local_folder_after_upload(mock_cls, tmp_path, settings):
-    """The temporary users_list_by_migrator.csv is cleaned up from the local folder after export."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.create_file_item.return_value = {
-        "id": "file-uuid",
-        "policy": "https://s3.example.com/users_list_by_migrator.csv?sig=x",
-    }
-    workspace = _make_workspace(
-        members=[{"name": "Doe", "firstName": "Jean", "email": "jean@example.com"}]
-    )
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    assert not (tmp_path / "users_list_by_migrator.csv").exists()
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_no_users_csv_uploaded_when_workspace_has_no_members(
-    mock_cls, tmp_path, settings
-):
-    """No users_list_by_migrator.csv is created or uploaded when the workspace has no members."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace(members=[])
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    uploaded_names = [c.args[0] for c in mock_backend.create_file_item.call_args_list]
-    assert "users_list_by_migrator.csv" not in uploaded_names
-
-
-# ---------------------------------------------------------------------------
-# Files rejected on upload
-# ---------------------------------------------------------------------------
-
-
-def _reject_one_file(destination, *args):  # pylint: disable=unused-argument
-    """Stand-in for _upload_tree recording a file refused by Drive."""
-    destination._upload_log.rejected.append(  # pylint: disable=protected-access
-        RejectedFile("page.txt", "file_type_not_allowed", "file-uuid")
-    )
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_hands_rejected_files_to_the_archive(
-    mock_cls, tmp_path, settings, rejected_files_archive
-):
-    """export() hands the files Drive refused to the rejected files archive."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace()
-
-    with patch.object(
-        DriveDestinationBackend, "_upload_tree", autospec=True
-    ) as upload_tree:
-        upload_tree.side_effect = _reject_one_file
-        destination = DriveDestinationBackend()
-        destination.export(workspace, MagicMock(), str(tmp_path))
-
-    rejected_files_archive.assert_called_once_with(workspace, destination)
-    rejected_files_archive.return_value.build.assert_called_once_with(
-        str(tmp_path),
-        [RejectedFile("page.txt", "file_type_not_allowed", "file-uuid")],
-    )
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_builds_the_rejected_files_archive_before_the_mail(
-    mock_cls, tmp_path, settings, rejected_files_archive, _patch_mails_manager
-):
-    """The archive exists when the mail, which links it, is sent."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
-    calls = []
-    rejected_files_archive.return_value.build.side_effect = lambda *args: calls.append(
-        "archive"
-    )
-    _patch_mails_manager.return_value.send_migration_mail.side_effect = (
-        lambda *args: calls.append("mail")
-    )
-
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
-
-    assert calls == ["archive", "mail"]
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_reports_no_rejection_when_drive_accepts_everything(
-    mock_cls, tmp_path, settings, rejected_files_archive
-):
-    """A run without rejection still reports, to clear a previous run's archive."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
-
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
-
-    assert not _recorded(rejected_files_archive)
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_reports_rejected_files_when_upload_fails(
-    mock_cls, tmp_path, settings, rejected_files_archive
-):
-    """Files refused before a fatal upload error are still reported."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace()
-
-    def reject_then_fail(destination, *args):
-        _reject_one_file(destination)
-        raise RuntimeError("boom")
-
-    with patch.object(
-        DriveDestinationBackend, "_upload_tree", autospec=True
-    ) as upload_tree:
-        upload_tree.side_effect = reject_then_fail
-        with pytest.raises(RuntimeError):
-            DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    assert len(_recorded(rejected_files_archive)) == 1
-
-
-def _upload(sent, rejected):
-    """Stand-in for _upload_tree sending the given paths, Drive refusing some."""
-
-    def upload_tree(destination, *args):  # pylint: disable=unused-argument
-        log = destination._upload_log  # pylint: disable=protected-access
-        for path in sent:
-            log.items[path] = f"id-{path}"
-        for path in rejected:
-            log.rejected.append(
-                RejectedFile(path, "file_type_not_allowed", f"id-{path}")
-            )
-
-    return upload_tree
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_fails_when_drive_rejects_every_file(
-    mock_cls, tmp_path, settings, rejected_files_archive
-):
-    """A migration where Drive refused every file fails instead of reporting success."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace(migration_user=_make_migration_user())
-
-    with patch.object(
-        DriveDestinationBackend, "_upload_tree", autospec=True
-    ) as upload_tree:
-        upload_tree.side_effect = _upload(["a.txt", "b.txt"], ["a.txt", "b.txt"])
-        with pytest.raises(RuntimeError, match="All 2 file"):
-            DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    assert len(_recorded(rejected_files_archive)) == 2
-    mock_backend.find_user_by_email.assert_not_called()
-    workspace.set_destination_status.assert_not_called()
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_succeeds_when_drive_rejects_some_files(mock_cls, tmp_path, settings):
-    """One file sent is enough for the migration to succeed with its gaps listed."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace()
-
-    with patch.object(
-        DriveDestinationBackend, "_upload_tree", autospec=True
-    ) as upload_tree:
-        upload_tree.side_effect = _upload(["a.txt", "b.txt"], ["a.txt"])
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
-    )
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_ignores_the_generated_users_csv_when_checking_rejections(
-    mock_cls, tmp_path, settings
-):
-    """The members CSV is not a source file: sending it does not count, nor does
-    its rejection in a workspace without files."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace()
-    csv_name = "users_list_by_migrator.csv"
-
-    with patch.object(
-        DriveDestinationBackend, "_upload_tree", autospec=True
-    ) as upload_tree:
-        upload_tree.side_effect = _upload([csv_name, "a.txt"], ["a.txt"])
-        with pytest.raises(RuntimeError):
-            DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-        upload_tree.side_effect = _upload([csv_name], [csv_name])
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
-    )
-
-
-def _drive_refusal(code):
+def _drive_refusal(code, status_code=400):
     """Build the HTTPError Drive raises when it refuses a file."""
-    response = MagicMock(status_code=400)
+    response = MagicMock(status_code=status_code)
     response.json.return_value = {
         "type": "validation_error",
         "errors": [{"code": code, "detail": "Refused.", "attr": None}],
     }
-    return HTTPError("400 Client Error", response=response)
+    return HTTPError(f"{status_code} Client Error", response=response)
+
+
+def _drive_results(run):
+    return {row.path: row.results.get("drive") for row in run.files.all()}
+
+
+# ---------------------------------------------------------------------------
+# Drive client
+# ---------------------------------------------------------------------------
+
+
+def test_service_account_mode_creates_one_client_per_run(
+    drive_client, make_run, migrate
+):
+    """In service_account mode, a single client (and token) serves every file."""
+    with patch("core.destinations.drive.backend.DriveServiceAccountBackend") as cls:
+        cls.return_value = drive_client
+        migrate(make_run(paths=["a.txt", "b.txt"]))
+
+    cls.assert_called_once_with()
+
+
+def test_user_token_mode_uses_the_user_token_client(
+    settings, drive_client, make_run, migrate, user
+):
+    """In user_token mode, the client acts with the migration user's token."""
+    settings.DRIVE_AUTH_MODE = "user_token"
+    with patch("core.destinations.drive.backend.DriveUserTokenBackend") as cls:
+        cls.return_value = drive_client
+        migrate(make_run())
+
+    cls.assert_called_once_with(user)
+
+
+# ---------------------------------------------------------------------------
+# open_export(): root folder and every planned folder
+# ---------------------------------------------------------------------------
+
+
+def test_open_creates_the_root_folder_and_keeps_its_id(drive_client, make_run, migrate):
+    """The root folder is named after the workspace, its id kept in its metadata."""
+    run = make_run(paths=[])
+
+    migrate(run)
+
+    drive_client.create_folder.assert_called_once_with("My Workspace")
+    run.workspace.refresh_from_db()
+    assert run.workspace.get_destination_metadata("drive") == {
+        "workspace_id": "root-uuid"
+    }
+
+
+def test_open_creates_every_planned_folder_under_its_parent(
+    drive_client, make_run, migrate
+):
+    """Folders are created parents first, empty ones included, and kept on the run."""
+    run = make_run(paths=[os.path.join("docs", "sub", "a.txt")], dirs=["empty"])
+
+    migrate(run)
+
+    assert drive_client.create_subfolder.call_args_list == [
+        (("empty",), {"parent_id": "root-uuid"}),
+        (("docs",), {"parent_id": "root-uuid"}),
+        (("sub",), {"parent_id": "folder-docs"}),
+    ]
+    run.refresh_from_db()
+    assert run.destinations_state["drive"]["folder_ids"] == {
+        "empty": "folder-empty",
+        "docs": "folder-docs",
+        os.path.join("docs", "sub"): "folder-sub",
+    }
+
+
+def test_a_root_folder_failure_disables_drive(drive_client, make_run, migrate):
+    """Without its root folder, Drive gets no file at all."""
+    drive_client.create_folder.side_effect = RuntimeError("Drive down")
+
+    failures = migrate(make_run())
+
+    assert list(failures) == ["drive"]
+    drive_client.create_file_item.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# put_file(): the three-step upload of one file
+# ---------------------------------------------------------------------------
+
+
+def test_put_uploads_the_file_in_its_folder(drive_client, make_run, migrate, tmp_path):
+    """Each file is created in its Drive folder, sent to S3, then completed."""
+    path = os.path.join("docs", "report.pdf")
+    run = make_run(paths=[path], size=7)
+
+    migrate(run)
+
+    item_id = drive_client.create_file_item.call_args.kwargs["item_id"]
+    drive_client.create_file_item.assert_called_once_with(
+        "report.pdf", parent_id="folder-docs", size=7, item_id=item_id
+    )
+    drive_client.upload_to_s3.assert_called_once_with(
+        "https://s3.example.com/report.pdf", str(tmp_path / path)
+    )
+    drive_client.notify_upload_ended.assert_called_once_with(item_id)
+    assert _drive_results(run) == {
+        path: {"status": FileExportStatus.SENT, "item_id": item_id}
+    }
+
+
+def test_item_ids_are_derived_from_the_rows(drive_client, make_run, migrate, tmp_path):
+    """A replayed file gets the same id again; two files never share one."""
+    run = make_run(paths=["a.txt", "b.txt"])
+
+    migrate(run)
+    first_ids = [
+        call.kwargs["item_id"] for call in drive_client.create_file_item.call_args_list
+    ]
+    drive_client.create_file_item.reset_mock()
+    destination = DriveDestinationBackend()
+    for migration_file in run.files.all():
+        destination.put_file(
+            UserFactory(), run, migration_file, str(tmp_path / migration_file.path)
+        )
+
+    assert len(set(first_ids)) == 2
+    assert [
+        call.kwargs["item_id"] for call in drive_client.create_file_item.call_args_list
+    ] == first_ids
+
+
+def test_put_keeps_the_id_drive_gives_back(drive_client, make_run, migrate):
+    """Drive may replace a recovered pending item: its new id is the one kept."""
+    drive_client.create_file_item.side_effect = lambda title, **kwargs: {
+        "id": "drive-id",
+        "policy": "https://s3.example.com/x",
+    }
+    run = make_run()
+
+    migrate(run)
+
+    drive_client.notify_upload_ended.assert_called_once_with("drive-id")
+    assert _drive_results(run)["report.pdf"]["item_id"] == "drive-id"
+
+
+def test_file_refused_at_upload_ended_is_rejected(drive_client, make_run, migrate):
+    """Drive refusing a file's content records it: the next files are still sent."""
+    drive_client.notify_upload_ended.side_effect = [
+        _drive_refusal("file_type_not_allowed"),
+        None,
+    ]
+    run = make_run(paths=["a.txt", "b.txt"])
+
+    assert migrate(run) == {}
+
+    results = _drive_results(run)
+    assert results["a.txt"] == {
+        "status": FileExportStatus.REJECTED,
+        "item_id": ANY,
+        "error": "file_type_not_allowed",
+    }
+    assert results["b.txt"]["status"] == FileExportStatus.SENT
+
+
+def test_file_refused_at_creation_keeps_the_client_id(drive_client, make_run, migrate):
+    """A file refused before Drive gave an id is listed with the one sent."""
+    drive_client.create_file_item.side_effect = _drive_refusal(
+        "item_create_file_extension_not_allowed"
+    )
+    run = make_run()
+
+    migrate(run)
+
+    sent_id = drive_client.create_file_item.call_args.kwargs["item_id"]
+    assert _drive_results(run)["report.pdf"] == {
+        "status": FileExportStatus.REJECTED,
+        "item_id": sent_id,
+        "error": "item_create_file_extension_not_allowed",
+    }
+    drive_client.upload_to_s3.assert_not_called()
 
 
 def _upstream_block():
@@ -646,97 +233,27 @@ def _upstream_block():
     return HTTPError("403 Client Error", response=response)
 
 
-def _mock_two_file_upload(mock_cls, tmp_path):
-    """Two local files, each getting a Drive item named after it."""
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.create_file_item.side_effect = lambda name, parent_id, size, item_id: {
-        "id": f"id-{name}",
-        "policy": f"https://s3.example.com/{name}",
-    }
-    (tmp_path / "a.txt").write_bytes(b"a")
-    (tmp_path / "b.txt").write_bytes(b"b")
-    return mock_backend
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_file_refused_at_upload_ended_is_skipped(
-    mock_cls, tmp_path, settings, rejected_files_archive
-):
-    """Drive refusing a file's content skips it: the next files are still sent."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
-    mock_backend.notify_upload_ended.side_effect = [
-        _drive_refusal("file_type_not_allowed"),
-        None,
-    ]
-    workspace = _make_workspace()
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    assert mock_backend.notify_upload_ended.call_count == 2
-    assert _recorded(rejected_files_archive) == [
-        RejectedFile("a.txt", "file_type_not_allowed", "id-a.txt")
-    ]
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
-    )
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_file_refused_at_creation_is_skipped(
-    mock_cls, tmp_path, settings, rejected_files_archive
-):
-    """A file refused at creation is listed with the id the migrator sent."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
-    create = mock_backend.create_file_item.side_effect
-    mock_backend.create_file_item.side_effect = [
-        _drive_refusal("item_create_file_extension_not_allowed"),
-        create("b.txt", parent_id="root-uuid", size=1, item_id=None),
-    ]
-    workspace = _make_workspace()
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    sent_id = mock_backend.create_file_item.call_args_list[0].kwargs["item_id"]
-    assert _recorded(rejected_files_archive) == [
-        RejectedFile("a.txt", "item_create_file_extension_not_allowed", sent_id)
-    ]
-    mock_backend.upload_to_s3.assert_called_once_with(
-        "https://s3.example.com/b.txt", str(tmp_path / "b.txt")
-    )
-
-
 @pytest.mark.parametrize(
     "probed_folder", [{"id": "root-uuid"}, None], ids=["found", "not-found"]
 )
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_file_blocked_upstream_at_creation_is_skipped(
-    mock_cls, probed_folder, tmp_path, settings, rejected_files_archive
+def test_file_blocked_upstream_at_creation_is_rejected(
+    drive_client, make_run, migrate, probed_folder
 ):
-    """A file whose creation is blocked in front of Drive is skipped once a
+    """A file whose creation is blocked in front of Drive is refused once a
     payload-less request to its folder gets an answer from Drive, even a 404."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
-    mock_backend.get_item.return_value = probed_folder
-    create = mock_backend.create_file_item.side_effect
-    mock_backend.create_file_item.side_effect = [
-        _upstream_block(),
-        create("b.txt", parent_id="root-uuid", size=1, item_id=None),
-    ]
-    workspace = _make_workspace()
+    drive_client.get_item.return_value = probed_folder
+    drive_client.create_file_item.side_effect = _upstream_block()
+    run = make_run()
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    migrate(run)
 
-    mock_backend.get_item.assert_called_once_with("root-uuid")
-    sent_id = mock_backend.create_file_item.call_args_list[0].kwargs["item_id"]
-    assert _recorded(rejected_files_archive) == [
-        RejectedFile("a.txt", "blocked_upstream", sent_id)
-    ]
-    mock_backend.upload_to_s3.assert_called_once_with(
-        "https://s3.example.com/b.txt", str(tmp_path / "b.txt")
-    )
+    drive_client.get_item.assert_called_once_with("root-uuid")
+    sent_id = drive_client.create_file_item.call_args.kwargs["item_id"]
+    assert _drive_results(run)["report.pdf"] == {
+        "status": FileExportStatus.REJECTED,
+        "item_id": sent_id,
+        "error": "blocked_upstream",
+    }
 
 
 @pytest.mark.parametrize(
@@ -744,158 +261,483 @@ def test_file_blocked_upstream_at_creation_is_skipped(
     [_upstream_block(), Timeout(), RequestsConnectionError()],
     ids=["blocked", "timeout", "connection-error"],
 )
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_upstream_block_of_every_request_stops_the_upload(
-    mock_cls, probe_error, tmp_path, settings, rejected_files_archive
+def test_upstream_block_of_every_request_fails_the_file(
+    drive_client, make_run, migrate, probe_error
 ):
     """A block the payload-less probe also gets (rate limit, IP reputation...)
-    is not the file's: the creation error stops the migration instead of
-    skipping every file."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
-    blocked = _upstream_block()
-    mock_backend.create_file_item.side_effect = blocked
-    mock_backend.get_item.side_effect = probe_error
-    workspace = _make_workspace()
+    is not the file's: it fails like any other error, not as a refusal."""
+    drive_client.create_file_item.side_effect = _upstream_block()
+    drive_client.get_item.side_effect = probe_error
+    run = make_run()
 
-    with pytest.raises(HTTPError) as excinfo:
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    migrate(run)
 
-    assert excinfo.value is blocked
-
-    assert mock_backend.create_file_item.call_count == 1
-    assert not _recorded(rejected_files_archive)
+    assert _drive_results(run)["report.pdf"]["status"] == FileExportStatus.FAILED
 
 
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_upstream_block_at_upload_ended_stops_the_upload(
-    mock_cls, tmp_path, settings, rejected_files_archive
-):
+def test_upstream_block_at_upload_ended_fails_the_file(drive_client, make_run, migrate):
     """upload-ended carries no file name: a block there is not the file's."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
-    mock_backend.notify_upload_ended.side_effect = _upstream_block()
-    workspace = _make_workspace()
+    drive_client.notify_upload_ended.side_effect = _upstream_block()
+    run = make_run()
 
-    with pytest.raises(HTTPError):
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    migrate(run)
 
-    mock_backend.get_item.assert_not_called()
-    assert not _recorded(rejected_files_archive)
+    drive_client.get_item.assert_not_called()
+    assert _drive_results(run)["report.pdf"]["status"] == FileExportStatus.FAILED
 
 
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_other_drive_error_still_stops_the_upload(
-    mock_cls, tmp_path, settings, rejected_files_archive
+@pytest.mark.parametrize(
+    "error",
+    [_drive_refusal("item_upload_type_unavailable"), Timeout("read timed out")],
+    ids=["other_drive_error", "timeout"],
+)
+def test_other_errors_fail_the_file_only(drive_client, make_run, migrate, error):
+    """An error that is not a refusal of the file fails it, not the whole export."""
+    drive_client.notify_upload_ended.side_effect = [error, None]
+    run = make_run(paths=["a.txt", "b.txt"])
+
+    assert migrate(run) == {}
+
+    results = _drive_results(run)
+    assert results["a.txt"] == {
+        "status": FileExportStatus.FAILED,
+        "item_id": ANY,
+        "error": str(error),
+    }
+    assert results["b.txt"]["status"] == FileExportStatus.SENT
+
+
+def test_a_failed_file_is_logged_without_the_error_message(
+    drive_client, make_run, migrate
 ):
-    """An error that is not a refusal of the file still stops the migration."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = _mock_two_file_upload(mock_cls, tmp_path)
-    mock_backend.notify_upload_ended.side_effect = _drive_refusal(
-        "item_upload_type_unavailable"
-    )
-    workspace = _make_workspace()
-
-    with pytest.raises(HTTPError):
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    assert mock_backend.notify_upload_ended.call_count == 1
-    assert not _recorded(rejected_files_archive)
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_logs_rejected_files_once_without_paths(mock_cls, tmp_path, settings):
-    """Rejections are summed up in a single ERROR, with item ids and codes only."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
-
-    with (
-        patch.object(
-            DriveDestinationBackend, "_upload_tree", autospec=True
-        ) as upload_tree,
-        patch("core.destinations.drive.backend.logger") as mock_logger,
-    ):
-        upload_tree.side_effect = _upload(["a.txt", "b.txt"], ["a.txt"])
-        DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
-
-    mock_logger.error.assert_called_once_with(
-        "%s file(s) rejected on upload: %s",
-        1,
-        [("id-a.txt", "file_type_not_allowed")],
-    )
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_logs_nothing_at_error_without_rejection(mock_cls, tmp_path, settings):
-    """A run where Drive accepted every file produces no Sentry event."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
-    (tmp_path / "report.pdf").write_bytes(b"content")
+    """The warning names the error type and status only: the message may hold
+    the URL, hence the file name."""
+    error = _drive_refusal("server_error", 500)
+    drive_client.notify_upload_ended.side_effect = error
 
     with patch("core.destinations.drive.backend.logger") as mock_logger:
-        DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+        migrate(make_run())
 
-    mock_logger.error.assert_not_called()
-
-
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_logs_each_file_before_creating_it(mock_cls, tmp_path, settings):
-    """Each upload is logged with its item id and size, before Drive is called."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    mock_backend.create_file_item.side_effect = RuntimeError("boom")
-    (tmp_path / "report.pdf").write_bytes(b"content")
-
-    with (
-        patch("core.destinations.drive.backend.logger") as mock_logger,
-        pytest.raises(RuntimeError),
-    ):
-        DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
-
-    item_id = mock_backend.create_file_item.call_args.kwargs["item_id"]
-    mock_logger.info.assert_called_once_with("Uploading file %s (%s bytes)", item_id, 7)
-
-
-@patch("core.destinations.drive.backend.DriveUserTokenBackend")
-def test_user_token_mode_sets_status_success(mock_cls, tmp_path, settings):
-    """In user_token mode, export() sets destination status to SUCCESS."""
-    settings.DRIVE_AUTH_MODE = "user_token"
-    mock_backend = mock_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace()
-
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
-
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
+    item_id = drive_client.create_file_item.call_args.kwargs["item_id"]
+    mock_logger.warning.assert_called_once_with(
+        "Upload of file %s failed: %s %s", item_id, "HTTPError", 500
     )
 
 
+@pytest.mark.parametrize(
+    "error",
+    [_drive_refusal("not_authenticated", 401), RuntimeError("cannot refresh token")],
+    ids=["unauthorized", "token_refresh"],
+)
+def test_authentication_errors_disable_drive(drive_client, make_run, migrate, error):
+    """An unusable token would fail every file: Drive gets no more of them."""
+    drive_client.create_file_item.side_effect = error
+    run = make_run(paths=["a.txt", "b.txt"])
+
+    failures = migrate(run)
+
+    assert list(failures) == ["drive"]
+    assert drive_client.create_file_item.call_count == 1
+
+
+def test_put_logs_each_file_before_creating_it(drive_client, make_run, migrate):
+    """Each upload is logged with its item id and size, before Drive is called."""
+    with patch("core.destinations.drive.backend.logger") as mock_logger:
+        migrate(make_run(size=7))
+
+    item_id = drive_client.create_file_item.call_args.kwargs["item_id"]
+    mock_logger.info.assert_any_call("Uploading file %s (%s bytes)", item_id, 7)
+
+
 # ---------------------------------------------------------------------------
-# Completion mail
+# close_export(): members listing, sharing, status and mail
 # ---------------------------------------------------------------------------
 
 
-@patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_sends_drive_ready_mail(
-    mock_backend_cls, tmp_path, settings, _patch_mails_manager
+@pytest.mark.usefixtures("drive_client")
+def test_close_sets_status_success_and_sends_the_mail(
+    make_run, migrate, user, mailoutbox, settings
 ):
-    """export() sends a 'drive_ready' migration mail to the user after upload."""
-    settings.DRIVE_AUTH_MODE = "service_account"
-    mock_backend = mock_backend_cls.return_value
-    mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    workspace = _make_workspace()
-    user = MagicMock()
+    """A completed export is a success, announced by a drive_ready mail."""
+    settings.APP_EMAIL_FORCE_TO = None
+    run = make_run()
 
-    DriveDestinationBackend().export(workspace, user, str(tmp_path))
+    assert migrate(run) == {}
 
-    mock_send = _patch_mails_manager.return_value.send_migration_mail
-    mock_send.assert_called_once()
-    args, kwargs = mock_send.call_args
-    assert args[:3] == (user, workspace, "drive_ready")
-    assert str(args[3]["title"])
-    assert kwargs == {}
+    run.workspace.refresh_from_db()
+    assert run.workspace.get_destination_status("drive") == Workspace.Status.SUCCESS
+    assert [(mail.to, mail.subject) for mail in mailoutbox] == [
+        ([user.email], "Votre espace My Workspace est prêt sur La Suite Drive !")
+    ]
+
+
+def test_close_uploads_the_members_listing(drive_client, make_run, migrate):
+    """The shared members are listed at the root, one email per line, from a
+    temporary file that is then removed."""
+    run = make_run(
+        paths=[],
+        members=[
+            {"name": "Doe", "firstName": "Jean", "email": "jean@example.com"},
+            {"name": "Martin", "firstName": "Alice", "email": "alice@example.com"},
+        ],
+    )
+    sent_contents = []
+
+    def upload_to_s3(_policy, path):
+        with open(path, encoding="utf-8", newline="") as fh:
+            sent_contents.append((os.path.basename(path), fh.read(), path))
+
+    drive_client.upload_to_s3.side_effect = upload_to_s3
+
+    migrate(run)
+
+    drive_client.create_file_item.assert_called_once_with(
+        CSV_NAME, parent_id="root-uuid", size=ANY, item_id=ANY
+    )
+    assert len(sent_contents) == 1
+    name, content, path = sent_contents[0]
+    assert name == CSV_NAME
+    assert content == "jean@example.com\r\nalice@example.com\r\n"
+    assert not os.path.exists(path)
+
+
+def test_close_uploads_no_listing_without_members(drive_client, make_run, migrate):
+    """No CSV is created when the workspace has no members."""
+    migrate(make_run(members=[]))
+
+    titles = [call.args[0] for call in drive_client.create_file_item.call_args_list]
+    assert CSV_NAME not in titles
+
+
+def _sharing_run(make_run, migration_email=None, members=()):
+    migration_user = UserFactory(email=migration_email) if migration_email else None
+    return make_run(
+        paths=[],
+        migration_user=migration_user,
+        members=[{"email": email} for email in members],
+    )
+
+
+def _queried_emails(drive_client):
+    return [call.args[0] for call in drive_client.find_user_by_email.call_args_list]
+
+
+def test_service_account_mode_shares_with_the_migration_user_in_drive(
+    drive_client, make_run, migrate
+):
+    """The migration user is shared when they exist in Drive."""
+    drive_client.find_user_by_email.return_value = {"id": "user-uuid"}
+
+    migrate(_sharing_run(make_run, "alice@example.com"))
+
+    drive_client.find_user_by_email.assert_any_call("alice@example.com")
+    drive_client.share_with_user.assert_any_call("root-uuid", "user-uuid")
+
+
+def test_service_account_mode_invites_users_not_in_drive(
+    drive_client, make_run, migrate
+):
+    """The migration user and members unknown to Drive are invited by email."""
+    drive_client.find_user_by_email.return_value = None
+
+    migrate(_sharing_run(make_run, "new@example.com", ["jean@example.com"]))
+
+    drive_client.invite_by_email.assert_any_call("root-uuid", "new@example.com")
+    drive_client.invite_by_email.assert_any_call("root-uuid", "jean@example.com")
+
+
+def test_service_account_mode_skips_sharing_without_anyone_to_share_with(
+    drive_client, make_run, migrate
+):
+    """Without migration user nor members, no sharing call is made."""
+    migrate(_sharing_run(make_run))
+
+    drive_client.find_user_by_email.assert_not_called()
+    drive_client.share_with_user.assert_not_called()
+    drive_client.invite_by_email.assert_not_called()
+
+
+def test_service_account_mode_shares_with_members_in_drive(
+    drive_client, make_run, migrate
+):
+    """Workspace members who exist in Drive are shared."""
+    drive_client.find_user_by_email.return_value = {"id": "user-uuid"}
+
+    migrate(_sharing_run(make_run, members=["jean@example.com", "alice@example.com"]))
+
+    assert sorted(_queried_emails(drive_client)) == [
+        "alice@example.com",
+        "jean@example.com",
+    ]
+    assert drive_client.share_with_user.call_count == 2
+
+
+def test_migration_user_who_is_also_member_is_shared_once(
+    drive_client, make_run, migrate
+):
+    """Emails are deduplicated across the migration user and the members."""
+    drive_client.find_user_by_email.return_value = {"id": "user-uuid"}
+
+    migrate(_sharing_run(make_run, "alice@example.com", ["alice@example.com"]))
+
+    assert _queried_emails(drive_client) == ["alice@example.com"]
+
+
+def test_user_token_mode_does_not_share_with_the_migration_user(
+    settings, drive_client, make_run, migrate
+):
+    """The token holder already owns the folder: only the other members are shared."""
+    settings.DRIVE_AUTH_MODE = "user_token"
+    drive_client.find_user_by_email.return_value = {"id": "other-user-uuid"}
+    run = _sharing_run(make_run, "alice@example.com", ["alice@example.com", "bob@x.fr"])
+
+    with patch("core.destinations.drive.backend.DriveUserTokenBackend") as cls:
+        cls.return_value = drive_client
+        migrate(run)
+
+    assert _queried_emails(drive_client) == ["bob@x.fr"]
+
+
+def test_user_token_mode_shares_with_members_without_migration_user(
+    settings, drive_client, make_run, migrate
+):
+    """Without a migration user, the members are still shared in user_token mode."""
+    settings.DRIVE_AUTH_MODE = "user_token"
+    drive_client.find_user_by_email.return_value = {"id": "user-uuid"}
+    run = _sharing_run(make_run, members=["bob@example.com"])
+
+    with patch("core.destinations.drive.backend.DriveUserTokenBackend") as cls:
+        cls.return_value = drive_client
+        migrate(run)
+
+    assert _queried_emails(drive_client) == ["bob@example.com"]
+
+
+def test_user_token_mode_sets_status_success(settings, drive_client, make_run, migrate):
+    """The export ends in SUCCESS whatever the auth mode."""
+    settings.DRIVE_AUTH_MODE = "user_token"
+    run = make_run()
+
+    with patch("core.destinations.drive.backend.DriveUserTokenBackend") as cls:
+        cls.return_value = drive_client
+        assert migrate(run) == {}
+
+    run.workspace.refresh_from_db()
+    assert run.workspace.get_destination_status("drive") == Workspace.Status.SUCCESS
+
+
+def test_sharing_disabled_skips_sharing(settings, drive_client, make_run, migrate):
+    """When DRIVE_SHARE_MEMBERS is False, no sharing or invitation is made."""
+    settings.DRIVE_SHARE_MEMBERS = False
+
+    migrate(_sharing_run(make_run, "alice@example.com", ["bob@example.com"]))
+
+    drive_client.find_user_by_email.assert_not_called()
+    drive_client.share_with_user.assert_not_called()
+    drive_client.invite_by_email.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Files Drive refused or failed to receive: archive, all-lost rule
+# ---------------------------------------------------------------------------
+
+
+def _refuse(drive_client, *titles):
+    """Make Drive refuse the content of the files with the given titles."""
+
+    def notify(item_id):
+        if any(item_id == ids[title] for title in titles):
+            raise _drive_refusal("file_type_not_allowed")
+
+    ids = {}
+
+    def create(title, item_id, **_kwargs):
+        ids[title] = item_id
+        return {"id": item_id, "policy": f"https://s3.example.com/{title}"}
+
+    drive_client.create_file_item.side_effect = create
+    drive_client.notify_upload_ended.side_effect = notify
+    return ids
+
+
+def _recorded(rejected_files_archive):
+    """Files the last export handed to the rejected files archive."""
+    _, rejected = rejected_files_archive.return_value.build.call_args.args
+    return rejected
+
+
+def test_rejected_files_are_handed_to_the_archive(
+    drive_client, make_run, migrate, rejected_files_archive
+):
+    """The files Drive refused are handed to the archive of the run."""
+    ids = _refuse(drive_client, "a.txt")
+    run = make_run(paths=["a.txt", "b.txt"])
+    destination = DriveDestinationBackend()
+
+    migrate(run, destination=destination)
+
+    (workspace, archived_for), _ = rejected_files_archive.call_args
+    assert (workspace.pk, archived_for) == (run.workspace.pk, destination)
+    rejected_files_archive.return_value.build.assert_called_once_with(
+        run,
+        [RejectedFile("a.txt", "file_type_not_allowed", ids["a.txt"])],
+    )
+
+
+def test_failed_files_are_handed_to_the_archive(
+    drive_client, make_run, migrate, rejected_files_archive
+):
+    """Files lost to an error are archived too, under a code of their own:
+    the error message may hold URLs."""
+    drive_client.notify_upload_ended.side_effect = [Timeout("read timed out"), None]
+
+    migrate(make_run(paths=["a.txt", "b.txt"]))
+
+    assert _recorded(rejected_files_archive) == [
+        RejectedFile("a.txt", "upload_failed", ANY)
+    ]
+
+
+@pytest.mark.usefixtures("drive_client")
+def test_the_archive_is_built_even_when_nothing_is_rejected(
+    make_run, migrate, rejected_files_archive
+):
+    """A run without rejection still reports, to clear a previous run's errors."""
+    migrate(make_run())
+
+    assert _recorded(rejected_files_archive) == []
+
+
+@pytest.mark.usefixtures("drive_client")
+def test_the_archive_is_built_before_the_mail(
+    make_run, migrate, rejected_files_archive, mailoutbox
+):
+    """The archive exists when the mail, which links it, is sent."""
+    mails_at_build = []
+    rejected_files_archive.return_value.build.side_effect = (
+        lambda *args: mails_at_build.append(len(mailoutbox))
+    )
+
+    migrate(make_run())
+
+    assert mails_at_build == [0]
+    assert len(mailoutbox) == 1
+
+
+def test_rejected_files_are_archived_when_drive_gets_disabled(
+    drive_client, make_run, migrate, rejected_files_archive
+):
+    """Files refused before Drive became unusable are still archived
+    (abort_export)."""
+    ids = _refuse(drive_client, "a.txt")
+    upload = drive_client.upload_to_s3
+
+    def fail_on_second(*_args):
+        if upload.call_count == 2:
+            raise _drive_refusal("not_authenticated", 401)
+
+    upload.side_effect = fail_on_second
+    run = make_run(paths=["a.txt", "b.txt"])
+
+    assert list(migrate(run)) == ["drive"]
+
+    assert _recorded(rejected_files_archive) == [
+        RejectedFile("a.txt", "file_type_not_allowed", ids["a.txt"])
+    ]
+
+
+def test_drive_fails_when_it_rejects_every_file(
+    drive_client, make_run, migrate, rejected_files_archive
+):
+    """An export where Drive refused every file fails instead of reporting success."""
+    _refuse(drive_client, "a.txt", "b.txt")
+    run = make_run(paths=["a.txt", "b.txt"], migration_user=UserFactory())
+
+    failures = migrate(run)
+
+    assert "All 2 file(s)" in str(failures["drive"])
+    assert len(_recorded(rejected_files_archive)) == 2
+    drive_client.find_user_by_email.assert_not_called()
+    run.workspace.refresh_from_db()
+    assert run.workspace.get_destination_status("drive") != Workspace.Status.SUCCESS
+
+
+def test_drive_fails_when_every_file_failed(drive_client, make_run, migrate, settings):
+    """Files lost to errors count like refused ones: nothing reached Drive."""
+    settings.MIGRATION_DESTINATION_MAX_CONSECUTIVE_FAILURES = 10
+    drive_client.notify_upload_ended.side_effect = Timeout("read timed out")
+
+    failures = migrate(make_run(paths=["a.txt", "b.txt"]))
+
+    assert "All 2 file(s)" in str(failures["drive"])
+
+
+def test_drive_succeeds_when_it_rejects_some_files(drive_client, make_run, migrate):
+    """One file sent is enough for the export to succeed with its gaps listed."""
+    _refuse(drive_client, "a.txt")
+    run = make_run(paths=["a.txt", "b.txt"])
+
+    assert migrate(run) == {}
+
+    run.workspace.refresh_from_db()
+    assert run.workspace.get_destination_status("drive") == Workspace.Status.SUCCESS
+
+
+def test_the_members_listing_does_not_count_as_a_sent_file(
+    drive_client, make_run, migrate
+):
+    """The CSV is not a source file: sending it does not save an all-refused export."""
+    _refuse(drive_client, "a.txt")
+    run = make_run(paths=["a.txt"], members=[{"email": "jean@example.com"}])
+
+    assert "drive" in migrate(run)
+
+
+def test_a_workspace_without_files_succeeds_even_if_its_listing_is_refused(
+    drive_client, make_run, migrate, rejected_files_archive
+):
+    """With no source file, a refused CSV alone does not fail the export; the
+    archive leaves it out, being the migrator's file."""
+    ids = _refuse(drive_client, CSV_NAME)
+    run = make_run(paths=[], members=[{"email": "jean@example.com"}])
+
+    assert migrate(run) == {}
+
+    assert _recorded(rejected_files_archive) == [
+        RejectedFile(CSV_NAME, "file_type_not_allowed", ids[CSV_NAME])
+    ]
+
+
+def test_lost_files_are_logged_once_without_paths(drive_client, make_run, migrate):
+    """Refused and failed files are summed up in a single ERROR, with item ids
+    and codes only: error messages may hold URLs, hence file names."""
+    ids = _refuse(drive_client, "a.txt")
+    refuse_a = drive_client.notify_upload_ended.side_effect
+
+    def notify(item_id):
+        if item_id == ids.get("b.txt"):
+            raise Timeout(f"timed out for url: https://drive/{item_id}/b.txt")
+        refuse_a(item_id)
+
+    drive_client.notify_upload_ended.side_effect = notify
+
+    with patch("core.destinations.drive.backend.logger") as mock_logger:
+        migrate(make_run(paths=["a.txt", "b.txt", "c.txt"]))
+
+    mock_logger.error.assert_called_once_with(
+        "%s file(s) not received by Drive: %s",
+        2,
+        [(ids["a.txt"], "file_type_not_allowed"), (ids["b.txt"], "upload_failed")],
+    )
+
+
+@pytest.mark.usefixtures("drive_client")
+def test_nothing_is_logged_at_error_without_rejection(make_run, migrate):
+    """An export where Drive accepted every file produces no Sentry event."""
+    with patch("core.destinations.drive.backend.logger") as mock_logger:
+        migrate(make_run())
+
+    mock_logger.error.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -909,6 +751,7 @@ def test_export_sends_drive_ready_mail(
         ("file_size_exceeded", "Fichier trop volumineux"),
         ("file_size_mismatch", "Fichier corrompu pendant le transfert"),
         ("blocked_upstream", "Fichier bloqué en amont de Drive (ex. pare-feu)"),
+        ("upload_failed", "Fichier non reçu par La Suite Drive (erreur d'envoi)"),
         ("new_code", "Fichier refusé par La Suite Drive"),
     ],
 )

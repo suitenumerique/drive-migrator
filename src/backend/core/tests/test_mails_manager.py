@@ -226,6 +226,24 @@ def test_send_migration_mail_links_the_rejected_files_archive(template_name):
 
 @pytest.mark.django_db
 @override_settings(LOGIN_REDIRECT_URL="http://localhost:3010")
+def test_send_migration_mail_links_the_streamed_zip_of_refused_files():
+    """Refused files listed by a manifest get the same link as a former zip."""
+    workspace = _workspace_with_errors()
+    workspace.destination_metadata = {
+        "drive": {"rejected_files_manifest_key": "rejected/ws/run/drive/manifest.json"}
+    }
+    user = MagicMock()
+    user.email = "user@example.com"
+
+    MailsManager().send_migration_mail(
+        user, workspace, "drive_ready", {"title": "Some Title"}
+    )
+
+    assert "download-rejected-files" in mail.outbox[0].body
+
+
+@pytest.mark.django_db
+@override_settings(LOGIN_REDIRECT_URL="http://localhost:3010")
 def test_send_migration_mail_links_the_zip_of_an_unregistered_destination():
     """A destination no longer configured is named after its slug instead of
     preventing the mail from being sent."""

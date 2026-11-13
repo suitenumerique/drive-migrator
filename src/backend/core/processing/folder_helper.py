@@ -1,9 +1,7 @@
 import os.path
-import shutil
 import threading
 import time
 import urllib.parse
-import zipfile
 
 from django.conf import settings
 
@@ -11,7 +9,6 @@ import boto3
 from celery.utils.log import get_task_logger
 
 from core.models import Workspace
-from core.processing.folder_creator import FolderCreator
 
 logger = get_task_logger(__name__)
 
@@ -38,43 +35,10 @@ class ProgressPercentage:
 
 
 class ArchiveManager:
-    archive_format = "zip"
     # Short-lived on purpose: the URL is regenerated on demand by an authenticated
     # API call, so it only needs to survive the time between generation and the
     # browser actually starting the S3 request (see docs/securisation-lien-export-zip.md).
     download_url_expires_in = 60 * 5
-
-    def zip_workspace_folder(self, workspace: Workspace):
-        folder_creator = FolderCreator()
-        path = folder_creator.get_workspace_path(workspace)
-        shutil.make_archive(path, self.archive_format, path)
-        self._force_utf8_filenames(path + "." + self.archive_format)
-
-    @staticmethod
-    def _force_utf8_filenames(zip_path):
-        # shutil.make_archive (via zipfile) silently falls back to CP437 for
-        # non-ASCII filenames instead of setting the UTF-8 language encoding
-        # flag, which strict unzip clients then misread as mojibake instead of
-        # accented characters (see issue #166). Rewrite each entry with the
-        # flag set, without touching how the archive itself was built.
-        tmp_path = zip_path + ".utf8"
-        with (
-            zipfile.ZipFile(zip_path) as src,
-            zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as dst,
-        ):
-            for info in src.infolist():
-                info.flag_bits |= 0x800
-                dst.writestr(info, src.read(info.filename))
-        os.replace(tmp_path, zip_path)
-
-    def get_archive_path(self, workspace: Workspace):
-        folder_creator = FolderCreator()
-        return folder_creator.get_workspace_path(workspace) + "." + self.archive_format
-
-    def delete_archive(self, workspace: Workspace):
-        path = self.get_archive_path(workspace)
-        if os.path.exists(path):
-            os.remove(path)
 
     def get_s3_resource(self):
         s3 = boto3.resource(
@@ -124,18 +88,6 @@ class ArchiveManager:
 
         return replaced.geturl()
 
-    def upload_archive(self, workspace: Workspace):
-        folder_creator = FolderCreator()
-        path = folder_creator.get_workspace_path(workspace) + "." + self.archive_format
-
-        destination = os.path.basename(path)
-        self.upload_file(path, destination)
-
-        workspace.set_destination_metadata("archive", {"s3_key": destination})
-        workspace.save()
-
-        return self.get_download_url(workspace)
-
     def upload_file(self, path: str, s3_key: str) -> None:
         s3 = self.get_s3_resource()
         bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
@@ -146,3 +98,29 @@ class ArchiveManager:
         s3.meta.client.delete_object(
             Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=s3_key
         )
+
+    def put_object(self, s3_key: str, body: bytes) -> None:
+        s3 = self.get_s3_resource()
+        bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
+        bucket.put_object(Key=s3_key, Body=body)
+
+    def delete_prefix(self, prefix: str) -> None:
+        """Delete every object under the prefix, taken as a folder."""
+        s3 = self.get_s3_resource()
+        bucket = s3.Bucket(settings.AWS_STORAGE_BUCKET_NAME)
+        bucket.objects.filter(Prefix=prefix.rstrip("/") + "/").delete()
+
+    def read_object(self, s3_key: str) -> bytes:
+        s3 = self.get_s3_resource()
+        response = s3.meta.client.get_object(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=s3_key
+        )
+        return response["Body"].read()
+
+    def iter_object(self, s3_key: str, chunk_size: int = 1024 * 1024):
+        """Yield the object chunk by chunk, reaching S3 on the first one only."""
+        s3 = self.get_s3_resource()
+        response = s3.meta.client.get_object(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=s3_key
+        )
+        yield from response["Body"].iter_chunks(chunk_size)

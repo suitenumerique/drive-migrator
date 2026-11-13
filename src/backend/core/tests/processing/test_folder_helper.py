@@ -4,8 +4,6 @@
 # Reaching into ProgressPercentage's internal counters is the only way to assert
 # its progress-tracking state from the outside.
 
-import os
-import zipfile
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -76,115 +74,6 @@ def test_progress_percentage_skips_log_within_throttle(tmp_path):
         pp(200)
 
     mock_logger.info.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# ArchiveManager — local filesystem methods
-# ---------------------------------------------------------------------------
-
-
-def test_get_archive_path(tmp_path, settings):
-    """get_archive_path() returns the workspace folder path with a .zip suffix."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-arch"
-
-    manager = ArchiveManager()
-    path = manager.get_archive_path(workspace)
-
-    assert path == str(tmp_path / "workspace_ws-arch.zip")
-
-
-def test_zip_workspace_folder(tmp_path, settings):
-    """zip_workspace_folder() creates a zip archive of the workspace folder."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-zip"
-    workspace_dir = tmp_path / "workspace_ws-zip"
-    workspace_dir.mkdir()
-    (workspace_dir / "file.txt").write_text("content")
-
-    manager = ArchiveManager()
-    manager.zip_workspace_folder(workspace)
-
-    assert os.path.exists(str(tmp_path / "workspace_ws-zip.zip"))
-
-
-def test_zip_workspace_folder_sets_utf8_flag_on_accented_filenames(tmp_path, settings):
-    """zip_workspace_folder() sets the ZIP UTF-8 language encoding flag on entries.
-
-    Without this flag, tools that follow the ZIP spec strictly (Windows Explorer,
-    some unzip clients) fall back to the local codepage to decode filenames, turning
-    accented bytes into mojibake (see issue #166: "Hébergement" -> "H俠ergement").
-    """
-    settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-accents"
-    workspace_dir = tmp_path / "workspace_ws-accents"
-    subdir = workspace_dir / "Hébergement"
-    subdir.mkdir(parents=True)
-    (subdir / "file.txt").write_text("content")
-
-    manager = ArchiveManager()
-    manager.zip_workspace_folder(workspace)
-
-    zip_path = tmp_path / "workspace_ws-accents.zip"
-    with zipfile.ZipFile(zip_path) as zip_file:
-        infos = zip_file.infolist()
-        assert infos, "archive should not be empty"
-        for info in infos:
-            assert (
-                info.flag_bits & 0x800
-            ), f"UTF-8 flag missing on entry {info.filename!r}"
-        assert any("Hébergement" in info.filename for info in infos)
-
-
-def test_zip_workspace_folder_preserves_file_modification_time(tmp_path, settings):
-    """zip_workspace_folder() keeps each entry's original mtime.
-
-    Forcing the UTF-8 flag must rewrite entries without resetting their metadata
-    (an earlier fix attempt rebuilt ZipInfo from scratch and reset every entry's
-    date to the zipfile default of 1980-01-01).
-    """
-    settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-mtime"
-    workspace_dir = tmp_path / "workspace_ws-mtime"
-    workspace_dir.mkdir()
-    (workspace_dir / "file.txt").write_text("content")
-
-    manager = ArchiveManager()
-    manager.zip_workspace_folder(workspace)
-
-    zip_path = tmp_path / "workspace_ws-mtime.zip"
-    with zipfile.ZipFile(zip_path) as zip_file:
-        info = zip_file.getinfo("file.txt")
-
-    assert info.date_time != (1980, 1, 1, 0, 0, 0)
-
-
-def test_delete_archive_removes_existing_file(tmp_path, settings):
-    """delete_archive() removes the zip file if it exists."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-del"
-    zip_path = tmp_path / "workspace_ws-del.zip"
-    zip_path.write_bytes(b"data")
-
-    manager = ArchiveManager()
-    manager.delete_archive(workspace)
-
-    assert not zip_path.exists()
-
-
-def test_delete_archive_is_safe_when_missing(tmp_path, settings):
-    """delete_archive() does nothing if the zip file does not exist."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-del-missing"
-
-    manager = ArchiveManager()
-    manager.delete_archive(workspace)  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -273,38 +162,6 @@ def test_get_download_url_replaces_netloc_when_download_url_setting_set(settings
     assert "sig=abc" in result
 
 
-def test_upload_archive_uploads_file_and_returns_url(tmp_path, settings):
-    """upload_archive() uploads the zip to S3, stores s3_key in metadata, and returns URL."""
-    settings.APP_WORK_DIR = str(tmp_path)
-    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-up"
-    workspace.get_destination_metadata.return_value = {"s3_key": "workspace_ws-up.zip"}
-
-    # Create a real zip file for ProgressPercentage to stat
-    zip_path = tmp_path / "workspace_ws-up.zip"
-    zip_path.write_bytes(b"fake-zip-data")
-
-    expected_url = "http://localhost:9001/bucket/ws.zip?sig=xyz"
-
-    with patch("core.processing.folder_helper.boto3") as mock_boto3:
-        mock_s3 = mock_boto3.resource.return_value
-        mock_s3.meta.client.generate_presigned_url.return_value = expected_url
-
-        with patch.object(
-            ArchiveManager, "get_download_url", return_value=expected_url
-        ):
-            manager = ArchiveManager()
-            url = manager.upload_archive(workspace)
-
-    mock_s3.Bucket.return_value.upload_file.assert_called_once()
-    workspace.set_destination_metadata.assert_called_once_with(
-        "archive", {"s3_key": "workspace_ws-up.zip"}
-    )
-    workspace.save.assert_called_once()
-    assert url == expected_url
-
-
 def test_upload_file_sends_the_file_under_the_given_key(tmp_path, settings):
     """upload_file() uploads a local file to the bucket under the given key."""
     settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
@@ -347,4 +204,66 @@ def test_delete_file_removes_the_given_key(settings):
 
     mock_boto3.resource.return_value.meta.client.delete_object.assert_called_once_with(
         Bucket="my-bucket", Key="some-key.zip"
+    )
+
+
+def test_put_object_stores_the_bytes_under_the_given_key(settings):
+    """put_object() stores in-memory content under the given key."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        ArchiveManager().put_object("archives/a/manifest.json", b"{}")
+
+    mock_s3 = mock_boto3.resource.return_value
+    mock_s3.Bucket.assert_called_once_with("my-bucket")
+    mock_s3.Bucket.return_value.put_object.assert_called_once_with(
+        Key="archives/a/manifest.json", Body=b"{}"
+    )
+
+
+def test_delete_prefix_removes_every_object_under_it(settings):
+    """delete_prefix() deletes the objects under the prefix, and only them:
+    the prefix is a folder, so "archives/a" does not match "archives/ab"."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        ArchiveManager().delete_prefix("archives/a")
+
+    objects = mock_boto3.resource.return_value.Bucket.return_value.objects
+    objects.filter.assert_called_once_with(Prefix="archives/a/")
+    objects.filter.return_value.delete.assert_called_once_with()
+
+
+def test_read_object_returns_the_content_of_the_key(settings):
+    """read_object() returns the whole content stored under the key."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        client = mock_boto3.resource.return_value.meta.client
+        client.get_object.return_value["Body"].read.return_value = b"{}"
+        content = ArchiveManager().read_object("archives/a/manifest.json")
+
+    assert content == b"{}"
+    client.get_object.assert_called_once_with(
+        Bucket="my-bucket", Key="archives/a/manifest.json"
+    )
+
+
+def test_iter_object_streams_the_key_only_once_iterated(settings):
+    """iter_object() reads the object chunk by chunk, and does not reach S3
+    before the first chunk is wanted."""
+    settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
+
+    with patch("core.processing.folder_helper.boto3") as mock_boto3:
+        client = mock_boto3.resource.return_value.meta.client
+        client.get_object.return_value["Body"].iter_chunks.return_value = iter(
+            [b"ab", b"c"]
+        )
+        chunks = ArchiveManager().iter_object("archives/a/files/1")
+        client.get_object.assert_not_called()
+
+        assert list(chunks) == [b"ab", b"c"]
+
+    client.get_object.assert_called_once_with(
+        Bucket="my-bucket", Key="archives/a/files/1"
     )

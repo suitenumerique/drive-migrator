@@ -11,6 +11,17 @@ def test_abstract_destination_cannot_be_instantiated():
         AbstractDestinationBackend()  # pylint: disable=abstract-class-instantiated
 
 
+def test_destination_without_the_file_hooks_cannot_be_instantiated():
+    """A destination must implement open_export, put_file and close_export."""
+
+    class NoFileHooks(AbstractDestinationBackend):
+        name = "no-hooks"
+        label = "No Hooks"
+
+    with pytest.raises(TypeError, match="open_export|put_file|close_export"):
+        NoFileHooks()  # pylint: disable=abstract-class-instantiated
+
+
 def test_optional_hooks_raise_not_implemented_by_default():
     """Optional hooks must raise NotImplementedError on the base class."""
 
@@ -18,7 +29,13 @@ def test_optional_hooks_raise_not_implemented_by_default():
         name = "minimal"
         label = "Minimal Destination"
 
-        def export(self, workspace, user, local_folder_path):
+        def open_export(self, user, run):
+            pass
+
+        def put_file(self, user, run, migration_file, local_path):
+            pass
+
+        def close_export(self, user, run):
             pass
 
     dest = MinimalDest()
@@ -31,9 +48,7 @@ def test_optional_hooks_raise_not_implemented_by_default():
     with pytest.raises(NotImplementedError):
         dest.poll_completion(workspace=None)
     with pytest.raises(NotImplementedError):
-        dest.check_integrity(
-            workspace=None, local_folder_path="/tmp", wait_for_analysis=False
-        )
+        dest.check_integrity(workspace=None, run=None, wait_for_analysis=False)
 
 
 def test_subclass_without_name_raises():
@@ -43,7 +58,13 @@ def test_subclass_without_name_raises():
         class BadDest(AbstractDestinationBackend):  # pylint: disable=unused-variable
             label = "Missing Name"
 
-            def export(self, workspace, user, local_folder_path):
+            def open_export(self, user, run):
+                pass
+
+            def put_file(self, user, run, migration_file, local_path):
+                pass
+
+            def close_export(self, user, run):
                 pass
 
 
@@ -54,7 +75,13 @@ def test_subclass_without_label_raises():
         class BadDest(AbstractDestinationBackend):  # pylint: disable=unused-variable
             name = "missing-label"
 
-            def export(self, workspace, user, local_folder_path):
+            def open_export(self, user, run):
+                pass
+
+            def put_file(self, user, run, migration_file, local_path):
+                pass
+
+            def close_export(self, user, run):
                 pass
 
 
@@ -65,7 +92,13 @@ def test_describe_rejection_defaults_to_a_generic_reason():
         name = "minimal"
         label = "Minimal Destination"
 
-        def export(self, workspace, user, local_folder_path):
+        def open_export(self, user, run):
+            pass
+
+        def put_file(self, user, run, migration_file, local_path):
+            pass
+
+        def close_export(self, user, run):
             pass
 
     assert (
@@ -81,7 +114,13 @@ def test_account_hooks_default_to_no_account_required():
         name = "minimal"
         label = "Minimal Destination"
 
-        def export(self, workspace, user, local_folder_path):
+        def open_export(self, user, run):
+            pass
+
+        def put_file(self, user, run, migration_file, local_path):
+            pass
+
+        def close_export(self, user, run):
             pass
 
     dest = MinimalDest()

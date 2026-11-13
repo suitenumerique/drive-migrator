@@ -90,6 +90,20 @@ def _describe_failure(outcome) -> str:
     return _QUERY_IN_TEXT_RE.sub("?<redacted>", repr(outcome.exception()))
 
 
+def _rewinding(send, body):
+    """Wrap send so that a file body read by a failed attempt is sent from where
+    it started again, not from where that attempt left it."""
+    if not (hasattr(body, "seek") and hasattr(body, "tell")):
+        return send
+    start = body.tell()
+
+    def send_from_start(*args, **kwargs):
+        body.seek(start)
+        return send(*args, **kwargs)
+
+    return send_from_start
+
+
 class RetryingSession(requests.Session):
     """Session retrying timeouts, connection errors and 5xx responses.
 
@@ -137,7 +151,13 @@ class RetryingSession(requests.Session):
             before_sleep=self._log_retry(method, url),
             retry_error_callback=self._give_up(method, url),
         )
-        return retrying(super().request, method, url, *args, **kwargs)
+        return retrying(
+            _rewinding(super().request, kwargs.get("data")),
+            method,
+            url,
+            *args,
+            **kwargs,
+        )
 
     def _log_retry(self, method, url):
         def _before_sleep(retry_state):

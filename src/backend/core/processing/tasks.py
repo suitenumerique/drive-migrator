@@ -1,4 +1,5 @@
 import os
+from typing import Callable
 
 from django.conf import settings
 from django.utils import timezone
@@ -8,22 +9,35 @@ from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
 from django_celery_results.models import TaskResult
 
-from core.analytics import local_files_stats, posthog_capture, workspaces_counts
-from core.backends.destination import DestinationRegistry
+from core.analytics import (
+    posthog_capture,
+    save_run_files_stats,
+    workspaces_counts,
+)
+from core.backends.destination import (
+    AbstractDestinationBackend,
+    DestinationRegistry,
+    FileExportStatus,
+)
 from core.backends.source import (
+    AbstractSourceBackend,
     SourceFolder,
     SourceManager,
     SourceTokenExpired,
     truncate_folder_files,
 )
 from core.mails_manager import MailsManager
-from core.models import ExtraTaskInfo, User, Workspace
+from core.models import ExtraTaskInfo, MigrationFile, MigrationRun, User, Workspace
+from core.processing.file_exports import FileExports
 from core.processing.folder_creator import FolderCreator
-from core.processing.folder_helper import ArchiveManager
 from core.processing.integrity import IntegrityTracker, Stage
 from core.processing.migration_run import create_migration_run, delete_migration_run
 from core.processing.plan import build_plan
-from core.processing.rejected_files import RejectedFilesArchive
+from core.processing.rejected_files import (
+    RejectedFilesArchive,
+    drop_unlinked_kept_files,
+    keep_refused_file,
+)
 from core.processing.token_status import log_token_status
 from core.utils import get_dir_size, sizeof_fmt
 
@@ -66,8 +80,6 @@ def cleanup_workspace_dir(workspace: Workspace):
     logger.info("Cleaning up %s directory ...", workspace.id)
     creator = FolderCreator()
     creator.delete_folder(workspace)
-    archive_manager = ArchiveManager()
-    archive_manager.delete_archive(workspace)
     logger.info("Cleaned up %s directory !", workspace.id)
     list_work_dir()
 
@@ -106,8 +118,7 @@ def capture_migration_finished(extra_task: ExtraTaskInfo, status: str):
                 timezone.now() - extra_task.task_result.date_created
             ).total_seconds(),
             "$set": workspaces_counts(extra_task.user),
-            # Called before cleanup_workspace_dir, the local folder still exists.
-            **local_files_stats(FolderCreator().get_workspace_path(workspace)),
+            **extra_task.files_stats,
         },
         workspace=workspace,
     )
@@ -161,6 +172,7 @@ def export(self, data):  # pylint: disable=unused-argument
         integrity_tracker.set_kept_files(folder)
 
         run_failed = True
+        run = None
         try:
             plan = build_plan(folder)
             run = create_migration_run(workspace, self.request.id, plan)
@@ -169,6 +181,10 @@ def export(self, data):  # pylint: disable=unused-argument
         finally:
             # Before the task_success/task_failure handlers delete the local folder.
             integrity_tracker.save(self.request.id, run_failed=run_failed)
+            if run is not None:
+                # Read from the run's rows, for the task handlers.
+                save_run_files_stats(self.request.id, run)
+                drop_unlinked_kept_files(run)
             delete_migration_run(self.request.id)
     finally:
         logger.info("Calling finalize_export ...")
@@ -179,45 +195,105 @@ def export(self, data):  # pylint: disable=unused-argument
     return True
 
 
-def _export_workspace(run, user, source_backend, integrity_tracker):
+def _export_workspace(
+    run: MigrationRun,
+    user: User,
+    source_backend: AbstractSourceBackend,
+    integrity_tracker: IntegrityTracker,
+) -> None:
     workspace = run.workspace
-    logger.info("Calling create_folder ...")
     creator = FolderCreator()
-    integrity_tracker.set_retrieval(run, creator.get_workspace_path(workspace))
+    local_path = creator.get_workspace_path(workspace)
+    integrity_tracker.set_retrieval(run)
+
+    # Before the downloads: the destinations need the members to close.
+    logger.info("Calling prepare_export ...")
+    source_backend.prepare_export(workspace, local_path)
+
+    destinations = _pending_destinations(workspace)
+    for destination in destinations:
+        # Registered first so a destination that fails midway is still checked.
+        integrity_tracker.add_exported_destination(destination)
+    file_exports = FileExports(run, user, destinations)
+
     try:
-        local_path = creator.create_folder(workspace, run, source_backend)
-    finally:
-        # Also when an expired source token stopped the downloads midway.
-        if creator.failed_files:
-            workspace.download_errors = creator.failed_files
-            workspace.save(update_fields=["download_errors"])
-            logger.warning(
-                "%s file(s) failed to download: %s",
-                len(creator.failed_files),
-                creator.failed_files,
+        file_exports.open()
+        logger.info("Calling create_folder ...")
+        try:
+            creator.create_folder(
+                workspace,
+                run,
+                source_backend,
+                after_download=_file_handover(file_exports, destinations),
             )
+        except SourceTokenExpired:
+            # Also keep the files that failed before the token expired.
+            _save_download_errors(workspace, creator)
+            raise
+        _check_downloads(workspace, creator)
+        list_workspace_dir(workspace)
+    except BaseException:
+        file_exports.abort()
+        raise
+
+    failures = file_exports.close()
+    if failures:
+        raise RuntimeError(
+            f"Export failed for {', '.join(failures)} on workspace {workspace.id}"
+        ) from next(iter(failures.values()))
+
+
+def _file_handover(
+    file_exports: FileExports, destinations: list[AbstractDestinationBackend]
+) -> Callable[[MigrationFile, str], None] | None:
+    """What to do with each downloaded file: hand it to the destinations, then
+    drop it. A file a destination did not take is kept on S3 first, for the
+    user."""
+    if not destinations:
+        return None
+
+    def put_and_drop(migration_file: MigrationFile, local_path: str) -> None:
+        file_exports.put(migration_file, local_path)
+        if not all(
+            result.get("status") == FileExportStatus.SENT
+            for result in migration_file.results.values()
+        ):
+            keep_refused_file(file_exports.run, migration_file, local_path)
+        os.remove(local_path)
+
+    return put_and_drop
+
+
+def _pending_destinations(workspace: Workspace) -> list[AbstractDestinationBackend]:
+    destinations = []
+    for destination in DestinationRegistry.get_all():
+        status = workspace.get_destination_status(destination.name)
+        logger.info("%s status = %s", destination.name, status)
+        if status == Workspace.Status.PENDING:
+            destinations.append(destination)
+    return destinations
+
+
+def _save_download_errors(workspace: Workspace, creator: FolderCreator) -> None:
+    if creator.failed_files:
+        workspace.download_errors = creator.failed_files
+        workspace.save(update_fields=["download_errors"])
+        logger.warning(
+            "%s file(s) failed to download: %s",
+            len(creator.failed_files),
+            creator.failed_files,
+        )
+
+
+def _check_downloads(workspace: Workspace, creator: FolderCreator) -> None:
+    """Keep the failed downloads on the workspace; fail when none succeeded."""
+    _save_download_errors(workspace, creator)
 
     if creator.files_count and creator.files_success == 0:
         raise RuntimeError(
             f"All {creator.files_count} file(s) failed to download for "
             f"workspace {workspace.id}"
         )
-
-    list_workspace_dir(workspace)
-
-    logger.info("Calling prepare_export ...")
-    source_backend.prepare_export(workspace, local_path)
-
-    for dest_backend in DestinationRegistry.get_all():
-        dest_name = dest_backend.name
-        logger.info(
-            "%s status = %s", dest_name, workspace.get_destination_status(dest_name)
-        )
-        if workspace.get_destination_status(dest_name) == Workspace.Status.PENDING:
-            logger.info("Calling %s export ...", dest_name)
-            # Registered first so a destination that fails midway is still checked.
-            integrity_tracker.add_exported_destination(dest_backend)
-            dest_backend.export(workspace, user, local_path)
 
 
 # From https://github.com/celery/django-celery-results/issues/286#issuecomment-1279161047

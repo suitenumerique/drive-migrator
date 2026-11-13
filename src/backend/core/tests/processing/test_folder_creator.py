@@ -698,3 +698,40 @@ def test_create_folder_flags_download_that_wrote_no_file(tmp_path, settings):
             "error": "Download reported success but wrote no file",
         }
     ]
+
+
+# ---------------------------------------------------------------------------
+# Handing each downloaded file over (file-by-file destinations)
+# ---------------------------------------------------------------------------
+
+
+def test_create_folder_hands_each_downloaded_file_over(tmp_path, settings):
+    """after_download gets every downloaded file with its local path, and only those."""
+    settings.APP_WORK_DIR = str(tmp_path)
+    workspace = _make_workspace("ws26")
+    files = [
+        SourceFile(id="f1", name="ok", extension=".txt", download_url="x"),
+        SourceFile(id="f2", name="broken", extension=".txt", download_url="x"),
+    ]
+    backend = _make_backend()
+
+    def download_file(file, destination):
+        if file.id == "f2":
+            raise RuntimeError("403 Forbidden")
+        _write_empty_file(file, destination)
+
+    backend.download_file.side_effect = download_file
+    handed_over = []
+
+    FolderCreator().create_folder(
+        workspace,
+        _run(SourceFolder(name="root", files=files)),
+        backend,
+        after_download=lambda row, path: handed_over.append(
+            (row.path, path, os.path.isfile(path))
+        ),
+    )
+
+    assert handed_over == [
+        ("ok.txt", str(tmp_path / "workspace_ws26" / "ok.txt"), True)
+    ]
