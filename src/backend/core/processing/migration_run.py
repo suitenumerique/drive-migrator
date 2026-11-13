@@ -3,6 +3,8 @@
 import itertools
 import os
 
+from django.db import transaction
+
 from celery.utils.log import get_task_logger
 
 from core.backends.source import (
@@ -18,11 +20,14 @@ logger = get_task_logger(__name__)
 BULK_BATCH_SIZE = 1000
 
 
+@transaction.atomic
 def create_migration_run(
     workspace: Workspace, task_id: str, plan: MigrationPlan
 ) -> MigrationRun:
     """Store the plan of a run: its folders, one pending row per file, and one
-    failed row per refused file."""
+    failed row per refused file. Rows left by a killed run of the same task are
+    replaced, since a retry starts over from a new plan."""
+    delete_migration_run(task_id)
     run = MigrationRun.objects.create(
         workspace=workspace,
         task_id=task_id,

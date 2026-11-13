@@ -84,6 +84,26 @@ def test_create_migration_run_stores_refused_files_as_failed():
     assert "is not inside" in refused.error
 
 
+def test_create_migration_run_replaces_the_rows_of_a_retried_task():
+    """A retried task, whose rows were left by a killed worker, starts over with
+    the new plan only."""
+    workspace = WorkspaceFactory()
+    stale = create_migration_run(
+        workspace,
+        "task-1",
+        build_plan(SourceFolder(name="root", files=[_source("f1", "old")])),
+    )
+    new = _source("f2", "new")
+
+    run = create_migration_run(
+        workspace, "task-1", build_plan(SourceFolder(name="root", files=[new]))
+    )
+
+    assert not MigrationRun.objects.filter(pk=stale.pk).exists()
+    assert [row.source for row in MigrationFile.objects.all()] == [new.to_dict()]
+    assert run.remaining_files == 1
+
+
 def test_download_migration_file_records_the_size(tmp_path):
     """A downloaded file is recorded with its size on disk."""
     doc = _source("f1", "doc")
