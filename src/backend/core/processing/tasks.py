@@ -8,7 +8,7 @@ from django.core.cache import cache
 from django.db import InterfaceError, OperationalError, transaction
 from django.utils import timezone
 
-from celery import states
+from celery import Task, states
 from celery.exceptions import Ignore
 from celery.signals import before_task_publish, task_failure, task_success
 from celery.utils.log import get_task_logger
@@ -25,13 +25,14 @@ from core.backends.destination import (
     FileExportStatus,
 )
 from core.backends.source import (
+    AbstractSourceBackend,
     SourceFolder,
     SourceManager,
     SourceTokenExpired,
     truncate_folder_files,
 )
 from core.mails_manager import MailsManager
-from core.models import ExtraTaskInfo, MigrationRun, User, Workspace
+from core.models import ExtraTaskInfo, MigrationFile, MigrationRun, User, Workspace
 from core.processing.file_exports import FileExports
 from core.processing.folder_creator import FolderCreator
 from core.processing.integrity import IntegrityTracker, Stage
@@ -220,7 +221,9 @@ def export(self, data):
     raise Ignore()
 
 
-def _undo_start(source_backend, workspace, task_id) -> None:
+def _undo_start(
+    source_backend: AbstractSourceBackend, workspace: Workspace, task_id: str
+) -> None:
     """Release the source of a run that failed to start, then purge it."""
     try:
         logger.info("Calling finalize_export ...")
@@ -230,13 +233,13 @@ def _undo_start(source_backend, workspace, task_id) -> None:
         delete_migration_run(task_id)
 
 
-def claim_export(task_id) -> bool:
+def claim_export(task_id: str) -> bool:
     """Claim an export task for this delivery; False once another delivery of
     it started, even after its run is over and purged."""
     return cache.add(f"export-claim:{task_id}", True, timeout=EXPORT_CLAIM_TIMEOUT)
 
 
-def dispatch_batch(run, user) -> None:
+def dispatch_batch(run: MigrationRun, user: User) -> None:
     """Queue a task for each file of the next batch of the run, or the finish of
     the run when it has no file left to dispatch."""
     positions = take_next_batch(run)
@@ -248,16 +251,16 @@ def dispatch_batch(run, user) -> None:
         publish_finish(run, user)
 
 
-def _publish(task, run, user, *args) -> None:
+def _publish(task: Task, run: MigrationRun, user: User, *args: int) -> None:
     # A worker must never read a run whose changes are not committed yet.
     transaction.on_commit(lambda: task.delay(str(run.pk), str(user.pk), *args))
 
 
-def publish_file(run, user, position) -> None:
+def publish_file(run: MigrationRun, user: User, position: int) -> None:
     _publish(export_file, run, user, position)
 
 
-def publish_finish(run, user) -> None:
+def publish_finish(run: MigrationRun, user: User) -> None:
     # Conditional, so that a run is finished only once.
     if MigrationRun.objects.filter(pk=run.pk, finish_published=False).update(
         finish_published=True
@@ -269,13 +272,13 @@ def publish_finish(run, user) -> None:
 _BIG_RUN_STATES = ("integrity_state", "dirs")
 
 
-def publish_finish_again(run, user) -> None:
+def publish_finish_again(run: MigrationRun, user: User) -> None:
     """Queue the finish of the run again, its first one lost: claim_finish()
     keeps a second one out."""
     _publish(finish_migration, run, user)
 
 
-def _load_run(run_id, *deferred):
+def _load_run(run_id: str, *deferred: str) -> MigrationRun | None:
     return (
         MigrationRun.objects.select_related("workspace")
         .defer(*deferred)
@@ -293,7 +296,7 @@ def _load_run(run_id, *deferred):
     retry_jitter=False,
     max_retries=5,
 )
-def export_file(run_id, user_id, position):
+def export_file(run_id: str, user_id: str, position: int) -> None:
     """Export one file of a run, then queue what comes next once its batch, or
     the run, is done."""
     # Run once per file: the big states only serve the start and the finish.
@@ -325,7 +328,7 @@ def export_file(run_id, user_id, position):
         _queue_next(run, user)
 
 
-def _queue_next(run, user) -> None:
+def _queue_next(run: MigrationRun, user: User) -> None:
     """Once the batch of the run is done, queue its next batch, or its finish
     once no file is left."""
     if run.in_flight:
@@ -336,7 +339,12 @@ def _queue_next(run, user) -> None:
         publish_finish(run, user)
 
 
-def run_file(run, user, source_backend, migration_file):
+def run_file(
+    run: MigrationRun,
+    user: User,
+    source_backend: AbstractSourceBackend,
+    migration_file: MigrationFile,
+) -> None:
     """Export one file of the run. Whatever goes wrong, the run goes on with
     its next files, except on an expired source token, which stops it, and on
     a database error, which retries the task."""
@@ -358,7 +366,7 @@ def run_file(run, user, source_backend, migration_file):
 
 
 @app.task(ignore_result=True)
-def finish_migration(run_id, user_id):
+def finish_migration(run_id: str, user_id: str) -> None:
     """Close the destinations of a run whose files are all done, purge the run,
     release the source, then report the outcome."""
     run = _load_run(run_id)
@@ -375,7 +383,9 @@ def finish_migration(run_id, user_id):
     finish_run(run, user, source_backend)
 
 
-def finish_run(run, user, source_backend):
+def finish_run(
+    run: MigrationRun, user: User, source_backend: AbstractSourceBackend
+) -> None:
     """Raise the error of a failed run once it is reported. The run is purged
     last: a finish dying before is taken over by the watchdog."""
     if _reported(run.task_id):
@@ -415,7 +425,7 @@ def finish_run(run, user, source_backend):
     logger.info("Run %s done", run.pk)
 
 
-def _failed_destinations(run, user) -> list[str] | None:
+def _failed_destinations(run: MigrationRun, user: User) -> list[str] | None:
     """The destinations of a failed run not closed cleanly: one a former
     finish closed, e.g. a Resana import running, is not failed. None when
     unknown: every pending one is failed then."""
@@ -427,7 +437,11 @@ def _failed_destinations(run, user) -> list[str] | None:
         return None
 
 
-def _report(run, error, failed_destinations) -> None:
+def _report(
+    run: MigrationRun,
+    error: Exception | None,
+    failed_destinations: list[str] | None,
+) -> None:
     """Tell the user, then record the outcome of the run and purge it. The run
     is kept when its outcome is not recorded: the watchdog finishes it again."""
     try:
@@ -442,14 +456,19 @@ def _report(run, error, failed_destinations) -> None:
         delete_migration_run(run.task_id)
 
 
-def _stop_error(run) -> Exception:
+def _stop_error(run: MigrationRun) -> Exception:
     """The error a stopped run fails with."""
     if run.source_token_expired:
         return SourceTokenExpired("The source token expired during the run.")
     return RunStalled("The migration stopped making progress.")
 
 
-def _start_export(run, user, source_backend, integrity_tracker):
+def _start_export(
+    run: MigrationRun,
+    user: User,
+    source_backend: AbstractSourceBackend,
+    integrity_tracker: IntegrityTracker,
+) -> None:
     """Open the run: fetch the members, open the destinations and prepare the
     local folder."""
     workspace = run.workspace
@@ -473,7 +492,12 @@ def _start_export(run, user, source_backend, integrity_tracker):
     creator.prepare_folder(workspace, run)
 
 
-def _export_file(run, user, source_backend, migration_file):
+def _export_file(
+    run: MigrationRun,
+    user: User,
+    source_backend: AbstractSourceBackend,
+    migration_file: MigrationFile,
+) -> None:
     """Download one file of the run and hand it to the destinations."""
     workspace = run.workspace
     file_exports = FileExports(run, user, _pending_destinations(workspace))
@@ -497,7 +521,7 @@ def _export_file(run, user, source_backend, migration_file):
         _hand_over(file_exports, migration_file, local_path)
 
 
-def _finish_export(run, user):
+def _finish_export(run: MigrationRun, user: User) -> None:
     """Close the destinations once every file of the run is done; raise when
     the run failed."""
     workspace = run.workspace
@@ -515,12 +539,17 @@ def _finish_export(run, user):
         )
 
 
-def _abort_export(run, user):
+def _abort_export(run: MigrationRun, user: User) -> None:
     """Leave no destination half open after a fatal run error."""
     FileExports(run, user, _pending_destinations(run.workspace)).abort()
 
 
-def _save_run_report(task_id, run, integrity_tracker, run_failed):
+def _save_run_report(
+    task_id: str,
+    run: MigrationRun | None,
+    integrity_tracker: IntegrityTracker,
+    run_failed: bool,
+) -> None:
     """Save what the outcome handlers read from the working rows of the run,
     before they are purged."""
     # Before the task_success/task_failure handlers delete the local folder.
@@ -531,7 +560,7 @@ def _save_run_report(task_id, run, integrity_tracker, run_failed):
         drop_unlinked_kept_files(run)
 
 
-def _release_source(source_backend, run) -> None:
+def _release_source(source_backend: AbstractSourceBackend, run: MigrationRun) -> None:
     """Unlock the source workspace; an error is logged, so that the outcome is
     reported and the run purged all the same."""
     logger.info("Calling finalize_export ...")
@@ -542,14 +571,16 @@ def _release_source(source_backend, run) -> None:
         logger.exception("Could not release the source of run %s", run.pk)
 
 
-def _reported(task_id) -> bool:
+def _reported(task_id: str) -> bool:
     """Whether the outcome of the migration is recorded already."""
     return TaskResult.objects.filter(
         task_id=task_id, status__in=states.READY_STATES
     ).exists()
 
 
-def _hand_over(file_exports, migration_file, local_path):
+def _hand_over(
+    file_exports: FileExports, migration_file: MigrationFile, local_path: str
+) -> None:
     """Hand a downloaded file to the destinations, then drop it from the disk.
     A file a destination did not take is kept on S3 first, for the user."""
     try:
@@ -594,7 +625,7 @@ def _check_downloads(workspace: Workspace, run: MigrationRun) -> None:
         )
 
 
-def _record_outcome(task_id, error) -> None:
+def _record_outcome(task_id: str, error: Exception | None) -> None:
     """Record the outcome of a migration on the TaskResult of its export() task,
     which ended without one, as Celery would have."""
     if error is None:
@@ -636,7 +667,7 @@ def create_task_result_on_publish(sender=None, headers=None, body=None, **kwargs
     )
 
 
-def _extra_task_of(task_id):
+def _extra_task_of(task_id: str) -> ExtraTaskInfo | None:
     task_result = TaskResult.objects.filter(task_id=task_id).first()
     if task_result is None:
         return None

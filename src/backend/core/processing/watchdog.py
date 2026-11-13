@@ -9,7 +9,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from core.backends.source import SourceManager, SourceTokenExpired
-from core.models import MigrationRun
+from core.models import MigrationRun, User
 from core.processing.tasks import (
     RunStalled,
     dispatch_batch,
@@ -66,7 +66,7 @@ def watch_run(run: MigrationRun) -> None:
         publish_finish(run, user)
 
 
-def _watch_finish(run: MigrationRun, user) -> None:
+def _watch_finish(run: MigrationRun, user: User) -> None:
     """A finish never started is queued again, as files are. One that started
     gets the patience of the files, the stall time once per redispatch, plus
     once. A lost finish of a done run is queued again, to close its
@@ -90,7 +90,7 @@ def _watch_finish(run: MigrationRun, user) -> None:
     _fail(run, user)
 
 
-def _relaunch(run: MigrationRun, user) -> bool:
+def _relaunch(run: MigrationRun, user: User) -> bool:
     """Queue again the files dispatched and never finished, or the next batch
     when it was never queued. False when there is nothing to queue again."""
     unfinished = list(
@@ -126,7 +126,7 @@ def _touch(run: MigrationRun, **fields) -> bool:
     )
 
 
-def _fail(run: MigrationRun, user) -> None:
+def _fail(run: MigrationRun, user: User) -> None:
     """Do the finish of the run here, as failed: its own task never ended."""
     # A finish task starting at last finds the finish taken. One that started
     # and went silent this long is taken over.
