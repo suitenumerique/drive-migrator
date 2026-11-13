@@ -5,21 +5,10 @@ from django.conf import settings
 
 from celery.utils.log import get_task_logger
 
-from core.backends.source import (
-    AbstractSourceBackend,
-    SourceFile,
-    SourceFolder,
-    SourceTokenExpired,
-)
-from core.models import Workspace
-from core.utils import (
-    ensure_file_uniqueness,
-    ensure_inside_directory,
-    get_dir_size,
-    sanitize_path_component,
-    sizeof_fmt,
-    truncate_path_parts,
-)
+from core.backends.source import AbstractSourceBackend, SourceTokenExpired
+from core.models import MigrationFile, MigrationRun, Workspace
+from core.processing.migration_run import download_migration_file
+from core.utils import sizeof_fmt
 
 logger = get_task_logger(__name__)
 
@@ -28,38 +17,32 @@ class FolderCreator:
     def __init__(self):
         self.files_count = None
         self.files_success = 0
-        self.files_current = 0
         self.failed_files = []
-        # Source file id -> path relative to the workspace root, for every file
-        # actually written to disk.
-        self.written_files = {}
-        # Source file ids whose download returned without error but left no file.
-        self.not_written_ids = set()
+        self.bytes_written = 0
         self.workspace = None
-
-    def __get_files_count(self, folder: SourceFolder):
-        count = len(folder.files)
-        for child in folder.children:
-            count += self.__get_files_count(child)
-        return count
 
     def create_folder(
         self,
         workspace: Workspace,
-        folder: SourceFolder,
+        run: MigrationRun,
         source_backend: AbstractSourceBackend,
     ) -> str:
         self.workspace = workspace
-        self.files_count = self.__get_files_count(folder)
+        self.files_count = run.files.count()
         self.delete_folder(workspace)
 
         path = self.get_workspace_path(workspace)
         os.makedirs(path, exist_ok=True)
+        for directory in run.dirs:
+            os.makedirs(os.path.join(path, directory), exist_ok=True)
 
-        for child in folder.children:
-            self.__create_folder(path, workspace, child, source_backend)
-
-        self.__download_folder_files(folder, path, source_backend)
+        for index, migration_file in enumerate(run.files.iterator(), start=1):
+            if migration_file.status != MigrationFile.Status.PENDING:
+                # Refused while planning: nothing to download.
+                self.__add_failed_file(migration_file)
+                continue
+            logger.info("Downloading file %s/%s ...", index, self.files_count)
+            self.__download_file(migration_file, path, source_backend)
 
         return path
 
@@ -71,141 +54,39 @@ class FolderCreator:
         if os.path.exists(path):
             shutil.rmtree(path)
 
-    def __create_folder(
+    def __download_file(
         self,
-        current_dir: str,
-        workspace: Workspace,
-        folder: SourceFolder,
+        migration_file: MigrationFile,
+        root: str,
         source_backend: AbstractSourceBackend,
     ):
-        path = truncate_path_parts(
-            os.path.join(current_dir, sanitize_path_component(folder.name))
-        )
         try:
-            ensure_inside_directory(os.path.join(current_dir, folder.name), current_dir)
-        except ValueError as error:
-            logger.error("Refusing folder %s: %s", folder.name, error)
-            self.__refuse_folder_files(folder, path, str(error))
+            download_migration_file(
+                migration_file, source_backend, os.path.join(root, migration_file.path)
+            )
+        except SourceTokenExpired:
+            # The run stops, so the user is asked to log in again.
+            self.__add_failed_file(migration_file)
+            raise
+        if migration_file.status != MigrationFile.Status.DOWNLOADED:
+            self.__add_failed_file(migration_file)
             return
-        if not os.path.exists(path):
-            os.mkdir(path)
 
-        for child in folder.children:
-            self.__create_folder(path, workspace, child, source_backend)
+        self.bytes_written += migration_file.size
+        logger.info(
+            "Directory size: %s (%s)",
+            sizeof_fmt(self.bytes_written),
+            self.bytes_written,
+        )
+        self.files_success += 1
 
-        self.__download_folder_files(folder, path, source_backend)
-
-    def __download_folder_files(
-        self, folder: SourceFolder, path: str, source_backend: AbstractSourceBackend
-    ):
-        for file in folder.files:
-            self.files_current += 1
-            logger.info(
-                "Downloading file %s/%s ...", self.files_current, self.files_count
-            )
-
-            destination = os.path.join(
-                path, sanitize_path_component(file.name_with_extension)
-            )
-            try:
-                ensure_inside_directory(
-                    os.path.join(path, file.name_with_extension), path
-                )
-            except ValueError as error:
-                logger.error("Refusing file %s: %s", file.name_with_extension, error)
-                self.__add_failed_file(
-                    file,
-                    os.path.relpath(
-                        destination, self.get_workspace_path(self.workspace)
-                    ),
-                    str(error),
-                )
-                continue
-
-            destination_truncated = truncate_path_parts(destination)
-            if destination != destination_truncated:
-                logger.info(
-                    "Truncated filename: %s into %s", destination, destination_truncated
-                )
-                destination = destination_truncated
-
-            destination_uniqueness = ensure_file_uniqueness(destination)
-            if destination != destination_uniqueness:
-                logger.info(
-                    "Uniquenessify filename: %s into %s",
-                    destination,
-                    destination_uniqueness,
-                )
-                destination = destination_uniqueness
-
-            relative_path = os.path.relpath(
-                destination, self.get_workspace_path(self.workspace)
-            )
-            try:
-                source_backend.download_file(file, destination)
-            except SourceTokenExpired as error:
-                # Every remaining file would fail the same way: stop the run,
-                # so the user is asked to log in again.
-                self.__add_failed_file(file, relative_path, str(error))
-                raise
-            # Broad on purpose: source_backend is backend-agnostic (Resana, Osmose,
-            # filesystem...), so we can't target a specific exception type here. One
-            # file failing must not abort the rest of the workspace's download.
-            except Exception as error:  # noqa: BLE001  # pylint: disable=broad-exception-caught
-                logger.error(
-                    "Failed to download %s: %s", file.name_with_extension, error
-                )
-                if os.path.exists(destination):
-                    os.remove(destination)
-                self.__add_failed_file(file, relative_path, str(error))
-                continue
-
-            if not os.path.isfile(destination):
-                logger.error(
-                    "Download of %s reported success but wrote no file",
-                    file.name_with_extension,
-                )
-                self.not_written_ids.add(file.id)
-                self.__add_failed_file(
-                    file, relative_path, "Download reported success but wrote no file"
-                )
-                continue
-
-            self.written_files[file.id] = relative_path
-
-            size = get_dir_size(self.get_workspace_path(self.workspace))
-            size_formatted = sizeof_fmt(size)
-            logger.info("Directory size: %s (%s)", size_formatted, size)
-            self.files_success += 1
-
-    def __refuse_folder_files(self, folder: SourceFolder, path: str, error: str):
-        """Report every file of a refused folder, and of its sub-folders, as
-        failed."""
-        for file in folder.files:
-            self.files_current += 1
-            self.__add_failed_file(
-                file,
-                os.path.relpath(
-                    os.path.join(
-                        path, sanitize_path_component(file.name_with_extension)
-                    ),
-                    self.get_workspace_path(self.workspace),
-                ),
-                error,
-            )
-        for child in folder.children:
-            self.__refuse_folder_files(
-                child,
-                os.path.join(path, sanitize_path_component(child.name)),
-                error,
-            )
-
-    def __add_failed_file(self, file: SourceFile, relative_path: str, error: str):
+    def __add_failed_file(self, migration_file: MigrationFile):
+        source = migration_file.source
         self.failed_files.append(
             {
-                "id": file.id,
-                "name": file.name_with_extension,
-                "path": relative_path,
-                "error": error,
+                "id": source["id"],
+                "name": source["name"] + source["extension"],
+                "path": migration_file.path,
+                "error": migration_file.error,
             }
         )

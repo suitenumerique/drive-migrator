@@ -3,6 +3,7 @@
 # pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
 
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
 from django.utils import timezone
@@ -10,8 +11,9 @@ from django.utils import timezone
 import pytest
 from django_celery_results.models import TaskResult
 
-from core.backends.source import SourceFile, SourceFolder
+from core.backends.source import SourceFolder
 from core.models import ExtraTaskInfo, User, Workspace
+from core.processing.plan import build_plan
 from core.processing.tasks import (
     cleanup_workspace_dir,
     create_task_result_on_publish,
@@ -33,6 +35,19 @@ from core.sources.resana.token_manager import ResanaTokenExpired
 def work_directory(settings, tmp_path):
     """Keep export task filesystem operations inside a temporary directory."""
     settings.APP_WORK_DIR = str(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def migration_run():
+    """Keep the run's working rows out of the database: workspaces are mocks here."""
+    with (
+        patch("core.processing.tasks.create_migration_run") as create,
+        patch("core.processing.tasks.delete_migration_run") as delete,
+    ):
+        create.side_effect = lambda workspace, task_id, plan: SimpleNamespace(
+            workspace=workspace
+        )
+        yield SimpleNamespace(create=create, delete=delete)
 
 
 @pytest.fixture()
@@ -148,13 +163,33 @@ def test_export_does_not_flag_workspace_when_limit_is_set_but_not_exceeded(
     assert workspace.is_truncated is False
 
 
-def test_export_builds_local_folder(workspace, user):
-    """export() calls FolderCreator.create_folder() with workspace, folder tree, and source backend."""
-    folder_tree = SourceFolder(name="root")
+def test_export_builds_local_folder_from_its_migration_run(
+    workspace, user, migration_run
+):
+    """export() plans the tree into the run of its task, downloads the run into
+    the local folder, then purges the run."""
+    folder_tree = SourceFolder(name="root", children=[SourceFolder(name="sub")])
+
     source_backend, creator, _ = _run_export(workspace, user, source_folder=folder_tree)
-    creator.create_folder.assert_called_once_with(
-        workspace, folder_tree, source_backend
+
+    migration_run.create.assert_called_once_with(
+        workspace, ANY, build_plan(folder_tree)
     )
+    creator.create_folder.assert_called_once_with(workspace, ANY, source_backend)
+    assert creator.create_folder.call_args.args[1].workspace is workspace
+    migration_run.delete.assert_called_once_with(migration_run.create.call_args.args[1])
+
+
+def test_export_deletes_the_migration_run_when_it_fails(workspace, user, migration_run):
+    """The working rows are purged whatever the outcome of the run."""
+    dest_drive = MagicMock()
+    dest_drive.name = "drive"
+    dest_drive.export.side_effect = RuntimeError("Drive down")
+
+    with pytest.raises(RuntimeError, match="Drive down"):
+        _run_export(workspace, user, dest_backends=[dest_drive])
+
+    migration_run.delete.assert_called_once()
 
 
 def test_export_calls_prepare_export(workspace, user):
@@ -191,35 +226,31 @@ def test_export_keeps_earlier_download_errors_when_the_source_token_expires(
 ):
     """An expired source token stops the run with that error, so the user is
     asked to log in again, and keeps the files that failed before it."""
-    files = [
-        SourceFile(id=f"f{i}", name=f"doc{i}", extension=".pdf", download_url="")
-        for i in range(3)
+    failed_files = [
+        {"name": "doc0.pdf", "error": "504 Gateway Timeout"},
+        {"name": "doc1.pdf", "error": "Resana offline token is no longer valid."},
     ]
     with (
         patch("core.models.Workspace.objects.get", return_value=workspace),
         patch("core.models.User.objects.get", return_value=user),
         patch("core.processing.tasks.SourceManager") as mock_sm,
+        patch("core.processing.tasks.FolderCreator") as mock_fc,
         patch("core.processing.tasks.IntegrityTracker"),
         patch("core.processing.tasks.DestinationRegistry") as mock_dr,
     ):
-        source_backend = mock_sm.return_value.get_backend.return_value
-        source_backend.get_workspace_structure.return_value = SourceFolder(
-            name="root", files=files
+        mock_sm.return_value.get_backend.return_value.get_workspace_structure.return_value = SourceFolder(
+            name="root"
         )
-        source_backend.download_file.side_effect = [
-            RuntimeError("504 Gateway Timeout"),
-            ResanaTokenExpired("Resana offline token is no longer valid."),
-        ]
+        mock_fc.return_value.create_folder.side_effect = ResanaTokenExpired(
+            "Resana offline token is no longer valid."
+        )
+        mock_fc.return_value.failed_files = failed_files
         mock_dr.get_all.return_value = []
 
         with pytest.raises(ResanaTokenExpired):
             export({"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}})  # pylint: disable=no-value-for-parameter
 
-    assert source_backend.download_file.call_count == 2
-    assert [error["name"] for error in workspace.download_errors] == [
-        "doc0.pdf",
-        "doc1.pdf",
-    ]
+    assert workspace.download_errors == failed_files
 
 
 def test_export_resets_previous_run_errors_before_starting(workspace, user):
@@ -437,8 +468,9 @@ def test_export_feeds_integrity_tracker_and_saves_it(workspace, user, mock_track
     tracker = mock_tracker_cls.return_value
     tracker.set_kept_files.assert_called_once_with(folder)
     tracker.set_retrieval.assert_called_once_with(
-        creator, creator.get_workspace_path.return_value
+        ANY, creator.get_workspace_path.return_value
     )
+    assert tracker.set_retrieval.call_args.args[0].workspace is workspace
     tracker.add_exported_destination.assert_called_once_with(dest_drive)
     tracker.save.assert_called_once_with(ANY, run_failed=False)
 

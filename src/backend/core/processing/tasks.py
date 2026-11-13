@@ -21,6 +21,8 @@ from core.models import ExtraTaskInfo, User, Workspace
 from core.processing.folder_creator import FolderCreator
 from core.processing.folder_helper import ArchiveManager
 from core.processing.integrity import IntegrityTracker, Stage
+from core.processing.migration_run import create_migration_run, delete_migration_run
+from core.processing.plan import build_plan
 from core.processing.rejected_files import RejectedFilesArchive
 from core.processing.token_status import log_token_status
 from core.utils import get_dir_size, sizeof_fmt
@@ -160,13 +162,14 @@ def export(self, data):  # pylint: disable=unused-argument
 
         run_failed = True
         try:
-            _export_workspace(
-                workspace, user, folder, source_backend, integrity_tracker
-            )
+            plan = build_plan(folder)
+            run = create_migration_run(workspace, self.request.id, plan)
+            _export_workspace(run, user, source_backend, integrity_tracker)
             run_failed = False
         finally:
             # Before the task_success/task_failure handlers delete the local folder.
             integrity_tracker.save(self.request.id, run_failed=run_failed)
+            delete_migration_run(self.request.id)
     finally:
         logger.info("Calling finalize_export ...")
         source_backend.finalize_export(workspace)
@@ -176,12 +179,13 @@ def export(self, data):  # pylint: disable=unused-argument
     return True
 
 
-def _export_workspace(workspace, user, folder, source_backend, integrity_tracker):
+def _export_workspace(run, user, source_backend, integrity_tracker):
+    workspace = run.workspace
     logger.info("Calling create_folder ...")
     creator = FolderCreator()
-    integrity_tracker.set_retrieval(creator, creator.get_workspace_path(workspace))
+    integrity_tracker.set_retrieval(run, creator.get_workspace_path(workspace))
     try:
-        local_path = creator.create_folder(workspace, folder, source_backend)
+        local_path = creator.create_folder(workspace, run, source_backend)
     finally:
         # Also when an expired source token stopped the downloads midway.
         if creator.failed_files:

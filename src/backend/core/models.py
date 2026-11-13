@@ -242,6 +242,62 @@ class ExtraTaskInfo(models.Model):
         return f"TaskResult {self.task_result.task_id} for {self.workspace.source_id} "
 
 
+class MigrationRun(BaseModel):
+    """Working state of a migration run, purged once the run is finished."""
+
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name="migration_runs"
+    )
+    # Not an ExtraTaskInfo link: the task may start before the API creates it.
+    task_id = models.CharField(unique=True)
+    # Planned folders (parents first), empty ones included, see core.processing.plan.
+    dirs = models.JSONField(default=list, blank=True)
+    # Files not finished yet; the run is finished once it reaches 0.
+    remaining_files = models.PositiveIntegerField(default=0)
+    # Guards against finishing the run twice when its last files end together.
+    finish_published = models.BooleanField(default=False)
+    # Destination state shared by the file tasks (e.g. Drive folder ids).
+    destinations_state = models.JSONField(default=dict, blank=True)
+
+
+class MigrationFile(BaseModel):
+    """One planned file of a migration run."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending"
+        DOWNLOADED = "downloaded"
+        DOWNLOAD_FAILED = "download_failed"
+        # The download returned without error but left no file.
+        NOT_WRITTEN = "not_written"
+
+    run = models.ForeignKey(
+        MigrationRun, on_delete=models.CASCADE, related_name="files"
+    )
+    # Rank in the plan, i.e. in the download order.
+    position = models.PositiveIntegerField()
+    # SourceFile.to_dict() of the file to download.
+    source = models.JSONField()
+    # Path relative to the workspace root, see core.processing.plan.
+    path = models.CharField()
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    size = models.BigIntegerField(null=True, blank=True)
+    error = models.TextField(blank=True, default="")
+    # Keyed by destination name: what each destination did with the file.
+    results = models.JSONField(default=dict, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["position"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["run", "position"], name="unique_migration_file_position"
+            )
+        ]
+        indexes = [models.Index(fields=["run", "finished_at"])]
+
+
 class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
     """User model to work with OIDC only authentication."""
 

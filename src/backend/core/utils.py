@@ -99,14 +99,14 @@ def rename_with_counter(old_name, new_name):
     os.rename(old_name, new_name_to_use)
 
 
-def ensure_file_uniqueness(file_path):
+def ensure_file_uniqueness(file_path, exists=os.path.exists):
     """
     Make sure the file_path is non existent, if so it appends a counter ( "/path/to/my_file (1)" ) at the end.
     """
     base, extension = os.path.splitext(file_path)
     count = 0
     uniq_path = file_path
-    while os.path.exists(uniq_path):
+    while exists(uniq_path):
         count += 1
         uniq_path = base + " (" + str(count) + ")" + extension
     return uniq_path

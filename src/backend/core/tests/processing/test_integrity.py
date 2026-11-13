@@ -1,7 +1,6 @@
 """Tests for the migration integrity check."""
 
 import os
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,7 +8,7 @@ from django_celery_results.models import TaskResult
 
 from core.backends.source import SourceFile, SourceFolder, truncate_folder_files
 from core.factories import UserFactory, WorkspaceFactory
-from core.models import ExtraTaskInfo, FeatureFlag, Workspace
+from core.models import ExtraTaskInfo, FeatureFlag, MigrationFile, Workspace
 from core.processing.integrity import (
     IntegrityTracker,
     build_integrity_report,
@@ -17,6 +16,8 @@ from core.processing.integrity import (
     should_track_file_integrity,
     snapshot_source_files,
 )
+from core.processing.migration_run import create_migration_run
+from core.processing.plan import build_plan
 
 
 def _set_feature_flag(is_active):
@@ -107,18 +108,17 @@ def test_snapshot_lists_every_source_file_with_its_original_path():
 # ---------------------------------------------------------------------------
 
 
-def _creator(written_files=None, failed_files=None, not_written_ids=None):
-    return SimpleNamespace(
-        written_files=written_files or {},
-        failed_files=failed_files or [],
-        not_written_ids=not_written_ids or set(),
+DOWNLOADED = MigrationFile.Status.DOWNLOADED
+
+
+def _row(path, status=DOWNLOADED, size=3, error=""):
+    """A run's row for a file, as left by its download."""
+    return MigrationFile(
+        path=path,
+        status=status,
+        size=size if status == DOWNLOADED else None,
+        error=error,
     )
-
-
-def _write(path, size=3):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as fh:
-        fh.write(b"x" * size)
 
 
 def _drive_ok(item_id="item-1"):
@@ -134,7 +134,7 @@ def _drive_ok(item_id="item-1"):
 SOURCE_A = {"source_id": "f1", "source_path": "a.txt"}
 
 
-def _build(tmp_path, source_files, creator, kept_source_ids=None, **kwargs):
+def _build(source_files, retrieved_files, kept_source_ids=None, **kwargs):
     return build_integrity_report(
         source_files=source_files,
         kept_source_ids=(
@@ -142,20 +142,16 @@ def _build(tmp_path, source_files, creator, kept_source_ids=None, **kwargs):
             if kept_source_ids is not None
             else {f["source_id"] for f in source_files}
         ),
-        creator=creator,
-        local_folder_path=str(tmp_path),
+        retrieved_files=retrieved_files,
         destination_results=kwargs.get("destination_results", {}),
     )
 
 
-def test_report_merges_retrieval_and_destination_for_each_file(tmp_path):
+def test_report_merges_retrieval_and_destination_for_each_file():
     """A file downloaded and found ready on Drive gives one complete ok row."""
-    _write(tmp_path / "a.txt")
-
     report = _build(
-        tmp_path,
         [SOURCE_A],
-        _creator(written_files={"f1": "a.txt"}),
+        {"f1": _row("a.txt")},
         destination_results={"drive": {"files": {"a.txt": _drive_ok()}, "extra": []}},
     )
 
@@ -184,22 +180,20 @@ def test_report_merges_retrieval_and_destination_for_each_file(tmp_path):
     }
 
 
-def test_report_truncated_file_is_explained(tmp_path):
+def test_report_truncated_file_is_explained():
     """A file dropped by the file limit is truncated, not an anomaly."""
-    report = _build(tmp_path, [SOURCE_A], _creator(), kept_source_ids=set())
+    report = _build([SOURCE_A], {}, kept_source_ids=set())
 
     assert report["files"] == [
         {"source_id": "f1", "source_path": "a.txt", "stage": "truncated"}
     ]
 
 
-def test_report_download_failure_is_explained(tmp_path):
+def test_report_download_failure_is_explained():
     """A download that raised is download_failed with its error, not an anomaly."""
-    creator = _creator(
-        failed_files=[{"id": "f1", "name": "a.txt", "path": "a.txt", "error": "403"}]
-    )
+    retrieved = {"f1": _row("a.txt", MigrationFile.Status.DOWNLOAD_FAILED, error="403")}
 
-    report = _build(tmp_path, [SOURCE_A], creator)
+    report = _build([SOURCE_A], retrieved)
 
     assert report["files"] == [
         {
@@ -212,17 +206,13 @@ def test_report_download_failure_is_explained(tmp_path):
     ]
 
 
-def test_report_file_not_written_is_not_blamed_on_drive(tmp_path):
+def test_report_file_not_written_is_not_blamed_on_drive():
     """A silent retrieval loss is not_written, with no destination row."""
-    creator = _creator(
-        failed_files=[{"id": "f1", "name": "a.txt", "path": "a.txt", "error": "none"}],
-        not_written_ids={"f1"},
-    )
+    retrieved = {"f1": _row("a.txt", MigrationFile.Status.NOT_WRITTEN, error="none")}
 
     report = _build(
-        tmp_path,
         [SOURCE_A],
-        creator,
+        retrieved,
         destination_results={"drive": {"files": {}, "extra": []}},
     )
 
@@ -230,23 +220,25 @@ def test_report_file_not_written_is_not_blamed_on_drive(tmp_path):
     assert "destination" not in report["files"][0]
 
 
-def test_report_file_never_downloaded_is_not_attempted(tmp_path):
+@pytest.mark.parametrize(
+    "retrieved",
+    [{}, {"f1": _row("a.txt", MigrationFile.Status.PENDING)}],
+    ids=["no_row", "pending_row"],
+)
+def test_report_file_never_downloaded_is_not_attempted(retrieved):
     """The run stopped before this file was downloaded: explained by the failure."""
-    report = _build(tmp_path, [SOURCE_A], _creator())
+    report = _build([SOURCE_A], retrieved)
 
     assert report["files"] == [
         {"source_id": "f1", "source_path": "a.txt", "stage": "not_attempted"}
     ]
 
 
-def test_report_file_never_sent_to_destination_is_not_attempted(tmp_path):
-    """On disk but absent from the destination result: the export stopped before it."""
-    _write(tmp_path / "a.txt")
-
+def test_report_file_never_sent_to_destination_is_not_attempted():
+    """Downloaded but absent from the destination result: the export stopped before it."""
     report = _build(
-        tmp_path,
         [SOURCE_A],
-        _creator(written_files={"f1": "a.txt"}),
+        {"f1": _row("a.txt")},
         destination_results={"drive": {"files": {}, "extra": []}},
     )
 
@@ -255,14 +247,11 @@ def test_report_file_never_sent_to_destination_is_not_attempted(tmp_path):
     assert row["stage"] == "not_attempted"
 
 
-def test_report_file_is_ok_when_no_destination_checks_files(tmp_path):
+def test_report_file_is_ok_when_no_destination_checks_files():
     """Without per-file destination, a downloaded file is ok at retrieval level."""
-    _write(tmp_path / "a.txt")
-
     report = _build(
-        tmp_path,
         [SOURCE_A],
-        _creator(written_files={"f1": "a.txt"}),
+        {"f1": _row("a.txt")},
         destination_results={"archive": None},
     )
 
@@ -278,15 +267,14 @@ def test_report_file_is_ok_when_no_destination_checks_files(tmp_path):
     assert report["summary"]["destinations_not_checked"] == ["archive"]
 
 
-def test_report_lists_destination_items_without_source_as_extra(tmp_path):
+def test_report_lists_destination_items_without_source_as_extra():
     """Generated files and unknown destination items are extra, not anomalies."""
     users_csv = {**_drive_ok("csv-id"), "generated": True}
     unknown = {"item_id": "dup", "path": "a (1).txt", "upload_state": "ready"}
 
     report = _build(
-        tmp_path,
         [],
-        _creator(),
+        {},
         destination_results={
             "drive": {
                 "files": {"users_list_by_migrator.csv": users_csv},
@@ -316,20 +304,17 @@ def test_report_lists_destination_items_without_source_as_extra(tmp_path):
     ]
 
 
-def test_report_counts_source_files_ok_on_every_checked_destination(tmp_path):
+def test_report_counts_source_files_ok_on_every_checked_destination():
     """A source file is migrated when all its rows are ok; extra rows don't count."""
-    for name in ("a.txt", "b.txt", "c.txt"):
-        _write(tmp_path / name)
     source_files = [
         {"source_id": f"f{i}", "source_path": name}
         for i, name in enumerate(("a.txt", "b.txt", "c.txt", "d.txt"))
     ]
-    creator = _creator(written_files={"f0": "a.txt", "f1": "b.txt", "f2": "c.txt"})
+    retrieved = {"f0": _row("a.txt"), "f1": _row("b.txt"), "f2": _row("c.txt")}
 
     report = _build(
-        tmp_path,
         source_files,
-        creator,
+        retrieved,
         kept_source_ids={"f0", "f1", "f2"},
         destination_results={
             "drive": {
@@ -359,16 +344,11 @@ def test_report_counts_source_files_ok_on_every_checked_destination(tmp_path):
     assert report["summary"]["migrated_files_count"] == 1
 
 
-def test_report_counts_retrieved_files_as_migrated_without_checked_destination(
-    tmp_path,
-):
-    """Without per-file destination check, a file on disk counts as migrated."""
-    _write(tmp_path / "a.txt")
-
+def test_report_counts_retrieved_files_as_migrated_without_checked_destination():
+    """Without per-file destination check, a downloaded file counts as migrated."""
     report = _build(
-        tmp_path,
         [SOURCE_A],
-        _creator(written_files={"f1": "a.txt"}),
+        {"f1": _row("a.txt")},
         destination_results={"archive": None},
     )
 
@@ -376,26 +356,38 @@ def test_report_counts_retrieved_files_as_migrated_without_checked_destination(
     assert report["summary"]["sent_files_count"] is None
 
 
+def test_report_counts_only_downloaded_files_as_local():
+    """local_files_count is the number of files the download did write."""
+    source_files = [
+        {"source_id": "f1", "source_path": "a.txt"},
+        {"source_id": "f2", "source_path": "b.txt"},
+    ]
+    retrieved = {
+        "f1": _row("a.txt"),
+        "f2": _row("b.txt", MigrationFile.Status.DOWNLOAD_FAILED, error="x"),
+    }
+
+    report = _build(source_files, retrieved)
+
+    assert report["summary"]["local_files_count"] == 1
+
+
 SENT_STAGES = ["ok", "analysis_unfinished", "pending", "not_ready", "size_mismatch"]
 NOT_SENT_STAGES = ["not_created", "not_attempted", "unverified"]
 
 
-def test_report_counts_files_received_by_the_destination_as_sent(tmp_path):
+def test_report_counts_files_received_by_the_destination_as_sent():
     """A file is sent when the destination holds an item for it, whatever its
     state; failed creations, untried files and unverifiable ones are not."""
     stages = SENT_STAGES + NOT_SENT_STAGES
     names = [f"{stage}.txt" for stage in stages]
-    for name in names:
-        _write(tmp_path / name)
     source_files = [
         {"source_id": f"f{i}", "source_path": name} for i, name in enumerate(names)
     ]
     source_files.append({"source_id": "lost", "source_path": "lost.txt"})
-    creator = _creator(
-        written_files={f"f{i}": name for i, name in enumerate(names)},
-        failed_files=[
-            {"id": "lost", "name": "lost.txt", "path": "lost.txt", "error": "x"}
-        ],
+    retrieved = {f"f{i}": _row(name) for i, name in enumerate(names)}
+    retrieved["lost"] = _row(
+        "lost.txt", MigrationFile.Status.DOWNLOAD_FAILED, error="x"
     )
     drive_files = {
         name: {"item_id": name, "stage": stage}
@@ -404,9 +396,8 @@ def test_report_counts_files_received_by_the_destination_as_sent(tmp_path):
     }
 
     report = _build(
-        tmp_path,
         source_files,
-        creator,
+        retrieved,
         destination_results={"drive": {"files": drive_files, "extra": []}},
     )
 
@@ -414,26 +405,22 @@ def test_report_counts_files_received_by_the_destination_as_sent(tmp_path):
     assert report["summary"]["sent_files_count"] == len(SENT_STAGES)
 
 
-def test_report_keeps_destination_error_in_summary(tmp_path):
+def test_report_keeps_destination_error_in_summary():
     """A destination that could not be re-read keeps its error in the summary."""
     report = _build(
-        tmp_path,
         [],
-        _creator(),
+        {},
         destination_results={"drive": {"files": {}, "extra": [], "error": "boom"}},
     )
 
     assert report["summary"]["errors"] == {"drive": "boom"}
 
 
-def test_report_only_checks_destinations_that_return_a_result(tmp_path):
+def test_report_only_checks_destinations_that_return_a_result():
     """Destinations without per-file check (None) add no row and are listed apart."""
-    _write(tmp_path / "a.txt")
-
     report = _build(
-        tmp_path,
         [SOURCE_A],
-        _creator(written_files={"f1": "a.txt"}),
+        {"f1": _row("a.txt")},
         destination_results={
             "drive": {"files": {"a.txt": _drive_ok()}, "extra": []},
             "resana": None,
@@ -506,13 +493,18 @@ def _destination(name, result=None, not_implemented=False):
     return destination
 
 
-def _tracker(workspace, tmp_path, folder=None, creator=None, destinations=()):
+def _downloaded_run(workspace, folder):
+    """The run of folder, with every planned file downloaded."""
+    run = create_migration_run(workspace, "task-1", build_plan(folder))
+    run.files.update(status=DOWNLOADED, size=3)
+    return run
+
+
+def _tracker(workspace, tmp_path, folder=None, destinations=()):
     folder = folder or SourceFolder(name="root", files=[_source_file("f1", "a")])
     tracker = IntegrityTracker(workspace, folder)
     tracker.set_kept_files(folder)
-    tracker.set_retrieval(
-        creator or _creator(written_files={"f1": "a.txt"}), str(tmp_path)
-    )
+    tracker.set_retrieval(_downloaded_run(workspace, folder), str(tmp_path))
     for destination in destinations:
         tracker.add_exported_destination(destination)
     return tracker
@@ -536,7 +528,6 @@ def test_tracker_does_nothing_when_tracking_is_disabled(tmp_path):
 @pytest.mark.django_db
 def test_tracker_saves_report_on_the_run_extra_task(tmp_path):
     """The report and its flag are saved on the ExtraTaskInfo of the task."""
-    _write(tmp_path / "a.txt")
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
     extra_task = _extra_task(workspace)
     drive = _destination("drive", {"files": {"a.txt": _drive_ok()}, "extra": []})
@@ -549,6 +540,8 @@ def test_tracker_saves_report_on_the_run_extra_task(tmp_path):
     extra_task.refresh_from_db()
     assert extra_task.integrity_report["summary"]["stages"] == {"ok": 1}
     assert extra_task.integrity_report["files"][0]["item_id"] == "item-1"
+    # Read from the run's row: the file is not on disk.
+    assert extra_task.integrity_report["files"][0]["local_size"] == 3
     assert extra_task.integrity_check_passed is True
 
 
@@ -589,7 +582,6 @@ def test_tracker_not_attempted_is_unexplained_only_in_successful_run(
     tmp_path, run_failed, expected
 ):
     """A file never sent is explained by a failed run, an anomaly otherwise."""
-    _write(tmp_path / "a.txt")
     workspace = WorkspaceFactory(is_file_integrity_tracked=True)
     extra_task = _extra_task(workspace)
     drive = _destination("drive", {"files": {}, "extra": []})
@@ -614,7 +606,7 @@ def test_tracker_marks_files_removed_by_truncation(tmp_path):
     tracker = IntegrityTracker(workspace, folder)
     truncate_folder_files(folder, 1)
     tracker.set_kept_files(folder)
-    tracker.set_retrieval(_creator(written_files={"f1": "a.txt"}), str(tmp_path))
+    tracker.set_retrieval(_downloaded_run(workspace, folder), str(tmp_path))
 
     tracker.save("task-1", run_failed=False)
 

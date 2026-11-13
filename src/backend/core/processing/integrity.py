@@ -3,12 +3,17 @@
 import os
 from collections import Counter
 from enum import StrEnum
-from types import SimpleNamespace
 
 from celery.utils.log import get_task_logger
 
 from core.backends.source import SourceFolder
-from core.models import ExtraTaskInfo, FeatureFlag, Workspace
+from core.models import (
+    ExtraTaskInfo,
+    FeatureFlag,
+    MigrationFile,
+    MigrationRun,
+    Workspace,
+)
 
 logger = get_task_logger(__name__)
 
@@ -103,17 +108,13 @@ class IntegrityTracker:
     integrity report on its ExtraTaskInfo. Every method is a no-op when
     tracking is disabled for the workspace."""
 
-    # Stand-in for a FolderCreator when the run failed before downloading.
-    _NO_RETRIEVAL = SimpleNamespace(
-        written_files={}, failed_files=[], not_written_ids=set()
-    )
-
     def __init__(self, workspace: Workspace, source_folder: SourceFolder):
         self.workspace = workspace
         self.enabled = should_track_file_integrity(workspace)
         self.source_files = snapshot_source_files(source_folder) if self.enabled else []
         self.kept_source_ids = {file["source_id"] for file in self.source_files}
-        self.creator = self._NO_RETRIEVAL
+        # None while the run failed before planning its downloads.
+        self.run = None
         self.local_folder_path = ""
         self.exported_destinations = []
 
@@ -124,8 +125,8 @@ class IntegrityTracker:
                 file["source_id"] for file in snapshot_source_files(truncated_folder)
             }
 
-    def set_retrieval(self, creator, local_folder_path: str) -> None:
-        self.creator = creator
+    def set_retrieval(self, run: MigrationRun, local_folder_path: str) -> None:
+        self.run = run
         self.local_folder_path = local_folder_path
 
     def add_exported_destination(self, destination) -> None:
@@ -161,11 +162,15 @@ class IntegrityTracker:
             except NotImplementedError:
                 destination_results[destination.name] = None
 
+        retrieved_files = (
+            {row.source["id"]: row for row in self.run.files.iterator()}
+            if self.run
+            else {}
+        )
         report = build_integrity_report(
             source_files=self.source_files,
             kept_source_ids=self.kept_source_ids,
-            creator=self.creator,
-            local_folder_path=self.local_folder_path,
+            retrieved_files=retrieved_files,
             destination_results=destination_results,
         )
 
@@ -200,26 +205,23 @@ def build_integrity_report(
     *,
     source_files: list[dict],
     kept_source_ids: set,
-    creator,
-    local_folder_path: str,
+    retrieved_files: dict[str, MigrationFile],
     destination_results: dict[str, dict | None],
 ) -> dict:
     """Build the per-file listing of a run, one row per file and per checked
-    destination. destination_results maps each destination exported by the run
-    to its check_integrity() result, or None when it has no per-file check."""
+    destination. retrieved_files maps source file ids to the run's rows.
+    destination_results maps each destination exported by the run to its
+    check_integrity() result, or None when it has no per-file check."""
     checked_results = {
         destination: result
         for destination, result in destination_results.items()
         if result is not None
     }
-    failed_by_id = {failed["id"]: failed for failed in creator.failed_files}
     matched_local_paths = set()
     rows = []
 
     for source_file in source_files:
-        row = _retrieval_row(
-            source_file, kept_source_ids, failed_by_id, creator, local_folder_path
-        )
+        row = _retrieval_row(source_file, kept_source_ids, retrieved_files)
         if "stage" in row:
             rows.append(row)
             continue
@@ -240,7 +242,11 @@ def build_integrity_report(
     summary = _summary(
         rows,
         source_files_count=len(source_files),
-        local_files_count=len(creator.written_files),
+        local_files_count=sum(
+            1
+            for row in retrieved_files.values()
+            if row.status == MigrationFile.Status.DOWNLOADED
+        ),
         destination_results=destination_results,
     )
     return {"summary": summary, "files": rows}
@@ -313,12 +319,14 @@ def _summary(
     return summary
 
 
+_RETRIEVAL_LOSS_STAGES = {
+    MigrationFile.Status.DOWNLOAD_FAILED: Stage.DOWNLOAD_FAILED,
+    MigrationFile.Status.NOT_WRITTEN: Stage.NOT_WRITTEN,
+}
+
+
 def _retrieval_row(
-    source_file: dict,
-    kept_source_ids: set,
-    failed_by_id: dict,
-    creator,
-    local_folder_path: str,
+    source_file: dict, kept_source_ids: set, retrieved_files: dict
 ) -> dict:
     """Row of a source file after retrieval. It has a "stage" when the file was
     lost before reaching the disk, none when it awaits the destination check."""
@@ -328,29 +336,21 @@ def _retrieval_row(
     if source_id not in kept_source_ids:
         return {**row, "stage": Stage.TRUNCATED}
 
-    if source_id in failed_by_id:
-        failed = failed_by_id[source_id]
-        stage = (
-            Stage.NOT_WRITTEN
-            if source_id in creator.not_written_ids
-            else Stage.DOWNLOAD_FAILED
-        )
-        return {
-            **row,
-            "local_path": failed["path"],
-            "stage": stage,
-            "error": failed["error"],
-        }
-
-    local_path = creator.written_files.get(source_id)
-    if local_path is None:
+    retrieved = retrieved_files.get(source_id)
+    if retrieved is None or retrieved.status == MigrationFile.Status.PENDING:
         # The run stopped before this file was downloaded.
         return {**row, "stage": Stage.NOT_ATTEMPTED}
 
-    row["local_path"] = local_path
-    local_file = os.path.join(local_folder_path, local_path)
-    if os.path.isfile(local_file):
-        row["local_size"] = os.path.getsize(local_file)
+    row["local_path"] = retrieved.path
+    if retrieved.status in _RETRIEVAL_LOSS_STAGES:
+        return {
+            **row,
+            "stage": _RETRIEVAL_LOSS_STAGES[retrieved.status],
+            "error": retrieved.error,
+        }
+
+    if retrieved.size is not None:
+        row["local_size"] = retrieved.size
     return row
 
 
