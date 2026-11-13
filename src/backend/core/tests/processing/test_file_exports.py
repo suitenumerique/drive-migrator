@@ -181,9 +181,11 @@ def test_abort_only_aborts_destinations_not_closed_yet(run):
     drive.close_export.assert_not_called()
 
 
-def _reloaded(run, user, *destinations):
+def _reloaded(run, *destinations):
     """FileExports of another task: same run read back from the database, no open()."""
-    return FileExports(MigrationRun.objects.get(pk=run.pk), user, list(destinations))
+    return FileExports(
+        MigrationRun.objects.get(pk=run.pk), UserFactory(), list(destinations)
+    )
 
 
 def test_a_disabled_destination_stays_disabled_for_the_next_tasks(run):
