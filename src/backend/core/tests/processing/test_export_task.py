@@ -542,7 +542,7 @@ def test_export_streams_files_to_file_by_file_destinations(workspace, user, tmp_
     local_file.write_text("content")
     row = SimpleNamespace(results={"drive": {"status": FileExportStatus.SENT}})
     with patch("core.processing.tasks.keep_refused_file") as keep:
-        on_downloaded(row, str(local_file))
+        after_download(row, str(local_file))
     exports.put.assert_called_once_with(row, str(local_file))
     keep.assert_not_called()
     assert not local_file.exists()
@@ -559,12 +559,12 @@ def test_export_keeps_the_files_a_destination_did_not_take(
         workspace, user, [_file_by_file_destination("drive")]
     )
 
-    on_downloaded = creator.create_folder.call_args.kwargs["on_downloaded"]
+    after_download = creator.create_folder.call_args.kwargs["after_download"]
     local_file = tmp_path / "doc.txt"
     local_file.write_text("content")
     row = SimpleNamespace(results={"drive": {"status": status}})
     with patch("core.processing.tasks.keep_refused_file") as keep:
-        on_downloaded(row, str(local_file))
+        after_download(row, str(local_file))
     keep.assert_called_once_with(exports_cls.return_value.run, row, str(local_file))
     assert not local_file.exists()
 
