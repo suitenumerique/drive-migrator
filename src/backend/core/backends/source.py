@@ -1,7 +1,7 @@
 """Abstract source backend interface, source data types, and source manager."""
 
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 
 from django.conf import settings
 from django.utils.module_loading import import_string
@@ -27,14 +27,6 @@ class SourceFile:
     @property
     def name_with_extension(self) -> str:
         return self.name + self.extension
-
-    def to_dict(self) -> dict:
-        """JSON-ready form, e.g. to hand the file over to another Celery task."""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "SourceFile":
-        return cls(**data)
 
 
 @dataclass
