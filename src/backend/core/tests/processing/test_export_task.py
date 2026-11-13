@@ -3,82 +3,31 @@
 # pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
 
 from types import SimpleNamespace
-from unittest.mock import ANY, MagicMock, PropertyMock, call, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from celery.exceptions import Ignore
 
-from core.backends.destination import FileExportStatus
 from core.backends.source import SourceFolder, SourceTokenExpired
 from core.factories import UserFactory, WorkspaceFactory
-from core.models import MigrationRun, User, Workspace
+from core.models import User, Workspace
 from core.processing import tasks
 from core.processing.plan import build_plan
 from core.processing.tasks import export
 from core.sources.resana.token_manager import ResanaTokenExpired
+from core.tests.processing.export_helpers import (
+    DRIVE_DOWN,
+    EXPORT_DATA,
+    export_and_run_tasks,
+    make_destination,
+    run_export_with_creator,
+    run_file_by_file_export,
+    saved_workspace,
+)
 
-EXPORT_DATA = {"workspace": {"id": "ws-1"}, "user": {"id": "user-1"}}
-
-
-class _FakeRun(SimpleNamespace):
-    """A run kept out of the database, stopped as the model is."""
-
-    stopped = MigrationRun.stopped
-
-
-@pytest.fixture(autouse=True)
-def work_directory(settings, tmp_path):
-    """Keep export task filesystem operations inside a temporary directory."""
-    settings.APP_WORK_DIR = str(tmp_path)
-
-
-@pytest.fixture(autouse=True)
-def _rejected_files_bucket():
-    """Keep the rejected files cleanup away from S3."""
-    with patch("core.processing.rejected_files.ArchiveManager"):
-        yield
-
-
-@pytest.fixture(autouse=True)
-def migration_run():
-    """Keep the run's working rows out of the database: workspaces are mocks here."""
-    with (
-        patch("core.processing.tasks.run_exists", return_value=False),
-        patch("core.processing.tasks.claim_export", return_value=True),
-        patch("core.processing.tasks.mark_run_alive"),
-        patch("core.processing.tasks.TaskResult"),
-        patch("core.processing.tasks._reported", return_value=False),
-        patch("core.processing.tasks.create_migration_run") as create,
-        patch("core.processing.tasks.delete_migration_run") as delete,
-        patch("core.processing.tasks.save_run_files_stats") as save_stats,
-        patch("core.processing.tasks.drop_unlinked_kept_files") as drop_kept,
-        patch("core.processing.tasks.failed_downloads", return_value=[]) as failed,
-        patch("core.processing.tasks.stop_run") as stop,
-        patch("core.processing.tasks.record_file_error"),
-        patch("core.processing.tasks._extra_task_of", return_value=None),
-        patch("core.processing.tasks._record_outcome"),
-    ):
-        files = MagicMock()
-        files.count.return_value = 0
-        create.side_effect = lambda workspace, task_id, plan: _FakeRun(
-            pk="run-1",
-            task_id=task_id,
-            workspace=workspace,
-            exports_state={},
-            integrity_state={},
-            source_token_expired=False,
-            stalled=False,
-            files=files,
-        )
-        stop.side_effect = lambda run: setattr(run, "source_token_expired", True)
-        yield SimpleNamespace(
-            create=create,
-            delete=delete,
-            save_stats=save_stats,
-            drop_kept=drop_kept,
-            failed=failed,
-            files=files,
-        )
+pytestmark = pytest.mark.usefixtures(
+    "work_directory", "rejected_files_bucket", "migration_run"
+)
 
 
 @pytest.fixture()
@@ -97,20 +46,6 @@ def user():
     u = MagicMock(spec=User)
     u.id = "user-1"
     return u
-
-
-def _export(data=None):
-    """Run export(), then, as the workers would, each file of its run and its
-    finish. Raise the error of the run, if any."""
-    with patch("core.processing.tasks.dispatch_batch") as dispatch:
-        with pytest.raises(Ignore):
-            export(data or EXPORT_DATA)  # pylint: disable=no-value-for-parameter
-    run, user = dispatch.call_args.args
-    source_backend = tasks.SourceManager().get_backend()
-    for migration_file in run.files.iterator():
-        if not run.source_token_expired:
-            tasks.run_file(run, user, source_backend, migration_file)
-    tasks.finish_run(run, user, source_backend)
 
 
 def _run_export(
@@ -140,7 +75,7 @@ def _run_export(
             setup_creator(mock_folder_creator_cls.return_value)
         mock_dest_registry.get_all.return_value = dest_backends
 
-        _export()
+        export_and_run_tasks()
 
         return (
             mock_source_backend,
@@ -166,7 +101,7 @@ def test_export_fetches_workspace_and_user(workspace, user):
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        _export()
+        export_and_run_tasks()
 
     mock_ws_get.assert_called_once_with(id="ws-1")
     mock_user_get.assert_called_once_with(id="user-1")
@@ -245,7 +180,7 @@ def _export_dispatching(workspace, user, dispatch_error=None):
     ):
         source_backend = mock_sm.return_value.get_backend.return_value
         source_backend.get_workspace_structure.return_value = SourceFolder(name="root")
-        mock_dr.get_all.return_value = [_destination("drive")]
+        mock_dr.get_all.return_value = [make_destination("drive")]
         dispatch.side_effect = dispatch_error
         with pytest.raises((Ignore, RuntimeError)) as raised:
             export(EXPORT_DATA)  # pylint: disable=no-value-for-parameter
@@ -298,10 +233,10 @@ def test_export_undoes_the_start_when_the_first_batch_cannot_be_queued(
 @pytest.mark.django_db
 def test_export_deletes_the_migration_run_when_it_fails(migration_run):
     """The working rows are purged whatever the outcome of the run."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
+    workspace, user = saved_workspace("drive"), UserFactory()
     with pytest.raises(RuntimeError, match="drive"):
-        _run_file_by_file_export(
-            workspace, user, [_destination("drive")], failures=_DRIVE_DOWN
+        run_file_by_file_export(
+            workspace, user, [make_destination("drive")], failures=DRIVE_DOWN
         )
 
     migration_run.delete.assert_called_once()
@@ -311,18 +246,18 @@ def test_export_deletes_the_migration_run_when_it_fails(migration_run):
 @pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
 def test_export_keeps_the_files_stats_before_purging_the_run(migration_run, fails):
     """The analytics stats are read from the run's rows, so before they go."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
+    workspace, user = saved_workspace("drive"), UserFactory()
     calls = []
     migration_run.save_stats.side_effect = lambda task_id, run: calls.append(
         ("stats", task_id, run)
     )
     migration_run.delete.side_effect = lambda task_id: calls.append(("delete",))
     try:
-        _run_file_by_file_export(
+        run_file_by_file_export(
             workspace,
             user,
-            [_destination("drive")],
-            failures=_DRIVE_DOWN if fails else None,
+            [make_destination("drive")],
+            failures=DRIVE_DOWN if fails else None,
         )
     except RuntimeError:
         assert fails
@@ -339,16 +274,16 @@ def test_export_drops_the_unlinked_kept_files_before_purging_the_run(
 ):
     """The files kept for a destination that failed are deleted, while the
     run's rows still tell which ones it kept."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
+    workspace, user = saved_workspace("drive"), UserFactory()
     calls = []
     migration_run.drop_kept.side_effect = lambda run: calls.append(("drop", run))
     migration_run.delete.side_effect = lambda task_id: calls.append(("delete",))
     try:
-        _run_file_by_file_export(
+        run_file_by_file_export(
             workspace,
             user,
-            [_destination("drive")],
-            failures=_DRIVE_DOWN if fails else None,
+            [make_destination("drive")],
+            failures=DRIVE_DOWN if fails else None,
         )
     except RuntimeError:
         assert fails
@@ -366,7 +301,7 @@ def test_export_calls_prepare_export_before_downloading():
     def record_download(creator):
         creator.prepare_folder.side_effect = lambda *args: calls.append("download")
 
-    source_backend, creator = _run_export_with_creator(
+    source_backend, creator = run_export_with_creator(
         workspace,
         user,
         [],
@@ -399,7 +334,7 @@ def test_export_persists_download_errors_on_workspace(workspace, user, migration
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        _export()
+        export_and_run_tasks()
 
     assert workspace.download_errors == failed_files
     workspace.save.assert_called()
@@ -431,10 +366,10 @@ def test_export_keeps_earlier_download_errors_when_the_source_token_expires(
         mock_fc.return_value.download_file.side_effect = ResanaTokenExpired(
             "Resana offline token is no longer valid."
         )
-        mock_dr.get_all.return_value = [_destination("drive")]
+        mock_dr.get_all.return_value = [make_destination("drive")]
 
         with pytest.raises(SourceTokenExpired):
-            _export()
+            export_and_run_tasks()
 
     assert workspace.download_errors == failed_files
 
@@ -455,7 +390,7 @@ def test_export_resets_previous_run_errors_before_starting(workspace, user):
         pytest.raises(RuntimeError, match="stop"),
     ):
         mock_sm.return_value.get_backend.return_value = source_backend
-        _export()
+        export_and_run_tasks()
 
 
 def test_export_clears_previous_run_rejected_files_before_starting(workspace, user):
@@ -477,7 +412,7 @@ def test_export_clears_previous_run_rejected_files_before_starting(workspace, us
             pytest.raises(RuntimeError, match="stop"),
         ):
             mock_sm.return_value.get_backend.return_value = source_backend
-            _export()
+            export_and_run_tasks()
 
 
 def test_export_does_not_save_download_errors_when_all_files_succeed(
@@ -498,7 +433,7 @@ def test_export_does_not_save_download_errors_when_all_files_succeed(
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        _export()
+        export_and_run_tasks()
 
     workspace.save.assert_not_called()
 
@@ -525,292 +460,9 @@ def test_export_saves_download_errors_with_update_fields(
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        _export()
+        export_and_run_tasks()
 
     workspace.save.assert_called_once_with(update_fields=["download_errors"])
-
-
-# ---------------------------------------------------------------------------
-# Destinations
-# ---------------------------------------------------------------------------
-
-
-def _destination(name):
-    destination = MagicMock()
-    destination.name = name
-    return destination
-
-
-_DRIVE_DOWN = {"drive": RuntimeError("Drive down")}
-
-
-def _saved_workspace(*pending):
-    """A saved workspace whose given destinations are pending."""
-    return WorkspaceFactory(
-        destination_statuses=dict.fromkeys(pending, Workspace.Status.PENDING)
-    )
-
-
-def _run_file_by_file_export(
-    workspace, user, dest_backends, failures=None, downloaded_path=None
-):
-    """Run export() with FileExports mocked, the creator downloading every
-    row of the run to downloaded_path; return (exports class, creator)."""
-
-    def setup_creator(creator):
-        creator.download_file.return_value = downloaded_path
-
-    with patch("core.processing.tasks.FileExports") as exports_cls:
-        exports_cls.return_value.close.return_value = failures or {}
-        _, creator = _run_export_with_creator(
-            workspace, user, dest_backends, setup_creator
-        )
-    return exports_cls, creator
-
-
-@pytest.mark.django_db
-def test_export_hands_the_run_to_each_pending_destination():
-    """Only the destinations still pending receive the run."""
-    workspace = WorkspaceFactory(
-        destination_statuses={
-            "archive": Workspace.Status.SUCCESS,
-            "resana": Workspace.Status.PENDING,
-        }
-    )
-    user = UserFactory()
-    archive, resana = _destination("archive"), _destination("resana")
-
-    exports_cls, _ = _run_file_by_file_export(workspace, user, [archive, resana])
-
-    # Built by the start of the run, then its finish: it has no file.
-    assert exports_cls.call_args_list == [call(ANY, user, [resana])] * 2
-
-
-def _run_export_with_creator(
-    workspace, user, dest_backends, setup_creator=None, setup_source=None
-):
-    """Run export() for a saved workspace and user, with the creator (and
-    source) set up by the caller; return (source backend, creator)."""
-    with (
-        patch("core.processing.tasks.FolderCreator") as mock_fc,
-        patch("core.processing.tasks.SourceManager") as mock_sm,
-        patch("core.processing.tasks.DestinationRegistry") as mock_dr,
-    ):
-        source_backend = mock_sm.return_value.get_backend.return_value
-        source_backend.get_workspace_structure.return_value = SourceFolder(name="root")
-        if setup_source:
-            setup_source(source_backend)
-        if setup_creator:
-            setup_creator(mock_fc.return_value)
-        mock_dr.get_all.return_value = dest_backends
-
-        _export({"workspace": {"id": workspace.id}, "user": {"id": user.id}})
-    return source_backend, mock_fc.return_value
-
-
-@pytest.mark.django_db
-def test_export_streams_files_to_the_destinations(tmp_path, migration_run):
-    """Each file is handed over to the destinations, then dropped from the
-    disk."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
-    drive = _destination("drive")
-    local_file = tmp_path / "doc.txt"
-    local_file.write_text("content")
-    row = SimpleNamespace(results={"drive": {"status": FileExportStatus.SENT}})
-    migration_run.files.iterator.return_value = [row]
-
-    with patch("core.processing.tasks.keep_refused_file") as keep:
-        exports_cls, _ = _run_file_by_file_export(
-            workspace, user, [drive], downloaded_path=str(local_file)
-        )
-
-    # Built by the start of the run, its file, then its finish.
-    assert exports_cls.call_args_list == [call(ANY, user, [drive])] * 3
-    exports = exports_cls.return_value
-    exports.open.assert_called_once_with()
-    exports.close.assert_called_once_with()
-    exports.put.assert_called_once_with(row, str(local_file))
-    keep.assert_not_called()
-    assert not local_file.exists()
-
-
-@pytest.mark.django_db
-def test_export_downloads_nothing_once_no_destination_receives(migration_run):
-    """With every destination disabled during the run, e.g. on a revoked
-    token, the files left are not downloaded for nothing: the run fails when
-    it closes."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
-    migration_run.files.iterator.return_value = [SimpleNamespace(position=0)]
-    creators = []
-
-    with (
-        patch("core.processing.tasks.FileExports") as exports_cls,
-        pytest.raises(RuntimeError, match="drive"),
-    ):
-        # Still receiving when the run opens, no more for its file.
-        type(exports_cls.return_value).receiving = PropertyMock(
-            side_effect=[True, False]
-        )
-        exports_cls.return_value.close.return_value = _DRIVE_DOWN
-        _run_export_with_creator(
-            workspace, user, [_destination("drive")], creators.append
-        )
-
-    creators[0].download_file.assert_not_called()
-    exports_cls.return_value.put.assert_not_called()
-
-
-@pytest.mark.django_db
-def test_export_fails_at_once_when_no_destination_opens():
-    """Every destination failed to open, e.g. all of them unreachable: the
-    run fails before queuing a single file, with the error of a destination
-    as its cause."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
-    drive_down = RuntimeError("401 Unauthorized")
-    with (
-        patch("core.processing.tasks.FileExports") as exports_cls,
-        pytest.raises(RuntimeError, match="No destination") as raised,
-    ):
-        exports_cls.return_value.receiving = False
-        exports_cls.return_value.open.return_value = {"drive": drive_down}
-        _run_export_with_creator(
-            workspace, user, [_destination("drive")], lambda creator: None
-        )
-
-    assert raised.value.__cause__ is drive_down
-    exports_cls.return_value.abort.assert_called_once_with()
-
-
-@pytest.mark.django_db
-@pytest.mark.parametrize(
-    "results",
-    [
-        {"drive": {"status": FileExportStatus.REJECTED}},
-        {"drive": {"status": FileExportStatus.FAILED}},
-    ],
-    ids=["rejected", "failed"],
-)
-def test_export_keeps_the_files_a_destination_did_not_take(
-    tmp_path, migration_run, results
-):
-    """A file a destination refused or failed to receive is kept on S3, for
-    the destination to hand it back to the user once it closes: the disk only
-    holds the file being sent."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
-    local_file = tmp_path / "doc.txt"
-    local_file.write_text("content")
-    row = SimpleNamespace(results=results)
-    migration_run.files.iterator.return_value = [row]
-
-    with patch("core.processing.tasks.keep_refused_file") as keep:
-        exports_cls, _ = _run_file_by_file_export(
-            workspace,
-            user,
-            [_destination("drive")],
-            downloaded_path=str(local_file),
-        )
-
-    keep.assert_called_once_with(exports_cls.return_value.run, row, str(local_file))
-    assert not local_file.exists()
-
-
-@pytest.mark.django_db
-def test_export_drops_a_downloaded_file_its_hand_over_failed(tmp_path, migration_run):
-    """An error handing a file over leaves it on no worker's disk."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
-    local_file = tmp_path / "doc.txt"
-    local_file.write_text("content")
-    migration_run.files.iterator.return_value = [
-        SimpleNamespace(position=0, results={})
-    ]
-
-    def setup_creator(creator):
-        creator.download_file.return_value = str(local_file)
-
-    with patch("core.processing.tasks.FileExports") as exports_cls:
-        exports_cls.return_value.put.side_effect = RuntimeError("database down")
-        exports_cls.return_value.close.return_value = {}
-        _run_export_with_creator(
-            workspace, user, [_destination("drive")], setup_creator
-        )
-
-    assert not local_file.exists()
-
-
-@pytest.mark.django_db
-def test_a_hand_over_error_is_kept_even_with_its_file_gone(tmp_path, migration_run):
-    """The file gone already does not hide the error of its hand over."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
-    local_file = tmp_path / "doc.txt"
-    migration_run.files.iterator.return_value = [
-        SimpleNamespace(position=0, results={})
-    ]
-
-    def setup_creator(creator):
-        creator.download_file.return_value = str(local_file)
-
-    with (
-        patch("core.processing.tasks.FileExports") as exports_cls,
-        patch("core.processing.tasks.record_file_error") as record_error,
-    ):
-        exports_cls.return_value.put.side_effect = RuntimeError("Drive down")
-        exports_cls.return_value.close.return_value = {}
-        _run_export_with_creator(
-            workspace, user, [_destination("drive")], setup_creator
-        )
-
-    assert str(record_error.call_args.args[1]) == "Drive down"
-
-
-@pytest.mark.django_db
-def test_export_fails_when_a_destination_failed():
-    """A failed destination fails the task, its error as the cause."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
-    with pytest.raises(RuntimeError, match="drive") as raised:
-        _run_file_by_file_export(
-            workspace,
-            user,
-            [_destination("drive")],
-            failures={"drive": ValueError("401")},
-        )
-
-    assert raised.value.names == ["drive"]
-    assert isinstance(raised.value.__cause__, ValueError)
-
-
-def _disk_full(creator, _migration_run):
-    creator.prepare_folder.side_effect = OSError("disk full")
-
-
-def _every_download_failed(creator, migration_run):
-    creator.get_workspace_path.return_value = "/tmp/ws-1"
-    migration_run.failed.return_value = [{"id": "f1", "error": "403"}]
-    migration_run.files.count.return_value = 1
-
-
-@pytest.mark.django_db
-@pytest.mark.parametrize(
-    "setup_creator,error",
-    [(_disk_full, "disk full"), (_every_download_failed, "failed to download")],
-)
-def test_export_aborts_the_destinations_when_the_run_fails(
-    migration_run, setup_creator, error
-):
-    """A run failing before the end leaves no destination half open."""
-    workspace, user = _saved_workspace("drive"), UserFactory()
-    with (
-        patch("core.processing.tasks.FileExports") as exports_cls,
-        pytest.raises((OSError, RuntimeError), match=error),
-    ):
-        _run_export_with_creator(
-            workspace,
-            user,
-            [_destination("drive")],
-            lambda creator: setup_creator(creator, migration_run),
-        )
-
-    exports_cls.return_value.abort.assert_called_once_with()
-    exports_cls.return_value.close.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -844,15 +496,15 @@ def _run_export_with_tracker(workspace, user, dest_backends, failures=None):
         mock_dr.get_all.return_value = dest_backends
         exports_cls.return_value.close.return_value = failures or {}
 
-        _export()
+        export_and_run_tasks()
     return creator, folder
 
 
 def test_export_feeds_integrity_tracker_and_saves_it(workspace, user, mock_tracker_cls):
     """export() gives the tracker the kept files, the retrieval and the pending
     destinations, then saves the report of a successful run."""
-    dest_archive = _destination("archive")
-    dest_drive = _destination("drive")
+    dest_archive = make_destination("archive")
+    dest_drive = make_destination("drive")
     workspace.get_destination_status.side_effect = lambda name: (
         Workspace.Status.SUCCESS if name == "archive" else Workspace.Status.PENDING
     )
@@ -872,10 +524,10 @@ def test_export_saves_integrity_report_when_a_destination_fails(
     workspace, user, mock_tracker_cls
 ):
     """A failing destination is still checked and the original error propagates."""
-    dest_drive = _destination("drive")
+    dest_drive = make_destination("drive")
 
     with pytest.raises(RuntimeError, match="drive"):
-        _run_export_with_tracker(workspace, user, [dest_drive], failures=_DRIVE_DOWN)
+        _run_export_with_tracker(workspace, user, [dest_drive], failures=DRIVE_DOWN)
 
     tracker = mock_tracker_cls.return_value
     tracker.add_exported_destination.assert_called_once_with(dest_drive)
@@ -923,7 +575,7 @@ def test_export_calls_begin_export_before_get_workspace_structure(workspace, use
         mock_fc.return_value.get_workspace_path.return_value = "/tmp/ws-1"
         mock_dr.get_all.return_value = []
 
-        _export()
+        export_and_run_tasks()
 
     assert calls == ["begin", "structure"]
 
@@ -949,7 +601,7 @@ def test_export_calls_finalize_export_even_when_get_workspace_structure_raises(
         source_backend.get_workspace_structure.side_effect = RuntimeError("boom")
 
         with pytest.raises(RuntimeError, match="boom"):
-            _export()
+            export_and_run_tasks()
 
     source_backend.finalize_export.assert_called_once_with(workspace)
 
@@ -967,7 +619,7 @@ def test_export_calls_finalize_export_even_when_begin_export_raises(workspace, u
         source_backend.begin_export.side_effect = RuntimeError("grant failed")
 
         with pytest.raises(RuntimeError, match="grant failed"):
-            _export()
+            export_and_run_tasks()
 
     source_backend.get_workspace_structure.assert_not_called()
     source_backend.finalize_export.assert_called_once_with(workspace)
