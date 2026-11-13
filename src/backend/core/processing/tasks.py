@@ -255,7 +255,7 @@ def _file_handover(
     whole_folder: list[AbstractDestinationBackend],
 ) -> Callable[[MigrationFile, str], None] | None:
     """What to do with each downloaded file: hand it to the file-by-file
-    destinations, and drop it unless a legacy destination reads it back. A file
+    destinations, and drop it unless a whole-folder destination reads it back. A file
     a destination did not take is kept on S3 first, for the user."""
     if not file_by_file:
         return None
