@@ -356,23 +356,19 @@ def test_put_logs_each_file_before_creating_it(drive_client, make_run, migrate):
 
 @pytest.mark.usefixtures("drive_client")
 def test_close_sets_status_success_and_sends_the_mail(
-    make_run, migrate, user, mails_manager
+    make_run, migrate, user, mailoutbox, settings
 ):
     """A completed export is a success, announced by a drive_ready mail."""
+    settings.APP_EMAIL_FORCE_TO = None
     run = make_run()
 
     assert migrate(run) == {}
 
     run.workspace.refresh_from_db()
     assert run.workspace.get_destination_status("drive") == Workspace.Status.SUCCESS
-    send = mails_manager.return_value.send_migration_mail
-    send.assert_called_once()
-    args, kwargs = send.call_args
-    assert args[0] == user
-    assert args[1].pk == run.workspace.pk
-    assert args[2] == "drive_ready"
-    assert str(args[3]["title"])
-    assert kwargs == {}
+    assert [(mail.to, mail.subject) for mail in mailoutbox] == [
+        ([user.email], "Votre espace My Workspace est prêt sur La Suite Drive !")
+    ]
 
 
 def test_close_uploads_the_members_listing(drive_client, make_run, migrate):
@@ -614,20 +610,18 @@ def test_the_archive_is_built_even_when_nothing_is_rejected(
 
 @pytest.mark.usefixtures("drive_client")
 def test_the_archive_is_built_before_the_mail(
-    make_run, migrate, rejected_files_archive, mails_manager
+    make_run, migrate, rejected_files_archive, mailoutbox
 ):
     """The archive exists when the mail, which links it, is sent."""
-    calls = []
-    rejected_files_archive.return_value.build.side_effect = lambda *args: calls.append(
-        "archive"
-    )
-    mails_manager.return_value.send_migration_mail.side_effect = (
-        lambda *args: calls.append("mail")
+    mails_at_build = []
+    rejected_files_archive.return_value.build.side_effect = (
+        lambda *args: mails_at_build.append(len(mailoutbox))
     )
 
     migrate(make_run())
 
-    assert calls == ["archive", "mail"]
+    assert mails_at_build == [0]
+    assert len(mailoutbox) == 1
 
 
 def test_rejected_files_are_archived_when_drive_gets_disabled(

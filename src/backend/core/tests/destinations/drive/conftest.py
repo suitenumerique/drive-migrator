@@ -10,13 +10,6 @@ from core.processing.file_exports import FileExports
 
 
 @pytest.fixture(autouse=True)
-def mails_manager():
-    """Prevent real MailsManager calls across the Drive tests."""
-    with patch("core.destinations.drive.backend.MailsManager") as mock_cls:
-        yield mock_cls
-
-
-@pytest.fixture(autouse=True)
 def rejected_files_archive():
     """Capture what the export hands to the rejected files archive, which would
     otherwise reach S3."""
