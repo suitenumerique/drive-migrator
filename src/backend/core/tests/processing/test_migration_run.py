@@ -60,12 +60,9 @@ def test_create_migration_run_stores_the_plan():
     assert run.task_id == "task-1"
     assert run.dirs == ["sub", "e"]
     assert run.remaining_files == 2
-    assert [
-        (row.position, SourceFile.from_dict(row.source), row.path)
-        for row in run.files.all()
-    ] == [
-        (0, doc, os.path.join("sub", "doc.txt")),
-        (1, notes, "notes.txt"),
+    assert [(row.position, row.source, row.path) for row in run.files.all()] == [
+        (0, doc.to_dict(), os.path.join("sub", "doc.txt")),
+        (1, notes.to_dict(), "notes.txt"),
     ]
 
 
@@ -79,8 +76,8 @@ def test_create_migration_run_stores_refused_files_as_failed():
 
     assert run.remaining_files == 1
     refused = run.files.get(position=1)
-    assert (SourceFile.from_dict(refused.source), refused.path, refused.status) == (
-        escaping,
+    assert (refused.source, refused.path, refused.status) == (
+        escaping.to_dict(),
         "..",
         MigrationFile.Status.DOWNLOAD_FAILED,
     )
