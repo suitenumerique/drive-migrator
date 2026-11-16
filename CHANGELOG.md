@@ -16,6 +16,7 @@ and this project adheres to
 - ♻️(backend) assert mail and local archives without patches
 - ♻️(backend) run export tests on a real filesystem archive
 - ♻️(backend) script the Drive API with responses in tests
+- ♻️(backend) synchronize through the real source in tests
 
 ### Added
 
