@@ -17,6 +17,7 @@ and this project adheres to
 - ♻️(backend) run export tests on a real filesystem archive
 - ♻️(backend) script the Drive API with responses in tests
 - ♻️(backend) synchronize through the real source in tests
+- ♻️(backend) script the Interstis client with responses
 
 ### Added
 
