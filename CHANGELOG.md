@@ -31,6 +31,8 @@ and this project adheres to
 
 - Log as JSON with django-structlog, with the request and workspace ids
 
+- Upgrade Tornado to 6.6
+
 ## [v0.12.1] - 2026-11-03
 
 - Drop name columns from the Drive members CSV
