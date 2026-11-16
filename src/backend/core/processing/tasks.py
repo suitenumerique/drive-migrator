@@ -1,7 +1,9 @@
 import os
 
 from django.conf import settings
+from django.db import DatabaseError
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 import structlog
 from celery import states
@@ -29,6 +31,48 @@ from core.utils import get_dir_size, sizeof_fmt
 from main.celery_app import app
 
 logger = get_task_logger(__name__)
+
+
+def _notify_removed_folder_permissions(user, workspace) -> None:
+    """Email the starter the folders whose permissions were deleted. Once only."""
+    state = workspace.source_lock_state
+    if not isinstance(state, dict):
+        return
+    removed = state.get("permissions_removed") or []
+    if not removed or state.get("permissions_mail_sent"):
+        return
+    try:
+        MailsManager().send_migration_mail(
+            user,
+            workspace,
+            "folder_permissions_removed",
+            {
+                "title": _(
+                    f"Des permissions de dossiers ont été retirées "
+                    f"de l'espace {workspace.title}"
+                ),
+                "removed_folders": [
+                    item.get("name") or item.get("id") for item in removed
+                ],
+            },
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        # Broad on purpose: rendering, SMTP, or the DB can fail in many ways, and
+        # this runs in the export task's finally - a notification failure must not
+        # mask the migration's own exception.
+        logger.exception(
+            "Could not email removed folder permissions for workspace %s",
+            workspace.id,
+        )
+        return
+    workspace.source_lock_state.update({"permissions_mail_sent": True})
+    try:
+        workspace.save(update_fields=["source_lock_state"])
+    except DatabaseError:
+        logger.exception(
+            "Could not record the permissions mail as sent for workspace %s",
+            workspace.id,
+        )
 
 
 def list_work_dir():
@@ -173,6 +217,8 @@ def export(self, data):  # pylint: disable=unused-argument
     finally:
         logger.info("Calling finalize_export ...")
         source_backend.finalize_export(workspace)
+        # Permissions are already gone even when the migration failed afterwards.
+        _notify_removed_folder_permissions(user, workspace)
 
     logger.info("Task done")
 

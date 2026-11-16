@@ -27,6 +27,51 @@ from core.sources.resana.token_manager import ResanaTokenExpired, ResanaTokenMan
 
 logger = logging.getLogger(__name__)
 
+
+def _tab_ids(droit: dict) -> list[str]:
+    tab = droit.get("tabId")
+    if tab is None:
+        tab = droit.get("selected") or []
+    if not isinstance(tab, list):
+        tab = [tab]
+    return [str(item) for item in tab]
+
+
+def _folder_depth(folder: dict, by_id: dict) -> int:
+    depth = 0
+    seen = set()
+    parent_id = folder.get("dossier_mere")
+    while parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        depth += 1
+        parent = by_id.get(parent_id)
+        if parent is None:
+            break
+        parent_id = parent.get("dossier_mere")
+    return depth
+
+
+def _permission_blocks_migration(folder: dict, user_id: str) -> bool:
+    """True when the folder's own droit would hide files from the migration account."""
+    droit = folder.get("droit")
+    if not isinstance(droit, dict):
+        return False
+    droit_type = droit.get("type") or ""
+    if droit_type not in ("groupe", "utilisateur"):
+        return False
+    return not (droit_type == "utilisateur" and _tab_ids(droit) == [str(user_id)])
+
+
+def _blocking_folders(folders: list[dict], user_id: str) -> list[dict]:
+    """Folders whose droit we drop, deepest first so a parent is not blocked by a child."""
+    by_id = {folder["id"]: folder for folder in folders}
+    blocking = [
+        folder for folder in folders if _permission_blocks_migration(folder, user_id)
+    ]
+    blocking.sort(key=lambda folder: _folder_depth(folder, by_id), reverse=True)
+    return blocking
+
+
 # finalize_export() runs in a `finally` in the export task: it must never raise, or it
 # would replace the migration's own exception. These are the exceptions its PHP-portal
 # calls can realistically raise; anything else is a genuine bug and should surface.
@@ -213,6 +258,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
 
         Runs before any file is read, so a concurrent edit can't be missed and a
         folder we otherwise lack rights on doesn't get silently skipped (#215).
+        Lists folders once: drops blocking droits first, then grants root access.
 
         Idempotent: if the workspace is already locked, or a folder is already
         restricted to exactly our account, we don't touch it again, and we
@@ -262,7 +308,14 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 raise ResanaLockError(f"Workspace {slug} is still unlocked after figer")
 
         user_id = lock_client.get_connected_user_id()
-        for folder_id in lock_client.get_top_level_folder_ids(slug):
+        folders = lock_client.list_folders(slug)
+        self._drop_blocking_folder_permissions(
+            workspace, lock_client, slug, user_id, folders
+        )
+        root_ids = [
+            folder["id"] for folder in folders if folder.get("dossier_mere") is None
+        ]
+        for folder_id in root_ids:
             if folder_id in granted_folder_ids:
                 continue
             current_owners = lock_client.get_folder_access_owners(slug, folder_id)
@@ -338,6 +391,9 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 workspace.id,
             )
 
+        # Root deverouille can cascade and put a child droit back.
+        self._drop_recorded_permissions(workspace, lock_client, slug, lock_state)
+
         workspace.source_lock_state = lock_state
         try:
             workspace.save(update_fields=["source_lock_state"])
@@ -349,6 +405,45 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 lock_state,
                 exc_info=True,
             )
+
+    @staticmethod
+    def _drop_blocking_folder_permissions(
+        workspace, lock_client, slug, user_id, folders
+    ) -> None:
+        """Delete explicit folder droits that hide files, deepest folder first.
+
+        `folders` is the list already fetched by the caller (one getFolders).
+        Ids are collected before the deletions, then persisted afterwards. They
+        are not granted droits: finalize_export drops them again instead of
+        restoring them.
+        """
+        blocking = _blocking_folders(folders, user_id)
+        if not blocking:
+            return
+        removed = list(workspace.source_lock_state.get("permissions_removed") or [])
+        known = {item["id"] for item in removed}
+        for folder in blocking:
+            if folder["id"] not in known:
+                removed.append({"id": folder["id"], "name": folder.get("name", "")})
+            lock_client.release_folder_access(slug, folder["id"])
+        workspace.source_lock_state["permissions_removed"] = removed
+        workspace.save(update_fields=["source_lock_state"])
+
+    @staticmethod
+    def _drop_recorded_permissions(workspace, lock_client, slug, lock_state) -> None:
+        """Delete again the folders already recorded. The record itself stays."""
+        for folder in lock_state.get("permissions_removed") or []:
+            try:
+                lock_client.release_folder_access(slug, folder["id"])
+            except _FINALIZE_EXPORT_EXCEPTIONS:
+                logger.error(
+                    "Could not drop permission on folder %s of Resana workspace %s "
+                    "(workspace %s)",
+                    folder.get("id"),
+                    slug,
+                    workspace.id,
+                    exc_info=True,
+                )
 
     @staticmethod
     def _unlock_workspace(lock_client, members_client, slug: str) -> None:

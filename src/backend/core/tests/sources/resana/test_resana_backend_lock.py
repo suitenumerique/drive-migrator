@@ -14,7 +14,10 @@ import requests
 
 from core.factories import WorkspaceFactory
 from core.sources.resana.backend import ResanaSourceBackend
-from core.sources.resana.resana_lock_client import ResanaLockError
+from core.sources.resana.resana_lock_client import (
+    ResanaChildDroitError,
+    ResanaLockError,
+)
 from core.sources.resana.token_manager import ResanaTokenExpired
 
 pytestmark = pytest.mark.django_db
@@ -37,9 +40,17 @@ def _patch_members_client(mock_cls, slug="2137419", members=None, is_locked=Fals
     )
 
 
+def _root_folders(folder_ids):
+    """Build the list_folders payload for root-only folders."""
+    return [
+        {"id": folder_id, "name": folder_id, "dossier_mere": None}
+        for folder_id in folder_ids
+    ]
+
+
 def _patch_lock_client(mock_cls, top_level_folder_ids=None, folder_access_owners=None):
     mock_cls.return_value.get_connected_user_id.return_value = "2040942"
-    mock_cls.return_value.get_top_level_folder_ids.return_value = (
+    mock_cls.return_value.list_folders.return_value = _root_folders(
         top_level_folder_ids or []
     )
     mock_cls.return_value.get_folder_access_owners.return_value = folder_access_owners
@@ -106,7 +117,7 @@ def test_begin_export_locks_workspace_when_not_already_locked(settings):
             with patch(
                 "core.sources.resana.backend.ResanaLockClient", return_value=manager
             ):
-                manager.get_top_level_folder_ids.return_value = ["f1", "f2"]
+                manager.list_folders.return_value = _root_folders(["f1", "f2"])
                 ResanaSourceBackend().begin_export(workspace)
 
     assert calls == [("lock", "2137419"), ("grant", "f1"), ("grant", "f2")]
@@ -165,6 +176,118 @@ def test_begin_export_records_workspace_locked_by_us_false_when_already_locked(
     assert workspace.source_lock_state["workspace_locked_by_us"] is False
 
 
+def test_begin_export_drops_child_permissions_before_granting_the_root(settings):
+    """A restricted child is deleted, deepest first, and is not a granted root."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(source_type="resana")
+    order = []
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
+            _patch_members_client(mock_members, slug="2137419")
+            with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
+                _patch_lock_client(mock_lock, top_level_folder_ids=["root"])
+                mock_lock.return_value.list_folders.return_value = [
+                    {"id": "root", "name": "Root", "dossier_mere": None},
+                    {
+                        "id": "ours",
+                        "name": "Déjà nous",
+                        "dossier_mere": "root",
+                        "droit": {"type": "utilisateur", "tabId": ["2040942"]},
+                    },
+                    {
+                        "id": "child",
+                        "name": "Secret",
+                        "dossier_mere": "root",
+                        "droit": {"type": "groupe", "tabId": ["10174"]},
+                    },
+                    {
+                        "id": "grand",
+                        "name": "Au fond",
+                        "dossier_mere": "child",
+                        "droit": {"type": "utilisateur", "tabId": ["999"]},
+                    },
+                ]
+                mock_lock.return_value.release_folder_access.side_effect = (
+                    lambda _slug, folder_id: order.append(("release", folder_id))
+                )
+                mock_lock.return_value.grant_folder_access.side_effect = (
+                    lambda _slug, folder_id, _user_id: order.append(
+                        ("grant", folder_id)
+                    )
+                )
+                ResanaSourceBackend().begin_export(workspace)
+
+    assert order == [
+        ("release", "grand"),
+        ("release", "child"),
+        ("grant", "root"),
+    ]
+    workspace.refresh_from_db()
+    assert workspace.source_lock_state["permissions_removed"] == [
+        {"id": "grand", "name": "Au fond"},
+        {"id": "child", "name": "Secret"},
+    ]
+    assert "grand" not in workspace.source_lock_state["folders_granted_by_us"]
+
+
+def test_finalize_export_drops_removed_permissions_after_unlocking_roots(settings):
+    """After root cleanup, the same folders are deleted again and stay recorded."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(
+        source_type="resana",
+        source_lock_state={
+            "slug": "2137419",
+            "workspace_locked_by_us": True,
+            "folders_granted_by_us": ["root"],
+            "permissions_removed": [{"id": "child", "name": "Secret"}],
+        },
+    )
+    order = []
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
+            _patch_members_client(mock_members)
+            with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
+                mock_lock.return_value.release_folder_access.side_effect = (
+                    lambda _slug, folder_id: order.append(folder_id)
+                )
+                mock_lock.return_value.unlock_workspace.side_effect = (
+                    lambda _slug: order.append("unlock")
+                )
+                ResanaSourceBackend().finalize_export(workspace)
+
+    assert order == ["root", "unlock", "child"]
+    workspace.refresh_from_db()
+    assert workspace.source_lock_state["permissions_removed"] == [
+        {"id": "child", "name": "Secret"}
+    ]
+
+
+def test_begin_export_propagates_child_droit_error_from_the_root_grant(settings):
+    """If a child droit survived, the root saveDroit answers HTTP 200 with the
+    "dossiers enfants" error: begin_export must fail rather than migrate a subset."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(source_type="resana")
+
+    with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
+        mock_tm.return_value.get_valid_token.return_value = "tok"
+        with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
+            _patch_members_client(mock_members, slug="2137419")
+            with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
+                _patch_lock_client(mock_lock, top_level_folder_ids=["root"])
+                mock_lock.return_value.grant_folder_access.side_effect = (
+                    ResanaChildDroitError(
+                        "Un droit est déjà appliqué sur l'un des dossiers enfants !"
+                    )
+                )
+
+                with pytest.raises(ResanaChildDroitError, match="dossiers enfants"):
+                    ResanaSourceBackend().begin_export(workspace)
+
+
 def test_begin_export_grants_access_to_our_own_php_user_id(settings):
     """Folder access is granted to the PHP user id the portal session is logged in as."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
@@ -219,10 +342,9 @@ def test_begin_export_records_only_folders_it_actually_granted(settings):
             _patch_members_client(mock_members, slug="2137419")
             with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
                 mock_lock.return_value.get_connected_user_id.return_value = "2040942"
-                mock_lock.return_value.get_top_level_folder_ids.return_value = [
-                    "already-granted",
-                    "to-grant",
-                ]
+                mock_lock.return_value.list_folders.return_value = _root_folders(
+                    ["already-granted", "to-grant"]
+                )
                 mock_lock.return_value.get_folder_access_owners.side_effect = (
                     lambda slug, folder_id: (
                         ["2040942"] if folder_id == "already-granted" else None
@@ -267,7 +389,7 @@ def test_begin_export_saves_lock_state_before_granting_folder_access(settings):
         with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
             _patch_members_client(mock_members, slug="2137419")
             with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
-                mock_lock.return_value.get_top_level_folder_ids.return_value = ["f1"]
+                mock_lock.return_value.list_folders.return_value = _root_folders(["f1"])
                 mock_lock.return_value.get_folder_access_owners.return_value = None
                 mock_lock.return_value.grant_folder_access.side_effect = (
                     lambda slug, folder_id, user_id: calls.append("grant")
@@ -312,10 +434,9 @@ def test_begin_export_keeps_previous_run_state_after_crash(settings):
             _patch_members_client(mock_members, slug="2137419", is_locked=True)
             with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
                 mock_lock.return_value.get_connected_user_id.return_value = "2040942"
-                mock_lock.return_value.get_top_level_folder_ids.return_value = [
-                    "f1",
-                    "f2",
-                ]
+                mock_lock.return_value.list_folders.return_value = _root_folders(
+                    ["f1", "f2"]
+                )
                 mock_lock.return_value.get_folder_access_owners.side_effect = (
                     lambda slug, folder_id: ["2040942"] if folder_id == "f1" else None
                 )
@@ -625,7 +746,7 @@ def test_finalize_export_does_not_unlock_when_lock_state_is_missing(settings):
 
 
 def test_finalize_export_only_releases_folders_recorded_as_granted_by_us(settings):
-    """finalize_export() must not re-list top-level folders, only release what was recorded."""
+    """finalize_export() must not list folders, only release what was recorded."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.title = "TEST Worskspace"
@@ -646,7 +767,7 @@ def test_finalize_export_only_releases_folders_recorded_as_granted_by_us(setting
                 ResanaSourceBackend().finalize_export(workspace)
 
     manager.release_folder_access.assert_called_once_with("2137419", "f1")
-    manager.get_top_level_folder_ids.assert_not_called()
+    manager.list_folders.assert_not_called()
 
 
 def test_finalize_export_swallows_error_from_one_folder_and_continues(settings):

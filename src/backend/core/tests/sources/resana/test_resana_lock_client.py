@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from core.sources.resana.resana_lock_client import ResanaLockClient, ResanaLockError
+from core.sources.resana.resana_lock_client import (
+    ResanaChildDroitError,
+    ResanaLockClient,
+    ResanaLockError,
+)
 
 BASE_URL = "https://resana-web.example.test"
 SLUG = "2137458"
@@ -139,6 +143,52 @@ def test_get_top_level_folder_ids_calls_get_folders():
         timeout=30,
         retry=True,
     )
+
+
+def test_list_folders_includes_nested_folders_and_droit():
+    """Children are listed, and a droit on the payload is kept."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "folders": [
+            {
+                "id": "12677577",
+                "name": "Hébergement",
+                "dossier_mere": None,
+                "droit": {"type": "groupe", "tabId": ["10174"]},
+                "children": [
+                    {"id": "12677600", "name": "Sous-dossier", "children": []},
+                ],
+            }
+        ]
+    }
+
+    assert client.list_folders(SLUG) == [
+        {
+            "id": "12677577",
+            "name": "Hébergement",
+            "dossier_mere": None,
+            "droit": {"type": "groupe", "tabId": ["10174"]},
+        },
+        {
+            "id": "12677600",
+            "name": "Sous-dossier",
+            "dossier_mere": "12677577",
+        },
+    ]
+
+
+def test_grant_folder_access_raises_when_a_child_already_has_a_right():
+    """HTTP 200 with the child-droit error is a failure: nothing was applied."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "error": {
+            "message": "Un droit est déjà appliqué sur l'un des dossiers enfants !",
+            "titre": "",
+        }
+    }
+
+    with pytest.raises(ResanaChildDroitError, match="dossiers enfants"):
+        client.grant_folder_access(SLUG, "12677577", "2040942")
 
 
 def test_get_top_level_folder_ids_excludes_nested_folders():

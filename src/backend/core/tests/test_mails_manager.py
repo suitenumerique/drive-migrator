@@ -13,6 +13,7 @@ from django.test import override_settings
 import pytest
 
 from core.backends.source import SourceManager
+from core.factories import UserFactory, WorkspaceFactory
 from core.mails_manager import MailsManager
 from core.models import Workspace
 
@@ -46,6 +47,30 @@ def test_send_migration_mail_renders_named_template_and_sends(template_name):
         assert "contacter le support" in content
         assert "Ce mail a été envoyé" in content
     assert "data:image/png;base64," in html
+
+
+@pytest.mark.django_db
+def test_send_migration_mail_lists_removed_folder_permissions():
+    """The removed-permissions mail names the workspace and each folder."""
+    workspace = WorkspaceFactory(title="Équipe <projet>")
+    user = UserFactory(email="starter@example.com")
+
+    MailsManager().send_migration_mail(
+        user,
+        workspace,
+        "folder_permissions_removed",
+        {
+            "title": "Des permissions de dossiers ont été retirées",
+            "removed_folders": ["Secret", "Au fond"],
+        },
+    )
+
+    sent = mail.outbox[0]
+    assert sent.to == ["starter@example.com"]
+    assert "Secret" in sent.body
+    assert "Au fond" in sent.body
+    assert "Équipe" in sent.body
+    assert "ne sont pas rétablis" in sent.body
 
 
 @pytest.mark.django_db

@@ -3,8 +3,9 @@
 Uses the same interstis_access token as the documented GED API, but talks to the
 undocumented internal PHP endpoints (reverse-engineered from the portal's XHR calls).
 Limited to what's needed to lock a workspace for the duration of a migration (#215):
-freeze it against edits, and grant the migration account access to every folder so
-the migration doesn't miss files it lacked rights to.
+freeze it against edits, list folders (and clear blocking droits when needed), and
+grant the migration account access to every folder so the migration doesn't miss
+files it lacked rights to.
 """
 
 from celery.utils.log import get_task_logger
@@ -20,19 +21,41 @@ class ResanaLockError(Exception):
     """Raised when a PHP portal call answered but did not have the expected effect."""
 
 
+class ResanaChildDroitError(ResanaLockError):
+    """saveDroit refused because a descendant folder still has its own droit.
+
+    The portal answers HTTP 200 with this error and applies nothing.
+    """
+
+
+# The portal answers HTTP 200 with this body (success is absent), applying nothing:
+# {"error": {"message": "Un droit est déjà appliqué sur l'un des dossiers enfants !",
+#            "titre": ""}}
+# We match on the stable substring: the apostrophe in "l'un" is a straight quote.
+_CHILD_DROIT_MESSAGE = "dossiers enfants"
+
+
 def _raise_unless_success(resp) -> None:
     """Raise unless the response is the portal's JSON `{"success": true}`.
 
     An expired session answers with the login page instead, which a bare
-    raise_for_status() would let through as a success.
+    raise_for_status() would let through as a success. A child-folder droit
+    conflict is its own error: the call did not apply.
     """
     resp.raise_for_status()
     try:
         data = resp.json()
     except ValueError as exc:
         raise ResanaLockError(f"Non-JSON response from {resp.url}") from exc
-    if not isinstance(data, dict) or data.get("success") is not True:
-        raise ResanaLockError(f"Unsuccessful response from {resp.url}: {data!r}")
+    if isinstance(data, dict) and data.get("success") is True:
+        return
+    message = ""
+    error = data.get("error") if isinstance(data, dict) else None
+    if isinstance(error, dict):
+        message = str(error.get("message") or "")
+    if _CHILD_DROIT_MESSAGE in message:
+        raise ResanaChildDroitError(message)
+    raise ResanaLockError(f"Unsuccessful response from {resp.url}: {data!r}")
 
 
 class ResanaLockClient:
@@ -68,11 +91,11 @@ class ResanaLockClient:
         resp.raise_for_status()
         return str(resp.json()["utilisateurConnecte"]["id"])
 
-    def get_top_level_folder_ids(self, slug: str) -> list[str]:
-        """Return the ids of root folders only (dossier_mere is None).
+    def list_folders(self, slug: str) -> list[dict]:
+        """Return every folder from getFolders, including ones nested in children.
 
-        saveDroit/deverouilleDossier both cascade to sub-folders and files on
-        their own, so acting on root folders is enough to cover the whole tree.
+        Each item has id, name, dossier_mere, and droit when the payload has it.
+        A child that omits dossier_mere is recorded under the parent it was nested in.
         """
         resp = self.session.post(
             f"{self.base_url}/public/dossier/getFolders",
@@ -82,8 +105,43 @@ class ResanaLockClient:
             retry=True,
         )
         resp.raise_for_status()
-        folders = resp.json().get("folders", [])
-        return [f["id"] for f in folders if f.get("dossier_mere") is None]
+        listed = []
+        seen = set()
+
+        def visit(raw: dict, parent_id: str | None) -> None:
+            folder_id = raw["id"]
+            if folder_id in seen:
+                return
+            seen.add(folder_id)
+            dossier_mere = raw.get("dossier_mere")
+            if dossier_mere is None:
+                dossier_mere = parent_id
+            folder = {
+                "id": folder_id,
+                "name": raw.get("name", ""),
+                "dossier_mere": dossier_mere,
+            }
+            if "droit" in raw:
+                folder["droit"] = raw["droit"]
+            listed.append(folder)
+            for child in raw.get("children") or []:
+                visit(child, folder_id)
+
+        for raw in resp.json().get("folders", []):
+            visit(raw, None)
+        return listed
+
+    def get_top_level_folder_ids(self, slug: str) -> list[str]:
+        """Return the ids of root folders only (dossier_mere is None).
+
+        saveDroit/deverouilleDossier both cascade to sub-folders and files on
+        their own, so acting on root folders is enough to cover the whole tree.
+        """
+        return [
+            folder["id"]
+            for folder in self.list_folders(slug)
+            if folder.get("dossier_mere") is None
+        ]
 
     def get_folder_access_owners(self, slug: str, folder_id: str) -> list[str] | None:
         """Return the user ids a folder is restricted to, or None if unrestricted
@@ -135,8 +193,8 @@ class ResanaLockClient:
         """Restrict a folder to a nominative list containing only `user_id`.
 
         This overwrites whatever access was previously configured on the folder
-        (and cascades to its sub-folders/files); release_folder_access restores
-        the prior state afterwards.
+        (and cascades to its sub-folders/files). Call release_folder_access to
+        clear that restriction afterwards.
         """
         resp = self.session.post(
             f"{self.base_url}/public/dossier/saveDroit",
@@ -153,7 +211,11 @@ class ResanaLockClient:
         _raise_unless_success(resp)
 
     def release_folder_access(self, slug: str, folder_id: str) -> None:
-        """Restore the folder's access to whatever it was before grant_folder_access."""
+        """Clear the folder's current droit via deverouilleDossier.
+
+        Undoes a grant we made, or removes a pre-existing restriction we need
+        gone so the migration can see every file.
+        """
         resp = self.session.post(
             f"{self.base_url}/public/dossier/deverouilleDossier",
             params={"slug": slug},

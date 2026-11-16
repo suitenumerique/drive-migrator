@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Drop Resana folder permissions and email the list before exporting #321 
+
 ## [v0.13.0] - 2026-11-19
 
 ### Added
