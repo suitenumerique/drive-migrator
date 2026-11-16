@@ -6,6 +6,7 @@ import pytest
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError, Timeout
 
+from core import factories
 from core.backends.destination import (
     AbstractDestinationBackend,
     AccountPolicy,
@@ -14,6 +15,8 @@ from core.backends.destination import (
 from core.destinations.drive.backend import DriveDestinationBackend
 from core.destinations.drive.drive_backend import FileRejection
 from core.models import Workspace
+
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
@@ -56,18 +59,20 @@ def test_label_is_set():
 
 
 def _make_workspace(migration_user=None, members=None):
-    ws = MagicMock(spec=Workspace)
-    ws.title = "My Workspace"
-    ws.destination_statuses = {}
-    ws.migration_user = migration_user
-    ws.members = members or []
-    return ws
+    return factories.WorkspaceFactory(
+        title="My Workspace",
+        migration_user=migration_user,
+        members=members or [],
+    )
 
 
 def _make_migration_user(email="alice@example.com"):
-    member = MagicMock()
-    member.email = email
-    return member
+    return factories.UserFactory(email=email)
+
+
+def _assert_drive_status(workspace, status):
+    workspace.refresh_from_db()
+    assert workspace.get_destination_status("drive") == status
 
 
 # ---------------------------------------------------------------------------
@@ -112,9 +117,8 @@ def test_service_account_mode_stores_root_id_in_metadata(mock_cls, tmp_path, set
 
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
-    workspace.set_destination_metadata.assert_called_once_with(
-        "drive", {"workspace_id": "root-uuid"}
-    )
+    workspace.refresh_from_db()
+    assert workspace.get_destination_metadata("drive") == {"workspace_id": "root-uuid"}
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
@@ -257,10 +261,7 @@ def test_service_account_mode_sets_status_success(mock_cls, tmp_path, settings):
 
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
-    )
-    workspace.save.assert_called()
+    _assert_drive_status(workspace, Workspace.Status.SUCCESS)
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
@@ -582,7 +583,7 @@ def test_export_fails_when_drive_rejects_every_file(
 
     assert len(_recorded(rejected_files_archive)) == 2
     mock_backend.find_user_by_email.assert_not_called()
-    workspace.set_destination_status.assert_not_called()
+    _assert_drive_status(workspace, Workspace.Status.NONE)
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
@@ -598,9 +599,7 @@ def test_export_succeeds_when_drive_rejects_some_files(mock_cls, tmp_path, setti
         upload_tree.side_effect = _upload(["a.txt", "b.txt"], ["a.txt"])
         DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
-    )
+    _assert_drive_status(workspace, Workspace.Status.SUCCESS)
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
@@ -624,9 +623,7 @@ def test_export_ignores_the_generated_users_csv_when_checking_rejections(
         upload_tree.side_effect = _upload([csv_name], [csv_name])
         DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
-    )
+    _assert_drive_status(workspace, Workspace.Status.SUCCESS)
 
 
 def _drive_refusal(code):
@@ -678,9 +675,7 @@ def test_file_refused_at_upload_ended_is_skipped(
     assert _recorded(rejected_files_archive) == [
         RejectedFile("a.txt", "file_type_not_allowed", "id-a.txt")
     ]
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
-    )
+    _assert_drive_status(workspace, Workspace.Status.SUCCESS)
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
@@ -867,9 +862,7 @@ def test_user_token_mode_sets_status_success(mock_cls, tmp_path, settings):
 
     DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
 
-    workspace.set_destination_status.assert_called_once_with(
-        "drive", Workspace.Status.SUCCESS
-    )
+    _assert_drive_status(workspace, Workspace.Status.SUCCESS)
 
 
 # ---------------------------------------------------------------------------

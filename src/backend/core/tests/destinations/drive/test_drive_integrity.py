@@ -7,9 +7,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core import factories
 from core.backends.destination import RejectedFile
 from core.destinations.drive.backend import DriveDestinationBackend
-from core.models import Workspace
+
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
@@ -52,14 +54,11 @@ def mock_backend():
         yield backend
 
 
-def _make_workspace(workspace_id="ws-1", members=None):
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = workspace_id
-    workspace.title = "My Workspace"
-    workspace.destination_statuses = {}
-    workspace.migration_user = None
-    workspace.members = members or []
-    return workspace
+def _make_workspace(members=None):
+    return factories.WorkspaceFactory(
+        title="My Workspace",
+        members=members or [],
+    )
 
 
 def _write(path, size):
@@ -437,9 +436,9 @@ def test_nothing_to_check_when_drive_export_did_not_run_for_workspace(
     workspace must not leak into this workspace's report."""
     _write(tmp_path / "report.pdf", 3)
     destination = DriveDestinationBackend()
-    destination.export(_make_workspace("ws-1"), MagicMock(), str(tmp_path))
+    destination.export(_make_workspace(), MagicMock(), str(tmp_path))
 
-    result = destination.check_integrity(_make_workspace("ws-2"), str(tmp_path), True)
+    result = destination.check_integrity(_make_workspace(), str(tmp_path), True)
 
     assert result == {"files": {}, "extra": []}
     mock_backend.list_children.assert_not_called()

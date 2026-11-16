@@ -10,6 +10,7 @@ and this project adheres to
 - Split the backend settings into configuration mixins
 - ♻️(backend) load real models in export task tests
 - ♻️(backend) load real models in mail and folder tests
+- ♻️(backend) load real workspaces in destination tests
 
 ### Added
 
