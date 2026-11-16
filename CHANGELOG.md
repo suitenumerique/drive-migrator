@@ -12,6 +12,7 @@ and this project adheres to
 - ♻️(backend) load real models in mail and folder tests
 - ♻️(backend) load real workspaces in destination tests
 - ♻️(backend) drop filesystem user mocks in tests
+- 📝(backend) reserve test mocks for external calls
 
 ### Added
 

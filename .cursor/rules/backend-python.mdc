@@ -1,0 +1,31 @@
+---
+description: Conventions du backend Python (Django/DRF, ruff, pylint, pytest)
+globs: src/backend/**/*.py
+alwaysApply: false
+---
+
+# Backend Python
+
+Stack: Django 5 / Django REST Framework, Python >= 3.14 (voir `src/backend/pyproject.toml`).
+
+## Style (ruff)
+- Longueur de ligne: **88**.
+- Respecter l'ordre d'imports isort configuré:
+  `future, standard-library, django, third-party, main, first-party, local-folder`.
+- Pas de `print` (règle `T20`) : utiliser le logging.
+- Pas de `except:` nu ni de blind except (règles `BLE`/`B`).
+- Règles ignorées à connaître: `DJ001`, `PLR2004`.
+
+## Tests
+- Fichiers `test_*.py` ou `tests.py`, avec `pytest` + `factory_boy`.
+- Préférer le code réel et l'état persisté aux mocks, patches et fixtures. Détail : règle `backend-tests`.
+- Les tests ignorent `S` et `SLF`.
+
+## Commandes
+```bash
+make lint-ruff-format   # format
+make lint-ruff-check    # lint ruff
+make lint-pylint        # pylint (fichiers modifiés vs main)
+make lint               # tout le lint back
+make test-back          # tests backend
+```

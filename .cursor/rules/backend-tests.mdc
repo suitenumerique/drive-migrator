@@ -1,0 +1,40 @@
+---
+description: Préférer des tests backend qui exécutent le code réel plutôt que des mocks
+globs: src/backend/**/*.py
+alwaysApply: false
+---
+
+# Tests backend
+
+Exécuter le code de `core` et `main`. Observer la base, le disque, `django.core.mail.outbox` ou la requête partie. `pytest` et `factory_boy` (`core.factories`).
+
+- `User` et `Workspace` passent par `UserFactory` et `WorkspaceFactory`, avec `pytest.mark.django_db`. Vérifier via `refresh_from_db()`.
+- Si le code ne lit qu'un `id` ou un `email`, un `SimpleNamespace` suffit.
+- Pas de fixture dont le seul rôle est de construire un mock. Les fixtures `autouse` de settings restent.
+- Logs via `caplog`. Un id généré se relit dans la requête enregistrée.
+
+Ne jamais `patch` ni `MagicMock` une classe ou une fonction de `core` ou `main`, y compris `RetryingSession`, `MailsManager`, `ArchiveManager`, `SourceManager`, `DriveServiceAccountBackend`, `ResanaTokenManager`.
+
+Le mock est réservé à ce que nous n'écrivons pas :
+
+- HTTP : `responses` (`RetryingSession` hérite de `requests.Session`).
+- S3 : `boto3`.
+- PostHog : `posthog.capture`.
+- Osmose : `urllib.request`.
+- Horloge : `time` et `tenacity.nap.time.sleep`.
+
+Dans ces tests, `*_RETRY_MAX_ATTEMPTS = 1`, sauf quand le sujet est le retry.
+
+```python
+# À éviter
+with patch("core.destinations.drive.backend.DriveServiceAccountBackend") as cls:
+    cls.return_value.create_folder.return_value = {"id": "root"}
+    DriveDestinationBackend().export(workspace, user, path)
+cls.return_value.create_folder.assert_called_once()
+
+# Préféré
+responses.add(responses.POST, f"{api}/folders/", json={"id": "root"}, status=201)
+DriveDestinationBackend().export(workspace, user, path)
+workspace.refresh_from_db()
+assert workspace.get_destination_metadata("drive")["workspace_id"] == "root"
+```
