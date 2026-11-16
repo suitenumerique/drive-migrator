@@ -14,6 +14,7 @@ and this project adheres to
 - ♻️(backend) drop filesystem user mocks in tests
 - 📝(backend) reserve test mocks for external calls
 - ♻️(backend) assert mail and local archives without patches
+- ♻️(backend) run export tests on a real filesystem archive
 
 ### Added
 
