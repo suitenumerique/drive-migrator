@@ -1,7 +1,8 @@
 """Tests for FolderCreator — generic SourceFolder/SourceFile-based implementation."""
 
 import os
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -11,7 +12,6 @@ from core.backends.source import (
     SourceFolder,
     SourceTokenExpired,
 )
-from core.models import Workspace
 from core.processing.folder_creator import FolderCreator
 
 
@@ -29,9 +29,8 @@ def _make_backend():
 
 
 def _make_workspace(workspace_id="ws-1"):
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = workspace_id
-    return workspace
+    """FolderCreator only reads the workspace id to name its directory."""
+    return SimpleNamespace(id=workspace_id)
 
 
 # ---------------------------------------------------------------------------
@@ -565,25 +564,22 @@ def test_failed_download_removes_partial_file(tmp_path, settings):
 
 
 def test_create_folder_ensures_filename_uniqueness(tmp_path, settings):
-    """When ensure_file_uniqueness returns a different path, create_folder() uses it."""
+    """A second file whose name collides is stored under a unique path."""
     settings.APP_WORK_DIR = str(tmp_path)
     workspace = _make_workspace("ws11")
-    file = SourceFile(id="f1", name="doc", extension=".pdf", download_url="http://x")
+    first = SourceFile(id="f1", name="doc", extension=".pdf", download_url="http://x")
+    second = SourceFile(id="f2", name="doc", extension=".pdf", download_url="http://x")
     folder = SourceFolder(
-        name="root", children=[SourceFolder(name="sub", files=[file])]
+        name="root", children=[SourceFolder(name="sub", files=[first, second])]
     )
     backend = _make_backend()
 
-    # Simulate a name collision: ensure_file_uniqueness returns a different path
-    with patch(
-        "core.processing.folder_creator.ensure_file_uniqueness",
-        side_effect=lambda p: p.replace("doc.pdf", "doc (1).pdf"),
-    ):
-        creator = FolderCreator()
-        creator.create_folder(workspace, folder, backend)
+    creator = FolderCreator()
+    creator.create_folder(workspace, folder, backend)
 
-    called_dest = backend.download_file.call_args[0][1]
-    assert "doc (1).pdf" in called_dest
+    destinations = [call.args[1] for call in backend.download_file.call_args_list]
+    assert destinations[0].endswith("doc.pdf")
+    assert destinations[1].endswith("doc (1).pdf")
 
 
 # ---------------------------------------------------------------------------
