@@ -2,10 +2,11 @@
 # pylint: disable=redefined-outer-name
 
 import os
-from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
 
+from core import factories
 from core.backends.source import AbstractSourceBackend, SourceFolder, SourceWorkspace
 from core.sources.filesystem import FileSystemSourceBackend
 
@@ -14,9 +15,7 @@ USER_EMAIL = "user@example.com"
 
 @pytest.fixture
 def user():
-    u = MagicMock()
-    u.email = USER_EMAIL
-    return u
+    return SimpleNamespace(email=USER_EMAIL)
 
 
 @pytest.fixture
@@ -85,17 +84,16 @@ def test_get_workspaces_returns_empty_when_no_user(settings, tmp_path):
     (tmp_path / "a_workspace").mkdir()
     settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
     fs_backend = FileSystemSourceBackend()
-    assert fs_backend.get_workspaces(user=None) == []
+    assert not fs_backend.get_workspaces(user=None)
 
 
 def test_get_workspaces_returns_empty_when_no_user_directory(settings, tmp_path):
     """get_workspaces() returns an empty list when {root}/{user.email}/ does not exist."""
-    user = MagicMock()
-    user.email = "unknown@example.com"
+    user = SimpleNamespace(email="unknown@example.com")
     (tmp_path / "WS-A").mkdir()
     settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
     fs_backend = FileSystemSourceBackend()
-    assert fs_backend.get_workspaces(user=user) == []
+    assert not fs_backend.get_workspaces(user=user)
 
 
 def test_get_workspace_structure_flat(backend, user):
@@ -169,8 +167,7 @@ def test_download_file_uses_download_url(backend, user):
 
 def test_get_workspaces_uses_user_email_subdirectory(settings, tmp_path):
     """Only workspaces inside {root}/{user.email}/ are returned."""
-    user = MagicMock()
-    user.email = "admin@example.com"
+    user = SimpleNamespace(email="admin@example.com")
     user_dir = tmp_path / "admin@example.com"
     user_dir.mkdir()
     (user_dir / "WS-1").mkdir()
@@ -208,6 +205,7 @@ def test_get_workspace_structure_excludes_users_csv(settings, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.django_db
 def test_prepare_export_populates_workspace_members(settings, tmp_path):
     """prepare_export() parses _users.csv and stores members on workspace."""
     ws_dir = tmp_path / "WS"
@@ -217,23 +215,24 @@ def test_prepare_export_populates_workspace_members(settings, tmp_path):
     )
     settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
     fs_backend = FileSystemSourceBackend()
-    workspace = MagicMock()
-    workspace.source_id = str(ws_dir)
+    workspace = factories.WorkspaceFactory(source_id=str(ws_dir))
     fs_backend.prepare_export(workspace, str(tmp_path / "export"))
+    workspace.refresh_from_db()
     assert workspace.members == [
         {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
         {"name": "Martin", "firstName": "Alice", "email": "alice@example.com"},
     ]
-    workspace.save.assert_called_once()
 
 
+@pytest.mark.django_db
 def test_prepare_export_does_nothing_when_no_users_csv(settings, tmp_path):
     """prepare_export() does not touch workspace.members when _users.csv is absent."""
     ws_dir = tmp_path / "WS"
     ws_dir.mkdir()
     settings.FILESYSTEM_SOURCE_ROOT = str(tmp_path)
     fs_backend = FileSystemSourceBackend()
-    workspace = MagicMock()
-    workspace.source_id = str(ws_dir)
+    kept = [{"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"}]
+    workspace = factories.WorkspaceFactory(source_id=str(ws_dir), members=kept)
     fs_backend.prepare_export(workspace, str(tmp_path / "export"))  # must not raise
-    workspace.save.assert_not_called()
+    workspace.refresh_from_db()
+    assert workspace.members == kept
