@@ -1,6 +1,10 @@
 """Tests for ArchiveDestinationBackend."""
 
-from unittest.mock import MagicMock, patch
+# pylint: disable=no-member  # django.core.mail.outbox is added by the locmem backend
+
+from unittest.mock import patch
+
+from django.core import mail
 
 import pytest
 
@@ -22,17 +26,8 @@ def _user():
     return factories.UserFactory(email="user@example.com")
 
 
-@pytest.fixture(autouse=True)
-def _patch_mails_manager():
-    """Prevent real MailsManager calls (DB access) across all tests in this module."""
-    with patch("core.destinations.archive.backend.MailsManager") as mock_cls:
-        mock_cls.return_value.send_migration_mail = MagicMock()
-        yield mock_cls
-
-
-def test_export_sends_download_mail(_patch_mails_manager, settings):
-    """export() sends the archive download email to the user after uploading,
-    via the generic MailsManager.send_migration_mail()."""
+def test_export_sends_download_mail(settings):
+    """export() sends the archive download email to the user after uploading."""
     settings.LOGIN_REDIRECT_URL = "http://localhost:3010"
     workspace = _workspace()
     user = _user()
@@ -44,15 +39,18 @@ def test_export_sends_download_mail(_patch_mails_manager, settings):
         backend = ArchiveDestinationBackend()
         backend.export(workspace, user, "/tmp/workspace")
 
-    mock_send = _patch_mails_manager.return_value.send_migration_mail
-    mock_send.assert_called_once()
-    args, kwargs = mock_send.call_args
-    assert args[:3] == (user, workspace, "archive_download")
-    assert str(args[3]["title"])
-    assert kwargs == {}
+    assert len(mail.outbox) == 1
+    sent = mail.outbox[0]
+    assert sent.to == [user.email]
+    assert workspace.title in sent.subject
+    assert "Votre archive est prête" in sent.body
+    assert (
+        f"http://localhost:3010/download-archive/?workspaceId={workspace.id}"
+        in sent.body
+    )
 
 
-def test_export_mail_links_to_frontend_not_raw_s3_url(_patch_mails_manager, settings):
+def test_export_mail_links_to_frontend_not_raw_s3_url(settings):
     """The mail must never carry the raw S3 presigned URL: it must link to the
     frontend download page, which will fetch a short-lived URL once authenticated."""
     settings.LOGIN_REDIRECT_URL = "http://localhost:3010"
@@ -68,13 +66,9 @@ def test_export_mail_links_to_frontend_not_raw_s3_url(_patch_mails_manager, sett
         backend = ArchiveDestinationBackend()
         backend.export(workspace, user, "/tmp/workspace")
 
-    mock_send = _patch_mails_manager.return_value.send_migration_mail
-    args, _kwargs = mock_send.call_args
-    download_url = args[3]["download_url"]
-    assert (
-        download_url
-        == f"http://localhost:3010/download-archive/?workspaceId={workspace.id}"
-    )
+    body = mail.outbox[0].body
+    assert f"http://localhost:3010/download-archive/?workspaceId={workspace.id}" in body
+    assert "sig=secret" not in body
 
 
 def test_implements_abstract_destination():

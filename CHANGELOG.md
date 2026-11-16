@@ -13,6 +13,7 @@ and this project adheres to
 - ♻️(backend) load real workspaces in destination tests
 - ♻️(backend) drop filesystem user mocks in tests
 - 📝(backend) reserve test mocks for external calls
+- ♻️(backend) assert mail and local archives without patches
 
 ### Added
 

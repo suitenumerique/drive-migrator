@@ -284,15 +284,13 @@ def test_upload_archive_uploads_file_and_returns_url(tmp_path, settings):
 
     expected_url = "http://localhost:9001/bucket/ws.zip?sig=xyz"
 
+    settings.AWS_S3_DOWNLOAD_URL = ""
+
     with patch("core.processing.folder_helper.boto3") as mock_boto3:
         mock_s3 = mock_boto3.resource.return_value
         mock_s3.meta.client.generate_presigned_url.return_value = expected_url
 
-        with patch.object(
-            ArchiveManager, "get_download_url", return_value=expected_url
-        ):
-            manager = ArchiveManager()
-            url = manager.upload_archive(workspace)
+        url = ArchiveManager().upload_archive(workspace)
 
     mock_s3.Bucket.return_value.upload_file.assert_called_once()
     workspace.refresh_from_db()

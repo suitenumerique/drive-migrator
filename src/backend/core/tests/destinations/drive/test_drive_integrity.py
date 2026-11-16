@@ -3,7 +3,7 @@
 # pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
 
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -14,11 +14,8 @@ from core.destinations.drive.backend import DriveDestinationBackend
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture(autouse=True)
-def _patch_mails_manager():
-    """Prevent real MailsManager calls (DB access) across all tests in this module."""
-    with patch("core.destinations.drive.backend.MailsManager"):
-        yield
+def _user():
+    return factories.UserFactory(email="user@example.com")
 
 
 @pytest.fixture(autouse=True)
@@ -84,7 +81,7 @@ def _drive_folder(item_id, title):
 def _export_then_check(tmp_path, workspace=None, wait_for_analysis=True):
     destination = DriveDestinationBackend()
     workspace = workspace or _make_workspace()
-    destination.export(workspace, MagicMock(), str(tmp_path))
+    destination.export(workspace, _user(), str(tmp_path))
     return destination.check_integrity(workspace, str(tmp_path), wait_for_analysis)
 
 
@@ -228,7 +225,7 @@ def test_file_rejected_by_drive_carries_the_drive_error(tmp_path, mock_backend):
     _write(tmp_path / "page.txt", 3)
     destination = DriveDestinationBackend()
     workspace = _make_workspace()
-    destination.export(workspace, MagicMock(), str(tmp_path))
+    destination.export(workspace, _user(), str(tmp_path))
     destination._upload_log.rejected.append(  # pylint: disable=protected-access
         RejectedFile("page.txt", "file_type_not_allowed", "id-page.txt")
     )
@@ -379,7 +376,7 @@ def test_file_whose_creation_failed_is_tracked_with_its_client_id(
     workspace = _make_workspace()
 
     with pytest.raises(RuntimeError):
-        destination.export(workspace, MagicMock(), str(tmp_path))
+        destination.export(workspace, _user(), str(tmp_path))
     result = destination.check_integrity(workspace, str(tmp_path), False)
 
     client_id = mock_backend.create_file_item.call_args.kwargs["item_id"]
@@ -412,7 +409,7 @@ def test_listing_failure_keeps_the_drive_error_of_rejected_files(
     mock_backend.list_children.side_effect = RuntimeError("token expired")
     destination = DriveDestinationBackend()
     workspace = _make_workspace()
-    destination.export(workspace, MagicMock(), str(tmp_path))
+    destination.export(workspace, _user(), str(tmp_path))
     destination._upload_log.rejected.append(  # pylint: disable=protected-access
         RejectedFile("page.txt", "file_type_not_allowed", "id-page.txt")
     )
@@ -436,7 +433,7 @@ def test_nothing_to_check_when_drive_export_did_not_run_for_workspace(
     workspace must not leak into this workspace's report."""
     _write(tmp_path / "report.pdf", 3)
     destination = DriveDestinationBackend()
-    destination.export(_make_workspace(), MagicMock(), str(tmp_path))
+    destination.export(_make_workspace(), _user(), str(tmp_path))
 
     result = destination.check_integrity(_make_workspace(), str(tmp_path), True)
 
@@ -451,7 +448,7 @@ def test_nothing_to_check_when_root_folder_creation_failed(tmp_path, mock_backen
     workspace = _make_workspace()
 
     with pytest.raises(RuntimeError):
-        destination.export(workspace, MagicMock(), str(tmp_path))
+        destination.export(workspace, _user(), str(tmp_path))
     result = destination.check_integrity(workspace, str(tmp_path), False)
 
     assert result == {"files": {}, "extra": []}

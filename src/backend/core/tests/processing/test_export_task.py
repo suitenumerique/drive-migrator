@@ -591,16 +591,17 @@ def test_list_workspace_dir_logs_files(workspace):
 
 
 def test_cleanup_workspace_dir_deletes_folder_and_archive(workspace):
-    """cleanup_workspace_dir() deletes the local folder and the S3 archive."""
+    """cleanup_workspace_dir() deletes the local folder and the local zip."""
     workspace_dir = _workspace_dir(workspace)
     os.makedirs(workspace_dir)
+    archive = f"{workspace_dir}.zip"
+    with open(archive, "wb") as handle:
+        handle.write(b"zip")
 
-    with patch("core.processing.tasks.ArchiveManager") as mock_archive_cls:
-        cleanup_workspace_dir(workspace)
+    cleanup_workspace_dir(workspace)
 
     assert not os.path.exists(workspace_dir)
-    deleted = mock_archive_cls.return_value.delete_archive.call_args.args[0]
-    assert deleted.pk == workspace.pk
+    assert not os.path.exists(archive)
 
 
 # ---------------------------------------------------------------------------
@@ -658,12 +659,14 @@ def test_task_success_handler_saves_workspace_and_cleans_up(workspace, user):
     extra = _run_task("task-id-1", workspace, user)
     os.makedirs(_workspace_dir(workspace))
 
-    with patch("core.processing.tasks.ArchiveManager") as archive_cls:
-        task_success_handler(sender=_sender(extra.task_result.task_id))
+    archive = f"{_workspace_dir(workspace)}.zip"
+    with open(archive, "wb") as handle:
+        handle.write(b"zip")
+
+    task_success_handler(sender=_sender(extra.task_result.task_id))
 
     assert not os.path.exists(_workspace_dir(workspace))
-    deleted = archive_cls.return_value.delete_archive.call_args.args[0]
-    assert deleted.pk == workspace.pk
+    assert not os.path.exists(archive)
 
 
 # ---------------------------------------------------------------------------
@@ -680,8 +683,7 @@ def test_task_failure_handler_sets_pending_statuses_to_failure(workspace, user):
     )
     _run_task("task-id-2", workspace, user)
 
-    with patch("core.processing.tasks.ArchiveManager"):
-        task_failure_handler(sender=_sender("task-id-2"))
+    task_failure_handler(sender=_sender("task-id-2"))
 
     workspace.refresh_from_db()
     assert workspace.get_destination_status("archive") == Workspace.Status.FAILURE
@@ -692,8 +694,7 @@ def test_task_failure_handler_sends_fail_mail(workspace, user):
     """task_failure() sends a failure notification email."""
     _run_task("task-id-3", workspace, user)
 
-    with patch("core.processing.tasks.ArchiveManager"):
-        task_failure_handler(sender=_sender("task-id-3"))
+    task_failure_handler(sender=_sender("task-id-3"))
 
     assert len(mail.outbox) == 1
     sent = mail.outbox[0]
@@ -708,11 +709,10 @@ def test_task_failure_handler_asks_to_log_in_again_on_expired_source_token(
     to the source again before relaunching."""
     _run_task("task-id-4", workspace, user)
 
-    with patch("core.processing.tasks.ArchiveManager"):
-        task_failure_handler(
-            sender=_sender("task-id-4"),
-            exception=ResanaTokenExpired("Resana offline token is no longer valid."),
-        )
+    task_failure_handler(
+        sender=_sender("task-id-4"),
+        exception=ResanaTokenExpired("Resana offline token is no longer valid."),
+    )
 
     assert len(mail.outbox) == 1
     assert "Reconnectez-vous" in mail.outbox[0].body
@@ -759,10 +759,7 @@ def test_task_handlers_capture_migration_finished(handler, status, workspace, us
     with open(os.path.join(folder, "note.txt"), "wb") as handle:
         handle.write(b"abc")
 
-    with (
-        patch("core.processing.tasks.ArchiveManager"),
-        patch("core.processing.tasks.posthog_capture") as capture,
-    ):
+    with patch("core.processing.tasks.posthog_capture") as capture:
         handler(sender=_sender(task_result.task_id))
 
     capture.assert_called_once()
@@ -792,10 +789,7 @@ def test_migration_finished_file_counts_are_none_without_integrity_report(
     """Without integrity check, the file counts are sent as None."""
     extra = _run_task("task-id-5", workspace, user)
 
-    with (
-        patch("core.processing.tasks.ArchiveManager"),
-        patch("core.processing.tasks.posthog_capture") as capture,
-    ):
+    with patch("core.processing.tasks.posthog_capture") as capture:
         task_success_handler(sender=_sender(extra.task_result.task_id))
 
     properties = capture.call_args.args[2]
@@ -821,10 +815,7 @@ def test_migration_finished_counts_zero_unfinished_analyses_in_a_report(
         },
     )
 
-    with (
-        patch("core.processing.tasks.ArchiveManager"),
-        patch("core.processing.tasks.posthog_capture") as capture,
-    ):
+    with patch("core.processing.tasks.posthog_capture") as capture:
         task_success_handler(sender=_sender(extra.task_result.task_id))
 
     assert capture.call_args.args[2]["analysis_unfinished_count"] == 0

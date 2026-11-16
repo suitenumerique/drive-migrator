@@ -1,6 +1,10 @@
 """Tests for DriveDestinationBackend."""
 
+# pylint: disable=no-member  # django.core.mail.outbox is added by the locmem backend
+
 from unittest.mock import ANY, MagicMock, patch
+
+from django.core import mail
 
 import pytest
 from requests.exceptions import ConnectionError as RequestsConnectionError
@@ -19,12 +23,8 @@ from core.models import Workspace
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture(autouse=True)
-def _patch_mails_manager():
-    """Prevent real MailsManager calls (DB access) across all tests in this module."""
-    with patch("core.destinations.drive.backend.MailsManager") as mock_cls:
-        mock_cls.return_value.send_migration_mail = MagicMock()
-        yield mock_cls
+def _user():
+    return factories.UserFactory(email="user@example.com")
 
 
 @pytest.fixture(autouse=True, name="rejected_files_archive")
@@ -89,7 +89,7 @@ def test_service_account_mode_uses_service_account_backend(
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
 
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(_make_workspace(), _user(), str(tmp_path))
 
     mock_cls.assert_called_once_with()
 
@@ -102,7 +102,7 @@ def test_service_account_mode_creates_root_folder(mock_cls, tmp_path, settings):
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     workspace = _make_workspace()
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     mock_backend.create_folder.assert_called_once_with("My Workspace")
 
@@ -115,7 +115,7 @@ def test_service_account_mode_stores_root_id_in_metadata(mock_cls, tmp_path, set
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     workspace = _make_workspace()
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     workspace.refresh_from_db()
     assert workspace.get_destination_metadata("drive") == {"workspace_id": "root-uuid"}
@@ -130,7 +130,7 @@ def test_service_account_mode_creates_subfolders(mock_cls, tmp_path, settings):
     mock_backend.create_subfolder.return_value = {"id": "sub-uuid"}
     (tmp_path / "docs").mkdir()
 
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(_make_workspace(), _user(), str(tmp_path))
 
     mock_backend.create_subfolder.assert_called_once_with("docs", parent_id="root-uuid")
 
@@ -147,7 +147,7 @@ def test_service_account_mode_uploads_files(mock_cls, tmp_path, settings):
     }
     (tmp_path / "report.pdf").write_bytes(b"content")
 
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(_make_workspace(), _user(), str(tmp_path))
 
     mock_backend.create_file_item.assert_called_once_with(
         "report.pdf", parent_id="root-uuid", size=7, item_id=ANY
@@ -171,7 +171,7 @@ def test_service_account_mode_shares_with_migration_user_in_drive(
         migration_user=_make_migration_user("alice@example.com")
     )
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     mock_backend.find_user_by_email.assert_any_call("alice@example.com")
     mock_backend.share_with_user.assert_any_call("root-uuid", "user-uuid")
@@ -188,7 +188,7 @@ def test_service_account_mode_invites_migration_user_not_in_drive(
     mock_backend.find_user_by_email.return_value = None
     workspace = _make_workspace(migration_user=_make_migration_user("new@example.com"))
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     mock_backend.invite_by_email.assert_any_call("root-uuid", "new@example.com")
 
@@ -203,7 +203,7 @@ def test_service_account_mode_skips_sharing_when_no_migration_user(
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
 
     DriveDestinationBackend().export(
-        _make_workspace(migration_user=None), MagicMock(), str(tmp_path)
+        _make_workspace(migration_user=None), _user(), str(tmp_path)
     )
 
     mock_backend.find_user_by_email.assert_not_called()
@@ -227,7 +227,7 @@ def test_service_account_mode_shares_with_workspace_members_in_drive(
         ]
     )
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
     assert "jean@example.com" in emails_queried
@@ -246,7 +246,7 @@ def test_service_account_mode_invites_unknown_workspace_members(
     mock_backend.find_user_by_email.return_value = None
     workspace = _make_workspace(members=[{"email": "jean@example.com"}])
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     mock_backend.invite_by_email.assert_called_with("root-uuid", "jean@example.com")
 
@@ -259,7 +259,7 @@ def test_service_account_mode_sets_status_success(mock_cls, tmp_path, settings):
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     workspace = _make_workspace()
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     _assert_drive_status(workspace, Workspace.Status.SUCCESS)
 
@@ -278,7 +278,7 @@ def test_service_account_mode_does_not_double_share_migration_user_who_is_also_m
         members=[{"email": "alice@example.com"}],
     )
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
     assert emails_queried.count("alice@example.com") == 1
@@ -295,7 +295,7 @@ def test_user_token_mode_uses_user_token_backend(mock_cls, tmp_path, settings):
     settings.DRIVE_AUTH_MODE = "user_token"
     mock_backend = mock_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
-    user = MagicMock()
+    user = _user()
 
     DriveDestinationBackend().export(_make_workspace(), user, str(tmp_path))
 
@@ -314,7 +314,7 @@ def test_user_token_mode_does_not_share_with_migration_user(
         migration_user=_make_migration_user("alice@example.com")
     )
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
     assert "alice@example.com" not in emails_queried
@@ -335,7 +335,7 @@ def test_user_token_mode_still_shares_with_other_members(mock_cls, tmp_path, set
         ],
     )
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
     assert "alice@example.com" not in emails_queried
@@ -356,7 +356,7 @@ def test_user_token_mode_shares_with_members_even_without_migration_user(
         members=[{"email": "bob@example.com"}],
     )
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     emails_queried = [c.args[0] for c in mock_backend.find_user_by_email.call_args_list]
     assert "bob@example.com" in emails_queried
@@ -374,7 +374,7 @@ def test_sharing_disabled_skips_share_members(mock_cls, tmp_path, settings):
         members=[{"email": "bob@example.com"}],
     )
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     mock_backend.find_user_by_email.assert_not_called()
     mock_backend.share_with_user.assert_not_called()
@@ -411,7 +411,7 @@ def test_uploads_users_csv_when_workspace_has_members(mock_cls, tmp_path, settin
         ]
     )
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     mock_backend.create_file_item.assert_any_call(
         "users_list_by_migrator.csv", parent_id="root-uuid", size=ANY, item_id=ANY
@@ -437,7 +437,7 @@ def test_users_csv_removed_from_local_folder_after_upload(mock_cls, tmp_path, se
         members=[{"name": "Doe", "firstName": "Jean", "email": "jean@example.com"}]
     )
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     assert not (tmp_path / "users_list_by_migrator.csv").exists()
 
@@ -452,7 +452,7 @@ def test_no_users_csv_uploaded_when_workspace_has_no_members(
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     workspace = _make_workspace(members=[])
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     uploaded_names = [c.args[0] for c in mock_backend.create_file_item.call_args_list]
     assert "users_list_by_migrator.csv" not in uploaded_names
@@ -484,7 +484,7 @@ def test_export_hands_rejected_files_to_the_archive(
     ) as upload_tree:
         upload_tree.side_effect = _reject_one_file
         destination = DriveDestinationBackend()
-        destination.export(workspace, MagicMock(), str(tmp_path))
+        destination.export(workspace, _user(), str(tmp_path))
 
     rejected_files_archive.assert_called_once_with(workspace, destination)
     rejected_files_archive.return_value.build.assert_called_once_with(
@@ -495,22 +495,20 @@ def test_export_hands_rejected_files_to_the_archive(
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
 def test_export_builds_the_rejected_files_archive_before_the_mail(
-    mock_cls, tmp_path, settings, rejected_files_archive, _patch_mails_manager
+    mock_cls, tmp_path, settings, rejected_files_archive
 ):
     """The archive exists when the mail, which links it, is sent."""
     settings.DRIVE_AUTH_MODE = "service_account"
     mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
-    calls = []
-    rejected_files_archive.return_value.build.side_effect = lambda *args: calls.append(
-        "archive"
-    )
-    _patch_mails_manager.return_value.send_migration_mail.side_effect = (
-        lambda *args: calls.append("mail")
-    )
 
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+    def build(*_args):
+        assert not mail.outbox
 
-    assert calls == ["archive", "mail"]
+    rejected_files_archive.return_value.build.side_effect = build
+
+    DriveDestinationBackend().export(_make_workspace(), _user(), str(tmp_path))
+
+    assert len(mail.outbox) == 1
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
@@ -521,7 +519,7 @@ def test_export_reports_no_rejection_when_drive_accepts_everything(
     settings.DRIVE_AUTH_MODE = "service_account"
     mock_cls.return_value.create_folder.return_value = {"id": "root-uuid"}
 
-    DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(_make_workspace(), _user(), str(tmp_path))
 
     assert not _recorded(rejected_files_archive)
 
@@ -544,7 +542,7 @@ def test_export_reports_rejected_files_when_upload_fails(
     ) as upload_tree:
         upload_tree.side_effect = reject_then_fail
         with pytest.raises(RuntimeError):
-            DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+            DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     assert len(_recorded(rejected_files_archive)) == 1
 
@@ -579,7 +577,7 @@ def test_export_fails_when_drive_rejects_every_file(
     ) as upload_tree:
         upload_tree.side_effect = _upload(["a.txt", "b.txt"], ["a.txt", "b.txt"])
         with pytest.raises(RuntimeError, match="All 2 file"):
-            DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+            DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     assert len(_recorded(rejected_files_archive)) == 2
     mock_backend.find_user_by_email.assert_not_called()
@@ -597,7 +595,7 @@ def test_export_succeeds_when_drive_rejects_some_files(mock_cls, tmp_path, setti
         DriveDestinationBackend, "_upload_tree", autospec=True
     ) as upload_tree:
         upload_tree.side_effect = _upload(["a.txt", "b.txt"], ["a.txt"])
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+        DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     _assert_drive_status(workspace, Workspace.Status.SUCCESS)
 
@@ -618,10 +616,10 @@ def test_export_ignores_the_generated_users_csv_when_checking_rejections(
     ) as upload_tree:
         upload_tree.side_effect = _upload([csv_name, "a.txt"], ["a.txt"])
         with pytest.raises(RuntimeError):
-            DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+            DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
         upload_tree.side_effect = _upload([csv_name], [csv_name])
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+        DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     _assert_drive_status(workspace, Workspace.Status.SUCCESS)
 
@@ -669,7 +667,7 @@ def test_file_refused_at_upload_ended_is_skipped(
     ]
     workspace = _make_workspace()
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     assert mock_backend.notify_upload_ended.call_count == 2
     assert _recorded(rejected_files_archive) == [
@@ -692,7 +690,7 @@ def test_file_refused_at_creation_is_skipped(
     ]
     workspace = _make_workspace()
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     sent_id = mock_backend.create_file_item.call_args_list[0].kwargs["item_id"]
     assert _recorded(rejected_files_archive) == [
@@ -722,7 +720,7 @@ def test_file_blocked_upstream_at_creation_is_skipped(
     ]
     workspace = _make_workspace()
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     mock_backend.get_item.assert_called_once_with("root-uuid")
     sent_id = mock_backend.create_file_item.call_args_list[0].kwargs["item_id"]
@@ -754,7 +752,7 @@ def test_upstream_block_of_every_request_stops_the_upload(
     workspace = _make_workspace()
 
     with pytest.raises(HTTPError) as excinfo:
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+        DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     assert excinfo.value is blocked
 
@@ -773,7 +771,7 @@ def test_upstream_block_at_upload_ended_stops_the_upload(
     workspace = _make_workspace()
 
     with pytest.raises(HTTPError):
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+        DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     mock_backend.get_item.assert_not_called()
     assert not _recorded(rejected_files_archive)
@@ -792,7 +790,7 @@ def test_other_drive_error_still_stops_the_upload(
     workspace = _make_workspace()
 
     with pytest.raises(HTTPError):
-        DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+        DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     assert mock_backend.notify_upload_ended.call_count == 1
     assert not _recorded(rejected_files_archive)
@@ -811,7 +809,7 @@ def test_export_logs_rejected_files_once_without_paths(mock_cls, tmp_path, setti
         patch("core.destinations.drive.backend.logger") as mock_logger,
     ):
         upload_tree.side_effect = _upload(["a.txt", "b.txt"], ["a.txt"])
-        DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+        DriveDestinationBackend().export(_make_workspace(), _user(), str(tmp_path))
 
     mock_logger.error.assert_called_once_with(
         "%s file(s) rejected on upload: %s",
@@ -828,7 +826,7 @@ def test_export_logs_nothing_at_error_without_rejection(mock_cls, tmp_path, sett
     (tmp_path / "report.pdf").write_bytes(b"content")
 
     with patch("core.destinations.drive.backend.logger") as mock_logger:
-        DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+        DriveDestinationBackend().export(_make_workspace(), _user(), str(tmp_path))
 
     mock_logger.error.assert_not_called()
 
@@ -846,7 +844,7 @@ def test_export_logs_each_file_before_creating_it(mock_cls, tmp_path, settings):
         patch("core.destinations.drive.backend.logger") as mock_logger,
         pytest.raises(RuntimeError),
     ):
-        DriveDestinationBackend().export(_make_workspace(), MagicMock(), str(tmp_path))
+        DriveDestinationBackend().export(_make_workspace(), _user(), str(tmp_path))
 
     item_id = mock_backend.create_file_item.call_args.kwargs["item_id"]
     mock_logger.info.assert_called_once_with("Uploading file %s (%s bytes)", item_id, 7)
@@ -860,7 +858,7 @@ def test_user_token_mode_sets_status_success(mock_cls, tmp_path, settings):
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     workspace = _make_workspace()
 
-    DriveDestinationBackend().export(workspace, MagicMock(), str(tmp_path))
+    DriveDestinationBackend().export(workspace, _user(), str(tmp_path))
 
     _assert_drive_status(workspace, Workspace.Status.SUCCESS)
 
@@ -871,24 +869,21 @@ def test_user_token_mode_sets_status_success(mock_cls, tmp_path, settings):
 
 
 @patch("core.destinations.drive.backend.DriveServiceAccountBackend")
-def test_export_sends_drive_ready_mail(
-    mock_backend_cls, tmp_path, settings, _patch_mails_manager
-):
+def test_export_sends_drive_ready_mail(mock_backend_cls, tmp_path, settings):
     """export() sends a 'drive_ready' migration mail to the user after upload."""
     settings.DRIVE_AUTH_MODE = "service_account"
     mock_backend = mock_backend_cls.return_value
     mock_backend.create_folder.return_value = {"id": "root-uuid"}
     workspace = _make_workspace()
-    user = MagicMock()
+    user = _user()
 
     DriveDestinationBackend().export(workspace, user, str(tmp_path))
 
-    mock_send = _patch_mails_manager.return_value.send_migration_mail
-    mock_send.assert_called_once()
-    args, kwargs = mock_send.call_args
-    assert args[:3] == (user, workspace, "drive_ready")
-    assert str(args[3]["title"])
-    assert kwargs == {}
+    assert len(mail.outbox) == 1
+    sent = mail.outbox[0]
+    assert sent.to == [user.email]
+    assert workspace.title in sent.subject
+    assert "Votre espace LaSuite Fichiers est prêt" in sent.body
 
 
 @pytest.mark.parametrize(
@@ -982,7 +977,7 @@ def test_no_account_creation_url_when_the_user_creates_no_account(
 @patch("core.destinations.drive.backend.DriveUserTokenBackend")
 def test_user_account_exists_asks_drive_with_the_user_token(mock_cls, me, expected):
     """The account exists when Drive knows the holder of the user's token."""
-    user = MagicMock()
+    user = _user()
     mock_cls.return_value.get_me.return_value = me
 
     assert DriveDestinationBackend().user_account_exists(user) is expected
