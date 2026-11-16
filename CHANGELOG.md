@@ -8,6 +8,7 @@ and this project adheres to
 
 ## [Unreleased]
 - Split the backend settings into configuration mixins
+- ♻️(backend) load real models in export task tests
 
 ### Added
 
