@@ -15,6 +15,7 @@ and this project adheres to
 - 📝(backend) reserve test mocks for external calls
 - ♻️(backend) assert mail and local archives without patches
 - ♻️(backend) run export tests on a real filesystem archive
+- ♻️(backend) script the Drive API with responses in tests
 
 ### Added
 
