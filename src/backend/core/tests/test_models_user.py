@@ -1,5 +1,6 @@
 """Tests for User model fields — Resana token storage."""
 
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 import pytest
@@ -46,3 +47,20 @@ def test_resana_tokens_factory_defaults():
     user = UserFactory(resana_access_token="tok", resana_refresh_token="ref")
     assert user.resana_access_token == "tok"
     assert user.resana_refresh_token == "ref"
+
+
+def test_email_must_be_unique():
+    """Two users cannot share the same non-null email."""
+    UserFactory(email="duplicate@example.com")
+    # BaseModel.save() runs full_clean(), so the duplicate is rejected by
+    # validate_unique() before reaching the DB unique index.
+    with pytest.raises(ValidationError, match="email"):
+        UserFactory(email="duplicate@example.com")
+
+
+def test_email_can_be_null_for_multiple_users():
+    """The uniqueness constraint allows several users with a null email."""
+    user1 = UserFactory(email=None)
+    user2 = UserFactory(email=None)
+    assert user1.email is None
+    assert user2.email is None
