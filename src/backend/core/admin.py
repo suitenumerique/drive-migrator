@@ -192,7 +192,7 @@ class ExtraTaskInfoAdminInline(admin.TabularInline):
         "get_task_status",
         "get_task_date_created",
         "get_task_date_done",
-        "integrity_check_passed",
+        "is_integrity_check_passed",
         "get_files_migrated",
         "get_integrity_stages",
     ]
@@ -377,13 +377,13 @@ class ExtraTaskInfoAdmin(admin.ModelAdmin):
         "get_task_status",
         "get_task_date_created",
         "get_task_date_done",
-        "integrity_check_passed",
+        "is_integrity_check_passed",
         "get_files_migrated",
     ]
-    list_filter = ["integrity_check_passed"]
+    list_filter = ["is_integrity_check_passed"]
     exclude = ["integrity_report"]
     readonly_fields = [
-        "integrity_check_passed",
+        "is_integrity_check_passed",
         "get_integrity_summary",
         "get_integrity_files",
     ]

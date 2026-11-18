@@ -799,7 +799,7 @@ def test_task_handlers_capture_migration_finished(handler, status):
     mock_workspace.download_errors = [{"name": "a"}, {"name": "b"}]
     mock_workspace.upload_errors = [{"path": "c"}]
     mock_extra_task.workspace = mock_workspace
-    mock_extra_task.integrity_check_passed = False
+    mock_extra_task.is_integrity_check_passed = False
     mock_extra_task.integrity_report = {
         "summary": {
             "source_files_count": 7,
@@ -835,6 +835,7 @@ def test_task_handlers_capture_migration_finished(handler, status):
     assert properties["download_errors_count"] == 2
     assert properties["upload_errors_count"] == 1
     assert properties["integrity_check_passed"] is False
+    assert properties["is_integrity_check_passed"] is False
     assert properties["migrated_files_count"] == 5
     assert properties["source_files_count"] == 7
     assert properties["analysis_unfinished_count"] == 2

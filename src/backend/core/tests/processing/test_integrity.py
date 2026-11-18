@@ -530,7 +530,7 @@ def test_tracker_does_nothing_when_tracking_is_disabled(tmp_path):
     drive.check_integrity.assert_not_called()
     extra_task.refresh_from_db()
     assert extra_task.integrity_report == {}
-    assert extra_task.integrity_check_passed is None
+    assert extra_task.is_integrity_check_passed is None
 
 
 @pytest.mark.django_db
@@ -549,7 +549,8 @@ def test_tracker_saves_report_on_the_run_extra_task(tmp_path):
     extra_task.refresh_from_db()
     assert extra_task.integrity_report["summary"]["stages"] == {"ok": 1}
     assert extra_task.integrity_report["files"][0]["item_id"] == "item-1"
-    assert extra_task.integrity_check_passed is True
+    assert extra_task.is_integrity_check_passed is True
+    assert extra_task.integrity_check_passed is extra_task.is_integrity_check_passed
 
 
 @pytest.mark.django_db
@@ -600,7 +601,7 @@ def test_tracker_not_attempted_is_unexplained_only_in_successful_run(
 
     extra_task.refresh_from_db()
     assert extra_task.integrity_report["files"][0]["stage"] == "not_attempted"
-    assert extra_task.integrity_check_passed is expected
+    assert extra_task.is_integrity_check_passed is expected
 
 
 @pytest.mark.django_db
@@ -652,7 +653,7 @@ def test_tracker_never_raises(tmp_path):
     _tracker(workspace, tmp_path, destinations=[drive]).save("task-1", run_failed=False)
 
     extra_task.refresh_from_db()
-    assert extra_task.integrity_check_passed is None
+    assert extra_task.is_integrity_check_passed is None
 
 
 @pytest.mark.django_db

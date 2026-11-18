@@ -39,5 +39,5 @@ class DestinationAccountStatusAPIView(APIView):
         except ValueError as error:
             raise Http404 from error
         if dest.get_account_policy() != AccountPolicy.USER_CREATED:
-            return Response({"exists": True})
-        return Response({"exists": check_user_account(dest, request.user)})
+            return Response({"has_account": True})
+        return Response({"has_account": check_user_account(dest, request.user)})

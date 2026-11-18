@@ -11,7 +11,7 @@ class WorkspaceIntegritySerializer(serializers.Serializer):  # pylint: disable=a
     source_files_count = serializers.IntegerField()
     # None when no destination was checked file by file (e.g. archive).
     sent_files_count = serializers.IntegerField(allow_null=True)
-    check_passed = serializers.BooleanField(allow_null=True)
+    is_check_passed = serializers.BooleanField(allow_null=True)
 
 
 class WorkspaceSerializer(serializers.ModelSerializer):
@@ -42,5 +42,5 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "migrated_files_count": migrated,
             "source_files_count": obj.integrity_source,
             "sent_files_count": obj.integrity_sent,
-            "check_passed": obj.integrity_check_passed,
+            "is_check_passed": obj.is_integrity_check_passed,
         }
