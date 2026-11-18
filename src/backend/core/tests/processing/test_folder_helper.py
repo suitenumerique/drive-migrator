@@ -6,12 +6,20 @@
 
 import os
 import zipfile
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
+from core import factories
 from core.models import Workspace
 from core.processing.folder_helper import ArchiveManager, ProgressPercentage
+
+
+def _workspace(workspace_id):
+    """Archive paths are derived from the workspace id only."""
+    return SimpleNamespace(id=workspace_id)
+
 
 # ---------------------------------------------------------------------------
 # ProgressPercentage
@@ -86,8 +94,7 @@ def test_progress_percentage_skips_log_within_throttle(tmp_path):
 def test_get_archive_path(tmp_path, settings):
     """get_archive_path() returns the workspace folder path with a .zip suffix."""
     settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-arch"
+    workspace = _workspace("ws-arch")
 
     manager = ArchiveManager()
     path = manager.get_archive_path(workspace)
@@ -98,8 +105,7 @@ def test_get_archive_path(tmp_path, settings):
 def test_zip_workspace_folder(tmp_path, settings):
     """zip_workspace_folder() creates a zip archive of the workspace folder."""
     settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-zip"
+    workspace = _workspace("ws-zip")
     workspace_dir = tmp_path / "workspace_ws-zip"
     workspace_dir.mkdir()
     (workspace_dir / "file.txt").write_text("content")
@@ -118,8 +124,7 @@ def test_zip_workspace_folder_sets_utf8_flag_on_accented_filenames(tmp_path, set
     accented bytes into mojibake (see issue #166: "Hébergement" -> "H俠ergement").
     """
     settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-accents"
+    workspace = _workspace("ws-accents")
     workspace_dir = tmp_path / "workspace_ws-accents"
     subdir = workspace_dir / "Hébergement"
     subdir.mkdir(parents=True)
@@ -147,8 +152,7 @@ def test_zip_workspace_folder_preserves_file_modification_time(tmp_path, setting
     date to the zipfile default of 1980-01-01).
     """
     settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-mtime"
+    workspace = _workspace("ws-mtime")
     workspace_dir = tmp_path / "workspace_ws-mtime"
     workspace_dir.mkdir()
     (workspace_dir / "file.txt").write_text("content")
@@ -166,8 +170,7 @@ def test_zip_workspace_folder_preserves_file_modification_time(tmp_path, setting
 def test_delete_archive_removes_existing_file(tmp_path, settings):
     """delete_archive() removes the zip file if it exists."""
     settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-del"
+    workspace = _workspace("ws-del")
     zip_path = tmp_path / "workspace_ws-del.zip"
     zip_path.write_bytes(b"data")
 
@@ -180,8 +183,7 @@ def test_delete_archive_removes_existing_file(tmp_path, settings):
 def test_delete_archive_is_safe_when_missing(tmp_path, settings):
     """delete_archive() does nothing if the zip file does not exist."""
     settings.APP_WORK_DIR = str(tmp_path)
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-del-missing"
+    workspace = _workspace("ws-del-missing")
 
     manager = ArchiveManager()
     manager.delete_archive(workspace)  # must not raise
@@ -212,8 +214,7 @@ def test_get_s3_resource_creates_boto3_resource(settings):
 
 def test_get_download_url_raises_when_no_s3_key():
     """get_download_url() raises ValueError when the workspace has no archive s3_key."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.get_destination_metadata.return_value = {}
+    workspace = Workspace(destination_metadata={})
 
     manager = ArchiveManager()
     with pytest.raises(ValueError, match="does not have an archive path"):
@@ -224,8 +225,7 @@ def test_get_download_url_uses_short_expiry(settings):
     """get_download_url() requests a short-lived presigned URL (not 7 days) so a leaked
     email link/log entry can't be used to download the archive long after the fact."""
     settings.AWS_S3_DOWNLOAD_URL = ""
-    workspace = MagicMock(spec=Workspace)
-    workspace.get_destination_metadata.return_value = {"s3_key": "ws.zip"}
+    workspace = Workspace(destination_metadata={"archive": {"s3_key": "ws.zip"}})
 
     with patch("core.processing.folder_helper.boto3") as mock_boto3:
         mock_client = mock_boto3.resource.return_value.meta.client
@@ -243,8 +243,7 @@ def test_get_download_url_uses_short_expiry(settings):
 def test_get_download_url_returns_raw_url_without_download_url_setting(settings):
     """get_download_url() returns the presigned URL as-is when AWS_S3_DOWNLOAD_URL is unset."""
     settings.AWS_S3_DOWNLOAD_URL = ""
-    workspace = MagicMock(spec=Workspace)
-    workspace.get_destination_metadata.return_value = {"s3_key": "ws.zip"}
+    workspace = Workspace(destination_metadata={"archive": {"s3_key": "ws.zip"}})
 
     presigned_url = "http://minio:9000/bucket/ws.zip?sig=abc"
 
@@ -259,8 +258,7 @@ def test_get_download_url_returns_raw_url_without_download_url_setting(settings)
 def test_get_download_url_replaces_netloc_when_download_url_setting_set(settings):
     """get_download_url() replaces the URL netloc with the one from AWS_S3_DOWNLOAD_URL."""
     settings.AWS_S3_DOWNLOAD_URL = "http://localhost:9001"
-    workspace = MagicMock(spec=Workspace)
-    workspace.get_destination_metadata.return_value = {"s3_key": "ws.zip"}
+    workspace = Workspace(destination_metadata={"archive": {"s3_key": "ws.zip"}})
 
     presigned_url = "http://minio:9000/bucket/ws.zip?sig=abc"
 
@@ -273,35 +271,32 @@ def test_get_download_url_replaces_netloc_when_download_url_setting_set(settings
     assert "sig=abc" in result
 
 
+@pytest.mark.django_db
 def test_upload_archive_uploads_file_and_returns_url(tmp_path, settings):
     """upload_archive() uploads the zip to S3, stores s3_key in metadata, and returns URL."""
     settings.APP_WORK_DIR = str(tmp_path)
     settings.AWS_STORAGE_BUCKET_NAME = "my-bucket"
-    workspace = MagicMock(spec=Workspace)
-    workspace.id = "ws-up"
-    workspace.get_destination_metadata.return_value = {"s3_key": "workspace_ws-up.zip"}
+    workspace = factories.WorkspaceFactory()
 
     # Create a real zip file for ProgressPercentage to stat
-    zip_path = tmp_path / "workspace_ws-up.zip"
+    zip_path = tmp_path / f"workspace_{workspace.id}.zip"
     zip_path.write_bytes(b"fake-zip-data")
 
     expected_url = "http://localhost:9001/bucket/ws.zip?sig=xyz"
+
+    settings.AWS_S3_DOWNLOAD_URL = ""
 
     with patch("core.processing.folder_helper.boto3") as mock_boto3:
         mock_s3 = mock_boto3.resource.return_value
         mock_s3.meta.client.generate_presigned_url.return_value = expected_url
 
-        with patch.object(
-            ArchiveManager, "get_download_url", return_value=expected_url
-        ):
-            manager = ArchiveManager()
-            url = manager.upload_archive(workspace)
+        url = ArchiveManager().upload_archive(workspace)
 
     mock_s3.Bucket.return_value.upload_file.assert_called_once()
-    workspace.set_destination_metadata.assert_called_once_with(
-        "archive", {"s3_key": "workspace_ws-up.zip"}
-    )
-    workspace.save.assert_called_once()
+    workspace.refresh_from_db()
+    assert workspace.get_destination_metadata("archive") == {
+        "s3_key": f"workspace_{workspace.id}.zip"
+    }
     assert url == expected_url
 
 

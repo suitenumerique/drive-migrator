@@ -3,7 +3,7 @@
 # pylint: disable=no-member
 # django.core.mail.outbox is injected dynamically by Django's test runner.
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from django.conf import settings
 from django.core import mail
@@ -12,9 +12,17 @@ from django.test import override_settings
 
 import pytest
 
+from core import factories
 from core.backends.source import SourceManager
 from core.mails_manager import MailsManager
-from core.models import Workspace
+
+
+def _user(email="user@example.com"):
+    return factories.UserFactory(email=email)
+
+
+def _workspace(**fields):
+    return factories.WorkspaceFactory(**fields)
 
 
 @pytest.mark.django_db
@@ -25,10 +33,8 @@ from core.models import Workspace
 def test_send_migration_mail_renders_named_template_and_sends(template_name):
     """send_migration_mail() renders mail/html/{template_name}.html and
     mail/text/{template_name}.txt, then sends the resulting email to the user."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.title = "Équipe <projet> & partenaires"
-    user = MagicMock()
-    user.email = "user@example.com"
+    workspace = _workspace(title="Équipe <projet> & partenaires")
+    user = _user()
 
     MailsManager().send_migration_mail(
         user, workspace, template_name, {"title": "Some Title"}
@@ -52,10 +58,8 @@ def test_send_migration_mail_renders_named_template_and_sends(template_name):
 def test_send_migration_mail_injects_source_label_from_configured_source_backend():
     """send_migration_mail() exposes the configured source backend's label as
     'source_label' in the template context, so templates don't hardcode 'Osmose'."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.title = "My Workspace"
-    user = MagicMock()
-    user.email = "user@example.com"
+    workspace = _workspace(title="My Workspace")
+    user = _user()
 
     with patch(
         "core.mails_manager.render_to_string", wraps=render_to_string
@@ -72,10 +76,8 @@ def test_send_migration_mail_injects_source_label_from_configured_source_backend
 def test_send_migration_mail_merges_extra_context_into_template():
     """Extra context passed to send_migration_mail() reaches the template
     (e.g. a download_url or a destination-specific link)."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.title = "My Workspace"
-    user = MagicMock()
-    user.email = "user@example.com"
+    workspace = _workspace(title="My Workspace")
+    user = _user()
 
     MailsManager().send_migration_mail(
         user,
@@ -95,10 +97,8 @@ def test_send_migration_mail_merges_extra_context_into_template():
 def test_send_migration_mail_respects_force_to_setting():
     """When APP_EMAIL_FORCE_TO is set, the mail is redirected there instead of
     the user's real address."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.title = "My Workspace"
-    user = MagicMock()
-    user.email = "user@example.com"
+    workspace = _workspace(title="My Workspace")
+    user = _user()
 
     original = settings.APP_EMAIL_FORCE_TO
     settings.APP_EMAIL_FORCE_TO = "forced@example.com"
@@ -122,7 +122,7 @@ ALL_TEMPLATES = [
 
 
 def _workspace_with_errors():
-    return Workspace(
+    return _workspace(
         title="Équipe projet",
         download_errors=[
             {"id": "1", "name": "a.pdf", "path": "Docs/a.pdf", "error": "boom"}
@@ -138,8 +138,7 @@ def _workspace_with_errors():
 def test_send_migration_mail_attaches_failed_files_csv(template_name):
     """Every migration mail carries the CSV of the files that failed."""
     workspace = _workspace_with_errors()
-    user = MagicMock()
-    user.email = "user@example.com"
+    user = _user()
 
     MailsManager().send_migration_mail(
         user, workspace, template_name, {"title": "Some Title"}
@@ -161,13 +160,12 @@ def test_send_migration_mail_attaches_failed_files_csv(template_name):
 @pytest.mark.django_db
 def test_send_migration_mail_uses_singular_for_one_failed_file():
     """The mail sentence agrees with a single failed file."""
-    workspace = Workspace(
+    workspace = _workspace(
         title="Équipe projet",
         download_errors=[{"id": "1", "name": "a.pdf", "path": "a.pdf", "error": "x"}],
         upload_errors=[],
     )
-    user = MagicMock()
-    user.email = "user@example.com"
+    user = _user()
 
     MailsManager().send_migration_mail(
         user, workspace, "drive_ready", {"title": "Some Title"}
@@ -180,9 +178,8 @@ def test_send_migration_mail_uses_singular_for_one_failed_file():
 @pytest.mark.parametrize("template_name", ALL_TEMPLATES)
 def test_send_migration_mail_has_no_attachment_without_failed_files(template_name):
     """No attachment and no failed-files sentence when every file was migrated."""
-    workspace = Workspace(title="Équipe projet", download_errors=[], upload_errors=[])
-    user = MagicMock()
-    user.email = "user@example.com"
+    workspace = _workspace(title="Équipe projet", download_errors=[], upload_errors=[])
+    user = _user()
 
     MailsManager().send_migration_mail(
         user, workspace, template_name, {"title": "Some Title"}
@@ -205,8 +202,7 @@ def test_send_migration_mail_links_the_rejected_files_archive(template_name):
         "drive": {"workspace_id": "root", "rejected_files_s3_key": "ws.zip"},
         "archive": {"s3_key": "workspace.zip"},
     }
-    user = MagicMock()
-    user.email = "user@example.com"
+    user = _user()
 
     MailsManager().send_migration_mail(
         user, workspace, template_name, {"title": "Some Title"}
@@ -231,8 +227,7 @@ def test_send_migration_mail_links_the_zip_of_an_unregistered_destination():
     preventing the mail from being sent."""
     workspace = _workspace_with_errors()
     workspace.destination_metadata = {"gone": {"rejected_files_s3_key": "ws.zip"}}
-    user = MagicMock()
-    user.email = "user@example.com"
+    user = _user()
 
     MailsManager().send_migration_mail(
         user, workspace, ALL_TEMPLATES[0], {"title": "Some Title"}
@@ -247,8 +242,7 @@ def test_send_migration_mail_has_no_archive_link_without_zip(template_name):
     """No link when no destination kept a zip of refused files."""
     workspace = _workspace_with_errors()
     workspace.destination_metadata = {"drive": {"workspace_id": "root"}}
-    user = MagicMock()
-    user.email = "user@example.com"
+    user = _user()
 
     MailsManager().send_migration_mail(
         user, workspace, template_name, {"title": "Some Title"}
@@ -266,9 +260,8 @@ def test_send_fail_mail_asks_to_log_in_again_when_the_source_token_expired(
 ):
     """The fail mail tells the user to log in to the source again and relaunch,
     only when the run failed on an expired source token."""
-    workspace = Workspace(title="Équipe projet", download_errors=[], upload_errors=[])
-    user = MagicMock()
-    user.email = "user@example.com"
+    workspace = _workspace(title="Équipe projet", download_errors=[], upload_errors=[])
+    user = _user()
     label = SourceManager().get_backend().label
 
     MailsManager().send_fail_mail(

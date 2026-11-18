@@ -1,444 +1,364 @@
 """Tests for InterstisClient — Interstis GED API HTTP client."""
 
+# pylint: disable=redefined-outer-name  # pytest fixtures intentionally shadow outer names
+
+import json
 import logging
+import re
 import ssl
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-import requests as req_lib
+import responses
 import urllib3
+from requests.exceptions import ChunkedEncodingError, HTTPError, SSLError, Timeout
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
-from core.sources.resana import interstis_client
+from core.retrying_session import RetryingSession
 from core.sources.resana.interstis_client import InterstisClient
+
+_API = "https://resana.example.com/api"
+
+
+@pytest.fixture(autouse=True)
+def _settings(settings):
+    settings.RESANA_API_ENDPOINT = _API
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 1
 
 
 @pytest.fixture(autouse=True)
 def no_retry_delay():
     """Skip real sleeping so retry tests run instantly."""
-    with patch("tenacity.nap.time.sleep"):
-        yield
+    with patch("tenacity.nap.time.sleep") as sleep:
+        yield sleep
 
 
-def _http_error(status_code):
-    response = MagicMock()
-    response.status_code = status_code
-    error = req_lib.HTTPError(f"{status_code} error")
-    error.response = response
-    return error
+def _client():
+    client = InterstisClient("my-token")
+    assert isinstance(client.session, RetryingSession)
+    return client
 
 
-# ---------------------------------------------------------------------------
-# Group 1 — Constructor
-# ---------------------------------------------------------------------------
+def _script(callback):
+    recorded = responses.RequestsMock(assert_all_requests_are_fired=False)
+    for method in (responses.GET, responses.POST):
+        recorded.add_callback(method, re.compile(r"https://"), callback=callback)
+    return recorded
 
 
-def test_client_sets_bearer_token_header(settings):
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-
-    with patch("core.sources.resana.interstis_client.RetryingSession") as mock_session:
-        client = InterstisClient("my-token")
-
-    mock_session.return_value.headers.__setitem__.assert_called_once_with(
-        "Authorization", "Bearer my-token"
-    )
-    assert client.token == "my-token"
+def _json(payload, status=200):
+    return status, {"Content-Type": "application/json"}, json.dumps(payload)
 
 
-def test_client_creates_retrying_session_on_init(settings):
-    """The session retries transient failures using the RESANA_RETRY_* settings."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+def test_client_sends_the_bearer_token():
+    """The client calls Drive's sibling API with the token it was given."""
 
-    with patch("core.sources.resana.interstis_client.RetryingSession") as mock_session:
-        InterstisClient("tok")
+    def ok(_request):
+        return _json({"hydra:member": [], "hydra:totalItems": 0})
 
-    mock_session.assert_called_once_with("RESANA", interstis_client.logger)
+    client = _client()
+    with _script(ok) as recorded:
+        client.get_workspaces()
+        sent = recorded.calls[0].request
+        assert sent.headers["Authorization"] == "Bearer my-token"
+        assert sent.url.startswith(f"{_API}/api/workspaces")
 
 
-# ---------------------------------------------------------------------------
-# Group 2 — get_workspaces()
-# ---------------------------------------------------------------------------
-
-
-def test_get_workspaces_returns_members_from_single_page(settings):
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-
-    page_1 = {
+def test_get_workspaces_returns_members_from_single_page():
+    page = {
         "hydra:member": [
-            {"uuid": "ws-1", "name": "Workspace A", "isPersonalWorkspace": False},
-            {"uuid": "ws-2", "name": "Workspace B", "isPersonalWorkspace": False},
+            {"uuid": "ws-1", "name": "Workspace A"},
+            {"uuid": "ws-2", "name": "Workspace B"},
         ],
         "hydra:totalItems": 2,
     }
 
-    client = InterstisClient("fake-token")
-    client.session = MagicMock()
-    client.session.get.return_value.json.return_value = page_1
-    client.session.get.return_value.raise_for_status = MagicMock()
+    def ok(request):
+        assert "page=1" in request.url
+        assert "itemsPerPage=500" in request.url
+        return _json(page)
 
-    result = client.get_workspaces()
+    with _script(ok):
+        result = _client().get_workspaces()
 
-    client.session.get.assert_called_once_with(
-        "https://resana.example.com/api/api/workspaces",
-        params={"page": 1, "itemsPerPage": 500},
-        timeout=30,
-    )
-    assert len(result) == 2
-    assert result[0]["uuid"] == "ws-1"
+    assert [item["uuid"] for item in result] == ["ws-1", "ws-2"]
 
 
-def test_get_workspaces_paginates_until_all_fetched(settings):
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+def test_get_workspaces_paginates_until_all_fetched():
+    def pages(request):
+        page = 1 if "page=1" in request.url else 2
+        if page == 1:
+            members = [{"uuid": f"ws-{i}"} for i in range(500)]
+        else:
+            members = [{"uuid": f"ws-{i}"} for i in range(500, 750)]
+        return _json({"hydra:member": members, "hydra:totalItems": 750})
 
-    page_1 = {
-        "hydra:member": [{"uuid": f"ws-{i}"} for i in range(500)],
-        "hydra:totalItems": 750,
-    }
-    page_2 = {
-        "hydra:member": [{"uuid": f"ws-{i}"} for i in range(500, 750)],
-        "hydra:totalItems": 750,
-    }
+    with _script(pages) as recorded:
+        result = _client().get_workspaces()
+        assert len(recorded.calls) == 2
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.return_value.raise_for_status = MagicMock()
-    client.session.get.return_value.json.side_effect = [page_1, page_2]
-
-    result = client.get_workspaces()
-
-    assert client.session.get.call_count == 2
     assert len(result) == 750
 
 
-# ---------------------------------------------------------------------------
-# Group 3 — explore()
-# ---------------------------------------------------------------------------
-
-
-def test_explore_returns_folders_and_files(settings):
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-
-    explore_response = {
+def test_explore_returns_folders_and_files():
+    payload = {
         "hydra:member": [
             {
                 "uuid": "root-uuid",
-                "name": "root",
-                "folders": [
-                    {
-                        "uuid": "folder-1",
-                        "name": "Documents",
-                        "folders": [],
-                        "files": [],
-                    },
-                ],
-                "files": [
-                    {"uuid": "file-1", "name": "report", "extension": ".pdf"},
-                ],
+                "folders": [{"uuid": "folder-1", "name": "Documents"}],
+                "files": [{"uuid": "file-1", "name": "report", "extension": ".pdf"}],
             }
         ],
         "hydra:totalItems": 1,
     }
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.return_value.json.return_value = explore_response
-    client.session.get.return_value.raise_for_status = MagicMock()
+    def ok(request):
+        assert request.url.startswith(f"{_API}/api/targets/root-uuid/explore")
+        return _json(payload)
 
-    result = client.explore("root-uuid")
+    with _script(ok):
+        result = _client().explore("root-uuid")
 
-    client.session.get.assert_called_once_with(
-        "https://resana.example.com/api/api/targets/root-uuid/explore",
-        params={"page": 1, "itemsPerPage": 500},
-        timeout=30,
-    )
-    assert len(result) == 1
-    assert result[0]["uuid"] == "root-uuid"
     assert result[0]["folders"][0]["uuid"] == "folder-1"
     assert result[0]["files"][0]["uuid"] == "file-1"
 
 
-# ---------------------------------------------------------------------------
-# Group 4 — download_file()
-# ---------------------------------------------------------------------------
+def test_download_file_writes_binary_content_to_path(tmp_path):
+    destination = tmp_path / "output.pdf"
+
+    def ok(request):
+        assert request.url.endswith("/targets/file-uuid-123/download")
+        return 200, {}, b"%PDF binary content"
+
+    with _script(ok):
+        _client().download_file("file-uuid-123", str(destination))
+
+    assert destination.read_bytes() == b"%PDF binary content"
 
 
-def test_download_file_writes_binary_content_to_path(settings, tmp_path):
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+def test_download_file_raises_on_http_error():
+    def missing(_request):
+        return 404, {}, "missing"
 
-    destination = str(tmp_path / "output.pdf")
-    file_content = b"%PDF binary content"
-
-    mock_response = MagicMock()
-    mock_response.iter_content.return_value = [file_content]
-    mock_response.raise_for_status = MagicMock()
-    mock_response.__enter__ = lambda s: mock_response
-    mock_response.__exit__ = MagicMock(return_value=False)
-
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.return_value = mock_response
-
-    client.download_file("file-uuid-123", destination)
-
-    client.session.get.assert_called_once_with(
-        "https://resana.example.com/api/api/targets/file-uuid-123/download",
-        stream=True,
-        timeout=60,
-        retry=False,
-    )
-    with open(destination, "rb") as f:
-        assert f.read() == file_content
-
-
-def test_download_file_raises_on_http_error(settings):
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-
-    mock_response = MagicMock()
-    mock_response.raise_for_status.side_effect = req_lib.HTTPError("404")
-    mock_response.__enter__ = lambda s: mock_response
-    mock_response.__exit__ = MagicMock(return_value=False)
-
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.return_value = mock_response
-
-    with pytest.raises(req_lib.HTTPError):
-        client.download_file("missing-uuid", "/tmp/x.pdf")
-
-
-def _success_response(content=b"content"):
-    response = MagicMock()
-    response.iter_content.return_value = [content]
-    response.raise_for_status = MagicMock()
-    response.__enter__ = lambda s: response
-    response.__exit__ = MagicMock(return_value=False)
-    return response
-
-
-def _failing_response(status_code):
-    response = MagicMock()
-    response.raise_for_status.side_effect = _http_error(status_code)
-    response.__enter__ = lambda s: response
-    response.__exit__ = MagicMock(return_value=False)
-    return response
+    with _script(missing), pytest.raises(HTTPError):
+        _client().download_file("missing-uuid", "/tmp/x.pdf")
 
 
 def test_download_file_retries_on_timeout_then_succeeds(settings, tmp_path):
     """A transient network timeout is retried and eventually succeeds."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-    destination = str(tmp_path / "output.pdf")
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+    destination = tmp_path / "output.pdf"
+    attempts = {"n": 0}
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.side_effect = [
-        req_lib.Timeout("timed out"),
-        _success_response(),
-    ]
+    def flaky(_request):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise Timeout("timed out")
+        return 200, {}, b"content"
 
-    client.download_file("file-uuid", destination)
+    with _script(flaky):
+        _client().download_file("file-uuid", str(destination))
 
-    assert client.session.get.call_count == 2
+    assert attempts["n"] == 2
+    assert destination.read_bytes() == b"content"
 
 
 def test_download_file_retries_on_connection_error_then_succeeds(settings, tmp_path):
     """A transient connection error is retried and eventually succeeds."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-    destination = str(tmp_path / "output.pdf")
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+    attempts = {"n": 0}
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.side_effect = [
-        req_lib.ConnectionError("connection reset"),
-        _success_response(),
-    ]
+    def flaky(_request):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RequestsConnectionError("connection reset")
+        return 200, {}, b"content"
 
-    client.download_file("file-uuid", destination)
+    with _script(flaky):
+        _client().download_file("file-uuid", str(tmp_path / "output.pdf"))
 
-    assert client.session.get.call_count == 2
+    assert attempts["n"] == 2
 
 
 def test_download_file_retries_on_server_error_then_succeeds(settings, tmp_path):
     """A 504 Gateway Timeout from Interstis is retried and eventually succeeds."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-    destination = str(tmp_path / "output.pdf")
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+    attempts = {"n": 0}
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.side_effect = [_failing_response(504), _success_response()]
+    def flaky(_request):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return 504, {}, "down"
+        return 200, {}, b"content"
 
-    client.download_file("file-uuid", destination)
+    with _script(flaky):
+        _client().download_file("file-uuid", str(tmp_path / "output.pdf"))
 
-    assert client.session.get.call_count == 2
+    assert attempts["n"] == 2
 
 
-def test_download_file_does_not_retry_on_client_error(settings):
+def test_download_file_does_not_retry_on_client_error():
     """A 403 Forbidden is a permanent failure, not worth retrying."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    attempts = {"n": 0}
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.return_value = _failing_response(403)
+    def forbidden(_request):
+        attempts["n"] += 1
+        return 403, {}, "no"
 
-    with pytest.raises(req_lib.HTTPError):
-        client.download_file("file-uuid", "/tmp/x.pdf")
+    with _script(forbidden), pytest.raises(HTTPError):
+        _client().download_file("file-uuid", "/tmp/x.pdf")
 
-    assert client.session.get.call_count == 1
+    assert attempts["n"] == 1
 
 
 def test_download_file_retries_configured_max_attempts(settings):
     """The number of retry attempts before giving up follows RESANA_RETRY_MAX_ATTEMPTS."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+    attempts = {"n": 0}
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.side_effect = req_lib.Timeout("timed out")
+    def down(_request):
+        attempts["n"] += 1
+        raise Timeout("timed out")
 
-    with pytest.raises(req_lib.Timeout):
-        client.download_file("file-uuid", "/tmp/x.pdf")
+    with _script(down), pytest.raises(Timeout):
+        _client().download_file("file-uuid", "/tmp/x.pdf")
 
-    assert client.session.get.call_count == 2
+    assert attempts["n"] == 2
 
 
-def test_download_file_wait_uses_configured_timing(settings, tmp_path):
+def test_download_file_wait_uses_configured_timing(settings, tmp_path, no_retry_delay):
     """Retry backoff timing follows RESANA_RETRY_WAIT_MULTIPLIER / RESANA_RETRY_WAIT_MIN."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
     settings.RESANA_RETRY_WAIT_MULTIPLIER = 5
     settings.RESANA_RETRY_WAIT_MIN = 7
-    destination = str(tmp_path / "output.pdf")
+    attempts = {"n": 0}
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.side_effect = [
-        req_lib.Timeout("timed out"),
-        _success_response(),
-    ]
+    def flaky(_request):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise Timeout("timed out")
+        return 200, {}, b"content"
 
-    with patch("tenacity.nap.time.sleep") as mock_sleep:
-        client.download_file("file-uuid", destination)
+    with _script(flaky):
+        _client().download_file("file-uuid", str(tmp_path / "output.pdf"))
 
-    mock_sleep.assert_called_once()
-    assert mock_sleep.call_args[0][0] >= 7
+    no_retry_delay.assert_called()
+    assert no_retry_delay.call_args[0][0] >= 7
 
 
-def test_download_file_logs_before_sleeping_on_retry(settings, tmp_path):
+def test_download_file_logs_before_sleeping_on_retry(settings, tmp_path, caplog):
     """A retry attempt is logged at INFO: it's recoverable, not a definitive failure."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-    destination = str(tmp_path / "output.pdf")
-
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.side_effect = [
-        req_lib.Timeout("timed out"),
-        _success_response(),
-    ]
-
-    with patch.object(interstis_client.logger, "log") as mock_log:
-        client.download_file("file-uuid", destination)
-
-    mock_log.assert_called_once()
-    assert mock_log.call_args[0][0] == logging.INFO
-
-
-def test_download_file_logs_error_on_final_failure(settings):
-    """Once every attempt is exhausted, the definitive failure is logged at ERROR."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+    attempts = {"n": 0}
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.side_effect = req_lib.Timeout("timed out")
+    def flaky(_request):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise Timeout("timed out")
+        return 200, {}, b"content"
 
     with (
-        patch.object(interstis_client.logger, "error") as mock_error,
-        pytest.raises(req_lib.Timeout),
+        caplog.at_level(logging.INFO),
+        _script(flaky),
     ):
-        client.download_file("file-uuid", "/tmp/x.pdf")
+        _client().download_file("file-uuid", str(tmp_path / "output.pdf"))
 
-    mock_error.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Group 5 — Retry on transient errors, through the real RetryingSession
-# ---------------------------------------------------------------------------
+    assert any(record.levelno == logging.INFO for record in caplog.records)
 
 
-@pytest.fixture(name="base_request")
-def fixture_base_request():
-    """Mock the requests.Session.request wrapped by RetryingSession."""
-    with patch.object(req_lib.Session, "request") as mock_request:
-        yield mock_request
+def test_download_file_logs_error_on_final_failure(settings, caplog):
+    """Once every attempt is exhausted, the definitive failure is logged at ERROR."""
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+
+    def down(_request):
+        raise Timeout("timed out")
+
+    with (
+        caplog.at_level(logging.ERROR),
+        _script(down),
+        pytest.raises(Timeout),
+    ):
+        _client().download_file("file-uuid", "/tmp/x.pdf")
+
+    assert "giving up after 2 attempt" in caplog.text
 
 
-def _json_response(payload, status_code=200):
-    response = MagicMock()
-    response.status_code = status_code
-    response.json.return_value = payload
-    return response
-
-
-def test_explore_is_retried_on_timeout(settings, base_request):
+def test_explore_is_retried_on_timeout(settings):
     """A timed out explore page is replayed instead of aborting the whole export."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+    attempts = {"n": 0}
     page = {"hydra:member": [{"uuid": "root-uuid"}], "hydra:totalItems": 1}
-    base_request.side_effect = [req_lib.Timeout("read timed out"), _json_response(page)]
 
-    result = InterstisClient("tok").explore("root-uuid")
+    def flaky(_request):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise Timeout("read timed out")
+        return _json(page)
 
-    assert base_request.call_count == 2
+    with _script(flaky):
+        result = _client().explore("root-uuid")
+
+    assert attempts["n"] == 2
     assert result == [{"uuid": "root-uuid"}]
 
 
-def test_get_workspaces_retries_only_the_failing_page(settings, base_request):
+def test_get_workspaces_retries_only_the_failing_page(settings):
     """A 5xx on the second page replays that page, not the whole pagination."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-    page_1 = {
-        "hydra:member": [{"uuid": f"ws-{i}"} for i in range(500)],
-        "hydra:totalItems": 501,
-    }
-    page_2 = {"hydra:member": [{"uuid": "ws-500"}], "hydra:totalItems": 501}
-    base_request.side_effect = [
-        _json_response(page_1),
-        _json_response({}, status_code=504),
-        _json_response(page_2),
-    ]
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+    pages = []
 
-    result = InterstisClient("tok").get_workspaces()
+    def flaky(request):
+        page = 1 if "page=1" in request.url else 2
+        pages.append(page)
+        if page == 2 and pages.count(2) == 1:
+            return 504, {}, "down"
+        if page == 1:
+            members = [{"uuid": f"ws-{i}"} for i in range(500)]
+        else:
+            members = [{"uuid": "ws-500"}]
+        return _json({"hydra:member": members, "hydra:totalItems": 501})
 
-    assert base_request.call_count == 3
-    assert len(result) == 501
-    pages = [call.kwargs["params"]["page"] for call in base_request.call_args_list]
+    with _script(flaky):
+        result = _client().get_workspaces()
+
     assert pages == [1, 2, 2]
+    assert len(result) == 501
 
 
-def test_download_file_is_not_retried_twice_over(settings, base_request):
+def test_download_file_is_not_retried_twice_over(settings):
     """download_file already retries the whole download, so the session must not
     retry it again: attempts stay at RESANA_RETRY_MAX_ATTEMPTS, not its square."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
     settings.RESANA_RETRY_MAX_ATTEMPTS = 3
-    base_request.side_effect = req_lib.Timeout("read timed out")
+    attempts = {"n": 0}
 
-    with pytest.raises(req_lib.Timeout):
-        InterstisClient("tok").download_file("file-uuid", "/tmp/x.pdf")
+    def down(_request):
+        attempts["n"] += 1
+        raise Timeout("read timed out")
 
-    assert base_request.call_count == 3
+    with _script(down), pytest.raises(Timeout):
+        _client().download_file("file-uuid", "/tmp/x.pdf")
+
+    assert attempts["n"] == 3
 
 
 def test_download_file_is_retried_when_the_body_is_cut_short(settings, tmp_path):
     """A connection dropped mid-stream raises ChunkedEncodingError from
     iter_content, outside the session: the download decorator retries it."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
-    cut_short = _success_response()
-    cut_short.iter_content.side_effect = req_lib.exceptions.ChunkedEncodingError(
-        "IncompleteRead"
-    )
+    settings.RESANA_RETRY_MAX_ATTEMPTS = 2
+    attempts = {"n": 0}
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.side_effect = [cut_short, _success_response()]
+    def flaky(_request):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise ChunkedEncodingError("IncompleteRead")
+        return 200, {}, b"content"
 
-    client.download_file("file-uuid", str(tmp_path / "output.pdf"))
+    destination = tmp_path / "output.pdf"
+    with _script(flaky):
+        _client().download_file("file-uuid", str(destination))
 
-    assert client.session.get.call_count == 2
+    assert attempts["n"] == 2
+    assert destination.read_bytes() == b"content"
 
 
 def _certificate_error():
@@ -446,20 +366,18 @@ def _certificate_error():
     reason = urllib3.exceptions.SSLError(
         ssl.SSLCertVerificationError("certificate verify failed")
     )
-    return req_lib.exceptions.SSLError(
-        urllib3.exceptions.MaxRetryError(None, "/x", reason=reason)
-    )
+    return SSLError(urllib3.exceptions.MaxRetryError(None, "/x", reason=reason))
 
 
-def test_download_file_is_not_retried_on_certificate_error(settings):
+def test_download_file_is_not_retried_on_certificate_error():
     """A certificate that can't be verified fails every attempt: raised at once."""
-    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    attempts = {"n": 0}
 
-    client = InterstisClient("tok")
-    client.session = MagicMock()
-    client.session.get.side_effect = _certificate_error()
+    def bad_cert(_request):
+        attempts["n"] += 1
+        raise _certificate_error()
 
-    with pytest.raises(req_lib.exceptions.SSLError):
-        client.download_file("file-uuid", "/tmp/x.pdf")
+    with _script(bad_cert), pytest.raises(SSLError):
+        _client().download_file("file-uuid", "/tmp/x.pdf")
 
-    assert client.session.get.call_count == 1
+    assert attempts["n"] == 1

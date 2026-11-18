@@ -8,6 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 - Split the backend settings into configuration mixins
+- ♻️(backend) load real models in export task tests
+- ♻️(backend) load real models in mail and folder tests
+- ♻️(backend) load real workspaces in destination tests
+- ♻️(backend) drop filesystem user mocks in tests
+- 📝(backend) reserve test mocks for external calls
+- ♻️(backend) assert mail and local archives without patches
+- ♻️(backend) run export tests on a real filesystem archive
+- ♻️(backend) script the Drive API with responses in tests
+- ♻️(backend) synchronize through the real source in tests
+- ♻️(backend) script the Interstis client with responses
 
 ### Added
 

@@ -1,30 +1,36 @@
 """Tests for ArchiveDestinationBackend."""
 
-from unittest.mock import MagicMock, patch
+# pylint: disable=no-member  # django.core.mail.outbox is added by the locmem backend
+
+from unittest.mock import patch
+
+from django.core import mail
 
 import pytest
 
+from core import factories
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.archive.backend import ArchiveDestinationBackend
 from core.models import Workspace
 
-
-@pytest.fixture(autouse=True)
-def _patch_mails_manager():
-    """Prevent real MailsManager calls (DB access) across all tests in this module."""
-    with patch("core.destinations.archive.backend.MailsManager") as mock_cls:
-        mock_cls.return_value.send_migration_mail = MagicMock()
-        yield mock_cls
+pytestmark = pytest.mark.django_db
 
 
-def test_export_sends_download_mail(_patch_mails_manager, settings):
-    """export() sends the archive download email to the user after uploading,
-    via the generic MailsManager.send_migration_mail()."""
+def _workspace(**fields):
+    fields.setdefault("members", [])
+    fields.setdefault("title", "My Workspace")
+    return factories.WorkspaceFactory(**fields)
+
+
+def _user():
+    return factories.UserFactory(email="user@example.com")
+
+
+def test_export_sends_download_mail(settings):
+    """export() sends the archive download email to the user after uploading."""
     settings.LOGIN_REDIRECT_URL = "http://localhost:3010"
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    workspace.id = "ws-1"
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
@@ -33,22 +39,23 @@ def test_export_sends_download_mail(_patch_mails_manager, settings):
         backend = ArchiveDestinationBackend()
         backend.export(workspace, user, "/tmp/workspace")
 
-    mock_send = _patch_mails_manager.return_value.send_migration_mail
-    mock_send.assert_called_once()
-    args, kwargs = mock_send.call_args
-    assert args[:3] == (user, workspace, "archive_download")
-    assert str(args[3]["title"])
-    assert kwargs == {}
+    assert len(mail.outbox) == 1
+    sent = mail.outbox[0]
+    assert sent.to == [user.email]
+    assert workspace.title in sent.subject
+    assert "Votre archive est prête" in sent.body
+    assert (
+        f"http://localhost:3010/download-archive/?workspaceId={workspace.id}"
+        in sent.body
+    )
 
 
-def test_export_mail_links_to_frontend_not_raw_s3_url(_patch_mails_manager, settings):
+def test_export_mail_links_to_frontend_not_raw_s3_url(settings):
     """The mail must never carry the raw S3 presigned URL: it must link to the
     frontend download page, which will fetch a short-lived URL once authenticated."""
     settings.LOGIN_REDIRECT_URL = "http://localhost:3010"
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    workspace.id = "ws-1"
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
@@ -59,10 +66,9 @@ def test_export_mail_links_to_frontend_not_raw_s3_url(_patch_mails_manager, sett
         backend = ArchiveDestinationBackend()
         backend.export(workspace, user, "/tmp/workspace")
 
-    mock_send = _patch_mails_manager.return_value.send_migration_mail
-    args, _kwargs = mock_send.call_args
-    download_url = args[3]["download_url"]
-    assert download_url == "http://localhost:3010/download-archive/?workspaceId=ws-1"
+    body = mail.outbox[0].body
+    assert f"http://localhost:3010/download-archive/?workspaceId={workspace.id}" in body
+    assert "sig=secret" not in body
 
 
 def test_implements_abstract_destination():
@@ -83,10 +89,8 @@ def test_label_is_set():
 
 def test_export_creates_zip():
     """export() zips the local folder."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    workspace.get_destination_status.return_value = Workspace.Status.PENDING
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
@@ -100,10 +104,8 @@ def test_export_creates_zip():
 
 def test_export_uploads_to_s3():
     """export() uploads the archive to S3."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    workspace.get_destination_status.return_value = Workspace.Status.PENDING
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
@@ -117,10 +119,8 @@ def test_export_uploads_to_s3():
 
 def test_export_sets_status_success():
     """export() sets destination status to SUCCESS on success."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    workspace.get_destination_status.return_value = Workspace.Status.PENDING
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
@@ -129,18 +129,14 @@ def test_export_sets_status_success():
         backend = ArchiveDestinationBackend()
         backend.export(workspace, user, "/tmp/workspace")
 
-    workspace.set_destination_status.assert_called_once_with(
-        "archive", Workspace.Status.SUCCESS
-    )
-    workspace.save.assert_called()
+    workspace.refresh_from_db()
+    assert workspace.get_destination_status("archive") == Workspace.Status.SUCCESS
 
 
 def test_export_includes_any_extra_files_in_local_folder():
     """export() zips the entire local folder, including any extra files (e.g. members CSV)."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    workspace.get_destination_status.return_value = Workspace.Status.PENDING
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
@@ -156,11 +152,12 @@ def test_export_includes_any_extra_files_in_local_folder():
 
 def test_export_writes_users_csv_then_removes_it(tmp_path):
     """export() writes users_list_by_migrator.csv before zipping then removes it so Drive won't upload it."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = [
-        {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
-    ]
-    user = MagicMock()
+    workspace = _workspace(
+        members=[
+            {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
+        ]
+    )
+    user = _user()
     csv_path = tmp_path / "users_list_by_migrator.csv"
 
     def assert_csv_exists_during_zip(_ws):
@@ -179,9 +176,8 @@ def test_export_writes_users_csv_then_removes_it(tmp_path):
 
 def test_export_skips_users_csv_when_no_members(tmp_path):
     """export() does not write users_list_by_migrator.csv when workspace.members is empty."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value
@@ -195,7 +191,7 @@ def test_export_skips_users_csv_when_no_members(tmp_path):
 
 def test_get_download_url_returns_presigned_url():
     """get_download_url() delegates to ArchiveManager.get_download_url()."""
-    workspace = MagicMock(spec=Workspace)
+    workspace = _workspace()
 
     with patch("core.destinations.archive.backend.ArchiveManager") as mock_manager_cls:
         mock_manager = mock_manager_cls.return_value

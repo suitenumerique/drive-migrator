@@ -1,13 +1,25 @@
 """Tests for ResanaDestinationBackend."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
+from core import factories
 from core.backends.destination import AbstractDestinationBackend
 from core.destinations.resana.backend import ResanaDestinationBackend
 from core.destinations.resana.resana_backend import ResanaBackend
 from core.models import ResanaEmailMapping, Workspace
+
+pytestmark = pytest.mark.django_db
+
+
+def _workspace(**fields):
+    fields.setdefault("members", [])
+    return factories.WorkspaceFactory(**fields)
+
+
+def _user():
+    return factories.UserFactory()
 
 
 def test_implements_abstract_destination():
@@ -26,9 +38,8 @@ def test_label_is_set():
 
 def test_export_calls_create_workspace():
     """export() delegates workspace creation to ResanaBackend."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.resana.backend.ResanaBackend") as mock_backend_cls:
         mock_backend = mock_backend_cls.return_value
@@ -41,12 +52,13 @@ def test_export_calls_create_workspace():
 
 def test_export_writes_osmose_users_csv_from_members(tmp_path):
     """export() writes osmose_users.csv into local_folder_path from workspace.members."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = [
-        {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
-        {"name": "Martin", "firstName": "Alice", "email": "alice@example.com"},
-    ]
-    user = MagicMock()
+    workspace = _workspace(
+        members=[
+            {"name": "Dupont", "firstName": "Jean", "email": "jean@example.com"},
+            {"name": "Martin", "firstName": "Alice", "email": "alice@example.com"},
+        ]
+    )
+    user = _user()
 
     with patch("core.destinations.resana.backend.ResanaBackend"):
         backend = ResanaDestinationBackend()
@@ -61,9 +73,8 @@ def test_export_writes_osmose_users_csv_from_members(tmp_path):
 
 def test_export_skips_osmose_users_csv_when_no_members(tmp_path):
     """export() does not write osmose_users.csv when workspace.members is empty."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.resana.backend.ResanaBackend"):
         backend = ResanaDestinationBackend()
@@ -74,23 +85,20 @@ def test_export_skips_osmose_users_csv_when_no_members(tmp_path):
 
 def test_export_sets_status_pending_for_async_job():
     """export() sets destination status to PENDING — Resana is an async job."""
-    workspace = MagicMock(spec=Workspace)
-    workspace.members = []
-    user = MagicMock()
+    workspace = _workspace()
+    user = _user()
 
     with patch("core.destinations.resana.backend.ResanaBackend"):
         backend = ResanaDestinationBackend()
         backend.export(workspace, user, "/tmp/workspace")
 
-    workspace.set_destination_status.assert_called_once_with(
-        "resana", Workspace.Status.PENDING
-    )
-    workspace.save.assert_called()
+    workspace.refresh_from_db()
+    assert workspace.get_destination_status("resana") == Workspace.Status.PENDING
 
 
 def test_get_error_details():
     """get_error_details() delegates to ResanaBackend.get_error_details()."""
-    workspace = MagicMock(spec=Workspace)
+    workspace = _workspace()
     expected = [{"task": "failed"}]
 
     with patch("core.destinations.resana.backend.ResanaBackend") as mock_backend_cls:
@@ -106,7 +114,7 @@ def test_get_error_details():
 
 def test_retry_job():
     """retry() delegates to ResanaBackend.retry_job()."""
-    workspace = MagicMock(spec=Workspace)
+    workspace = _workspace()
 
     with patch("core.destinations.resana.backend.ResanaBackend") as mock_backend_cls:
         mock_backend = mock_backend_cls.return_value
@@ -119,7 +127,7 @@ def test_retry_job():
 
 def test_poll_completion():
     """poll_completion() delegates to ResanaBackend.refresh_job()."""
-    workspace = MagicMock(spec=Workspace)
+    workspace = _workspace()
 
     with patch("core.destinations.resana.backend.ResanaBackend") as mock_backend_cls:
         mock_backend = mock_backend_cls.return_value
