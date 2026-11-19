@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [v0.14.0] - 2026-11-19
+
 ## [v0.13.0] - 2026-11-19
 
 - Split the backend settings into configuration mixins
@@ -208,7 +210,8 @@ and this project adheres to
 
 - delete unused var in Makefile
 
-[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.13.0...main
+[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.14.0...main
+[v0.14.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.14.0
 [v0.13.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.13.0
 [v0.12.1]: https://github.com/suitenumerique/drive-migrator/releases/v0.12.1
 [v0.12.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.12.0
