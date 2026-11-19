@@ -257,6 +257,11 @@ tsclient: tsclient-install ## Generate a Typescript API client
 .PHONY: tsclient-install
 
 # -- Misc
+release: ## Prepare a release (VERSION=patch|minor|major|X.Y.Z)
+	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=patch|minor|major|X.Y.Z"; exit 1)
+	./bin/release $(VERSION) $(RELEASE_ARGS)
+.PHONY: release
+
 clean: ## restore repository state as it was freshly cloned
 	git clean -idx
 .PHONY: clean
