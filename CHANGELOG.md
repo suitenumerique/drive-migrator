@@ -7,6 +7,9 @@ and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [v0.13.0] - 2026-11-19
+
 - Split the backend settings into configuration mixins
 
 ### Added
@@ -205,7 +208,8 @@ and this project adheres to
 
 - delete unused var in Makefile
 
-[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.12.1...main
+[unreleased]: https://github.com/suitenumerique/drive-migrator/compare/v0.13.0...main
+[v0.13.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.13.0
 [v0.12.1]: https://github.com/suitenumerique/drive-migrator/releases/v0.12.1
 [v0.12.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.12.0
 [v0.11.0]: https://github.com/suitenumerique/drive-migrator/releases/v0.11.0
