@@ -1052,14 +1052,14 @@ wheels = [
 
 [[package]]
 name = "menshen-client"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx2" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/46/6c/71057f698c261b20bb969387494072010d4fea3029a5480942546c6d5443/menshen_client-0.3.0.tar.gz", hash = "sha256:b1a1d12a6277988e657e24ccc8a9ecf487d170bb9b0a0b10b1214eb8ee260308", size = 7611, upload-time = "2026-11-02T15:06:20.427Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e9/a7/6e88828566724fe5a76faa2eb900c3d2b30f80a3c0a00ea4572e901b55ae/menshen_client-0.4.0.tar.gz", hash = "sha256:69cb9dcef062601367cbdfdf16899a511d8d35dfb5032843e2d54ce14c33ebf0", size = 9787, upload-time = "2026-11-19T15:29:05.487Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/c5/bef9dba4e39cd05aabe74d3488c393b4b2f963587df78c29b6ecdabe4a99/menshen_client-0.3.0-py3-none-any.whl", hash = "sha256:6cddbf3024a661cac72ea47fbe0bcfc4355ef51d39b944708a736835803be1f2", size = 7923, upload-time = "2026-11-02T15:06:19.288Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/2a/34980c9ffe8252ee3eb3feecfd42a378c128667e2d2989e4d74002620914/menshen_client-0.4.0-py3-none-any.whl", hash = "sha256:c9d4f62180c8403ee4cdb65660102c54932eff35a19d6b745a1665632de7a342", size = 10416, upload-time = "2026-11-19T15:29:04.474Z" },
 ]
 
 [[package]]
@@ -1149,7 +1149,7 @@ requires-dist = [
     { name = "ipdb", marker = "extra == 'dev'", specifier = "==0.13.13" },
     { name = "ipython", marker = "extra == 'dev'", specifier = "==8.18.1" },
     { name = "jsonschema", specifier = "==4.20.0" },
-    { name = "menshen-client", specifier = "==0.3.0" },
+    { name = "menshen-client", specifier = "==0.4.0" },
     { name = "mozilla-django-oidc", specifier = "==4.0.0" },
     { name = "nested-multipart-parser", specifier = "==1.5.0" },
     { name = "pillow", specifier = ">=13.0.0" },

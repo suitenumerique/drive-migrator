@@ -56,13 +56,17 @@ def describe_oauth_error(error) -> str:
         payload = response.json()
     except ValueError:
         payload = None
+    return describe_oauth_failure(response.status_code, payload)
+
+
+def describe_oauth_failure(status_code: int, payload) -> str:
+    """Describe a token endpoint failure from its status and decoded JSON payload
+    (None when it was not JSON). Never carries a token."""
     if not isinstance(payload, dict) or not payload.get("error"):
-        return f"{response.status_code} without OAuth error"
+        return f"{status_code} without OAuth error"
     oauth_error = _one_line(payload["error"], 64)
     description = _one_line(payload.get("error_description") or "", 200)
-    return f"{response.status_code} {oauth_error}" + (
-        f" ({description})" if description else ""
-    )
+    return f"{status_code} {oauth_error}" + (f" ({description})" if description else "")
 
 
 def _one_line(value, limit: int) -> str:

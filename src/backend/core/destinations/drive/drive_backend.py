@@ -1,6 +1,7 @@
 """DriveBackend — HTTP client for La Suite Drive API."""
 
 import functools
+import json
 import logging
 import time
 import uuid
@@ -10,15 +11,16 @@ from enum import StrEnum
 from django.conf import settings
 from django.utils import timezone
 
-import httpx2
 from celery.utils.log import get_task_logger
 from menshen_client import (
+    APIError,
     Configuration,
+    MenshenClientError,
+    ServerUnavailableError,
     TokenExchangeClient,
     TokenExchangeRequest,
     TokenType,
 )
-from menshen_client.exceptions import ResponseParsingError
 from requests.auth import AuthBase
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError, RequestException
@@ -36,6 +38,7 @@ from core.retrying_session import RetryingSession, is_transient_error
 from core.utils import (
     describe_access_expiry,
     describe_oauth_error,
+    describe_oauth_failure,
     describe_request_error,
 )
 
@@ -198,12 +201,29 @@ class DriveTokenExpired(DestinationTokenExpired, RuntimeError):
 def _is_invalid_grant(response) -> bool:
     """Whether the token endpoint refused the refresh token itself (OAuth2's
     invalid_grant)."""
-    if response.status_code != 400:
-        return False
     try:
-        return response.json().get("error") == "invalid_grant"
+        payload = response.json()
     except ValueError:
-        return False
+        payload = None
+    return _is_invalid_grant_payload(response.status_code, payload)
+
+
+def _is_invalid_grant_payload(status_code: int, payload) -> bool:
+    """Whether a token endpoint status and decoded JSON payload are OAuth2's
+    invalid_grant."""
+    return (
+        status_code == 400
+        and isinstance(payload, dict)
+        and payload.get("error") == "invalid_grant"
+    )
+
+
+def _menshen_error_payload(error: APIError):
+    """The decoded JSON body of a Menshen error response, None when not JSON."""
+    try:
+        return json.loads(error.body)
+    except ValueError:
+        return None
 
 
 def clear_drive_tokens(user) -> None:
@@ -781,32 +801,33 @@ class DriveUserExchangedTokenBackend(DriveBackend):
                     scope=settings.DRIVE_TOKEN_EXCHANGE_SCOPE or None,
                 )
             )
-        except httpx2.HTTPStatusError as error:
+        except APIError as error:
+            payload = _menshen_error_payload(error)
             self._log_exchange_failure(
-                f"Menshen returned {describe_oauth_error(error)}"
+                f"Menshen returned {describe_oauth_failure(error.status_code, payload)}"
             )
             # Menshen refuses an expired or revoked ProConnect token: logging in
             # again gives a fresh one.
-            if _is_invalid_grant(error.response):
+            if _is_invalid_grant_payload(error.status_code, payload):
                 raise DriveTokenExpired(
                     f"Menshen refused the ProConnect token of user {self._user.email}."
                 ) from error
             # Raised as requests errors, which callers already handle: 5xx are
             # transient, other refusals are configuration errors.
-            if error.response.status_code >= 500:
+            if error.status_code >= 500:
                 raise RequestsConnectionError(
-                    f"Menshen returned {error.response.status_code}"
+                    f"Menshen returned {error.status_code}"
                 ) from error
-            raise HTTPError(f"Menshen returned {error.response.status_code}") from error
-        except httpx2.TransportError as error:
+            raise HTTPError(f"Menshen returned {error.status_code}") from error
+        except ServerUnavailableError as error:
             self._log_exchange_failure(
                 f"Menshen request failed ({type(error).__name__})"
             )
             raise RequestsConnectionError(
                 f"Menshen request failed ({type(error).__name__})"
             ) from error
-        except ResponseParsingError:
-            self._log_exchange_failure("Menshen returned an invalid response")
+        except MenshenClientError as error:
+            self._log_exchange_failure(f"Menshen client error ({type(error).__name__})")
             raise
         self._access_token = response.access_token
         self._token_expires_at = timezone.now() + timedelta(seconds=response.expires_in)

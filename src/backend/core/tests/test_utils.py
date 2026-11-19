@@ -13,6 +13,7 @@ from core.utils import (
     describe_access_expiry,
     describe_expiry,
     describe_oauth_error,
+    describe_oauth_failure,
     describe_request_error,
     ensure_inside_directory,
     sanitize_path_component,
@@ -130,6 +131,25 @@ def _http_error(status_code, json_body=None, json_error=None):
 def test_describe_oauth_error(error, expected):
     """Any token endpoint answer is described without raising."""
     assert describe_oauth_error(error) == expected
+
+
+@pytest.mark.parametrize(
+    "status_code,payload,expected",
+    [
+        (
+            400,
+            {"error": "invalid_grant", "error_description": "Token expired"},
+            "400 invalid_grant (Token expired)",
+        ),
+        (401, {"error": "invalid_client"}, "401 invalid_client"),
+        (400, {}, "400 without OAuth error"),
+        (502, None, "502 without OAuth error"),
+        (502, ["not", "an", "object"], "502 without OAuth error"),
+    ],
+)
+def test_describe_oauth_failure(status_code, payload, expected):
+    """A decoded token endpoint payload is described without raising."""
+    assert describe_oauth_failure(status_code, payload) == expected
 
 
 @freeze_time("2026-10-15 15:18:08")

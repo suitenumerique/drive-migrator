@@ -2,18 +2,24 @@
 
 # pylint: disable=protected-access
 
+import json
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from unittest.mock import MagicMock, patch
 
 from django.utils import timezone
 
-import httpx2
 import pytest
 from cryptography.fernet import Fernet
 from freezegun import freeze_time
-from menshen_client import TokenExchangeRequest, TokenType
-from menshen_client.exceptions import ResponseParsingError
+from menshen_client import (
+    APIError,
+    ResponseParsingError,
+    ServerTimeoutError,
+    ServerUnavailableError,
+    TokenExchangeRequest,
+    TokenType,
+)
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError
 
@@ -84,10 +90,13 @@ def _make_user(
     )
 
 
-def _menshen_error(status_code, payload=None):
-    request = httpx2.Request("POST", "https://menshen.example.com/auth/token/exchange/")
-    response = httpx2.Response(status_code, json=payload or {}, request=request)
-    return httpx2.HTTPStatusError("error", request=request, response=response)
+def _menshen_error(status_code, payload=None, body=None):
+    return APIError(
+        f"Menshen API error: {status_code}",
+        status_code=status_code,
+        url="https://menshen.example.com/auth/token/exchange/",
+        body=json.dumps(payload or {}) if body is None else body,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -185,8 +194,10 @@ def test_exchange_refreshes_an_expired_proconnect_token_first(menshen):
     [
         (_menshen_error(400, {"error": "invalid_grant"}), DriveTokenExpired),
         (_menshen_error(401, {"error": "invalid_client"}), HTTPError),
+        (_menshen_error(400, body="<html>Bad Request</html>"), HTTPError),
         (_menshen_error(503), RequestsConnectionError),
-        (httpx2.ConnectError("refused"), RequestsConnectionError),
+        (ServerUnavailableError("refused"), RequestsConnectionError),
+        (ServerTimeoutError("timed out"), RequestsConnectionError),
         (ResponseParsingError("Invalid token exchange response"), ResponseParsingError),
     ],
 )
