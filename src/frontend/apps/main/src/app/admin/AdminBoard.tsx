@@ -1,9 +1,12 @@
 'use client';
 
 import {
+  Alert,
+  Button,
   Input,
   Loader,
   Pagination,
+  VariantType,
 } from '@gouvfr-lasuite/cunningham-react';
 import { Filter } from '@gouvfr-lasuite/ui-kit';
 import { useEffect, useState } from 'react';
@@ -11,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 
 import { fetchAPI } from '@/api/fetchApi';
 import { AdminOrganization } from '@/hooks/useAdminContext';
+import { SyncFeedback } from '@/hooks/useOrganizationSync';
 
 import './AdminBoard.scss';
 import { ManagersModal } from './ManagersModal';
@@ -37,6 +41,11 @@ type Props = {
   organizations: AdminOrganization[];
   organizationId: string;
   onOrganizationChange: (id: string) => void;
+  onSyncRequest: () => void;
+  syncing: boolean;
+  syncFeedback: SyncFeedback;
+  onDismissSyncFeedback: () => void;
+  dataRevision: number;
 };
 
 const formatCount = (value: number) =>
@@ -61,6 +70,11 @@ export const AdminBoard = ({
   organizations,
   organizationId,
   onOrganizationChange,
+  onSyncRequest,
+  syncing,
+  syncFeedback,
+  onDismissSyncFeedback,
+  dataRevision,
 }: Props) => {
   const { t, i18n } = useTranslation();
   const organization = organizations.find((item) => item.id === organizationId);
@@ -118,7 +132,7 @@ export const AdminBoard = ({
     return () => {
       cancelled = true;
     };
-  }, [organizationId, filters]);
+  }, [organizationId, filters, dataRevision]);
 
   const applyKpi = (filter: KpiFilter) => {
     setSearchInput('');
@@ -240,8 +254,52 @@ export const AdminBoard = ({
               })}
             </p>
           )}
+          {syncFeedback.kind === 'syncing' && (
+            <p className="adm-muted">{t('Synchronisation en cours…')}</p>
+          )}
+          {syncFeedback.kind === 'success' && (
+            <Alert type={VariantType.SUCCESS}>
+              {t('Les espaces Resana ont été actualisés.')}
+              <Button variant="tertiary" onClick={onDismissSyncFeedback}>
+                {t('Fermer')}
+              </Button>
+            </Alert>
+          )}
+          {syncFeedback.kind === 'timeout' && (
+            <Alert type={VariantType.WARNING}>
+              {t(
+                'La synchronisation prend plus de temps que prévu. Réessayez dans quelques instants.',
+              )}
+              <Button variant="tertiary" onClick={onDismissSyncFeedback}>
+                {t('Fermer')}
+              </Button>
+            </Alert>
+          )}
+          {syncFeedback.kind === 'error' && (
+            <Alert type={VariantType.ERROR}>
+              {t(syncFeedback.messageKey)}
+              <Button variant="tertiary" onClick={onDismissSyncFeedback}>
+                {t('Fermer')}
+              </Button>
+            </Alert>
+          )}
         </div>
         <div className="adm-head__actions">
+          <Button
+            variant="tertiary"
+            disabled={syncing}
+            icon={
+              <span
+                className={`material-icons${syncing ? ' adm-spin' : ''}`}
+                aria-hidden
+              >
+                sync
+              </span>
+            }
+            onClick={onSyncRequest}
+          >
+            {t('Actualiser les espaces Resana')}
+          </Button>
           {organizations.length > 1 && (
             <Selector
               id="adm-org"
