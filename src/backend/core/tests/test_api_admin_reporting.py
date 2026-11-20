@@ -1,5 +1,8 @@
 """Tests for the organization admin reporting API."""
 
+from unittest.mock import patch
+
+from django.test import override_settings
 from django.utils import timezone
 
 import pytest
@@ -496,6 +499,69 @@ def test_workspaces_ordered_by_title_by_default():
     ]
 
     assert titles == ["Alpha", "Bravo"]
+
+
+SYNCHRONIZE = "/api/v1.0/admin/organizations/{source_id}/synchronize"
+
+
+def test_synchronize_anonymous():
+    """Anonymous users are refused before the flag is considered."""
+    response = APIClient().post(SYNCHRONIZE.format(source_id="12"))
+    assert response.status_code == 401
+
+
+def test_synchronize_flag_off():
+    """An inactive flag refuses the route."""
+    _flag(False)
+    client, user = _client()
+    organization = factories.OrganizationFactory(source_id="12")
+    organization.admins.add(user)
+    response = client.post(SYNCHRONIZE.format(source_id="12"))
+    assert response.status_code == 403
+    assert response.json()["error_name"] == "FeatureNotEnabled"
+
+
+@reporting
+def test_synchronize_refuses_an_organization_the_user_does_not_administer():
+    """A foreign organization and an unknown id answer the same error."""
+    client, _user = _client()
+    foreign = factories.OrganizationFactory(source_id="12")
+    foreign.admins.add(factories.UserFactory())
+    response = client.post(SYNCHRONIZE.format(source_id="12"))
+    assert response.status_code == 403
+    assert response.json()["error_name"] == "NotOrganizationAdmin"
+    missing = client.post(SYNCHRONIZE.format(source_id="missing"))
+    assert missing.status_code == 403
+    assert missing.json()["error_name"] == "NotOrganizationAdmin"
+
+
+@reporting
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "admin-org-sync",
+        }
+    }
+)
+def test_synchronize_enqueues_the_workspace_task_once():
+    """A second post while the lock is held returns the same task and enqueues nothing."""
+    client, user = _client()
+    organization = factories.OrganizationFactory(source_id="12")
+    organization.admins.add(user)
+    with patch(
+        "core.api.views.admin_reporting.sync_organization_workspaces.apply_async"
+    ) as mock_async:
+        first = client.post(SYNCHRONIZE.format(source_id="12"))
+        second = client.post(SYNCHRONIZE.format(source_id="12"))
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["task_id"] == second.json()["task_id"]
+    mock_async.assert_called_once_with(
+        args=[str(user.id), "12"],
+        task_id=first.json()["task_id"],
+    )
 
 
 def _managers_path(workspace_id):

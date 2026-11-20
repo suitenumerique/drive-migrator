@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from django.conf import settings
 from django.utils.module_loading import import_string
 
-from core.models import Workspace
+from core.models import Organization, Workspace
 
 
 class SourceTokenExpired(Exception):
@@ -45,6 +45,9 @@ class SourceWorkspace:
     id: str
     title: str
     raw_data: dict = field(default_factory=dict)
+    # Set when the source names the organization. Personal spaces leave it empty.
+    organization_id: str | None = None
+    organization_name: str = ""
 
 
 def truncate_folder_files(folder: SourceFolder, limit: int) -> bool:
@@ -182,8 +185,25 @@ class SourceManager:
             if not workspace:
                 workspace = Workspace(source_id=source_ws.id, source_type=source_type)
             workspace.title = source_ws.title
+            # Absent means the payload did not name an organization. Leave a
+            # previous link in place: the GED list often omits the field.
+            if source_ws.organization_id:
+                workspace.organization = _organization_for(source_ws)
             workspace.save()
             user.workspaces.add(workspace)
         # Note: workspaces that disappear from the source are NOT deleted from the DB.
         # This is intentional — this tool is designed for one-shot migrations, not
         # continuous sync. Orphaned workspace records are harmless and preserve history.
+
+
+def _organization_for(source_ws: SourceWorkspace) -> Organization:
+    """Return the organization of a source workspace, creating it when missing.
+
+    Reuses a portal row when its id equals the GED id. A different GED id
+    creates its own row and leaves portal_id empty.
+    """
+    return Organization.for_external_id(
+        source_ws.organization_id,
+        source_ws.organization_name,
+        from_portal=False,
+    )

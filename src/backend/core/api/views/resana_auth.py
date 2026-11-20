@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 
 from core.api.permissions import IsAuthenticated
 from core.encryption import decrypt_token, encrypt_token
+from core.processing.tasks import sync_administered_organizations
 from core.sources.resana.migrator_auth import (
     AuthorizeParams,
     bridge_session_url,
@@ -155,6 +156,7 @@ class ResanaAuthCallbackView(APIView):
         except _AuthExchangeFailed as exc:
             return _failure_redirect(exc.error_code)
 
+        sync_administered_organizations.delay(str(request.user.id))
         return HttpResponseRedirect(settings.RESANA_MIGRATOR_REDIRECT_URL_SUCCESS)
 
 

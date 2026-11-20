@@ -19,6 +19,9 @@ from core.retrying_session import RetryingSession
 logger = get_task_logger(__name__)
 
 _REQUEST_TIMEOUT = 30
+# Portal lists are paged until a short page comes back. Interstis documents
+# offset/limit on getPerimetre and gererPerimetresInformations.
+_PAGE_SIZE = 50
 GESTIONNAIRE_CODE = "GESTIONNAIRE"
 # Role badge labels, as shown in the workspace page header.
 ANIMATEUR_LABEL = "Animateur"
@@ -32,6 +35,10 @@ _ROLE_BADGE_RES = (
     ),
     re.compile(r"ic-layout-header__user-status[^>]*>\s*([^<]*?)\s*<"),
 )
+
+
+class ResanaPortalError(Exception):
+    """The portal answered HTTP 200 with an error object instead of the data."""
 
 
 class ResanaMembersClient:
@@ -51,6 +58,71 @@ class ResanaMembersClient:
         self.session.cookies.set("PHPSESSID", session_id)
         self.session.headers["X-Requested-With"] = "XMLHttpRequest"
         self.session.headers["X-CSRF-TOKEN"] = csrf_token
+
+    def get_administered_organizations(self) -> list[dict]:
+        """Return the organizations this session administers.
+
+        Interstis includes Administrateur, Ambassadeur and Animateur
+        d'organisation. Each item has a numeric id (as a string), a name and
+        a type. There is no organization UUID.
+        """
+        return self._paginate(
+            "/public/perimetre/getPerimetre",
+            {"admin": "true", "licence": "true"},
+            "tabPerimetres",
+        )
+
+    def get_organization_workspaces(self, organization_id: str) -> list[dict]:
+        """Return every shared workspace of an organization.
+
+        Includes workspaces the administrator is not a member of. Items carry
+        the portal id and nom, not the GED UUID.
+        """
+        return self._paginate(
+            "/public/admin/gererPerimetresInformations",
+            {"id_perimetre_mere": organization_id, "json_uniquement": "true"},
+            "tabPerimetreFilles",
+        )
+
+    def _paginate(self, path: str, base_data: dict, result_key: str) -> list[dict]:
+        """POST `path` with offset/limit until a page is shorter than the limit."""
+        offset = 0
+        items: list[dict] = []
+        seen: set[str] = set()
+        while True:
+            response = self.session.post(
+                f"{self.base_url}{path}",
+                data={**base_data, "offset": offset, "limit": _PAGE_SIZE},
+                headers={"Accept": "application/json"},
+                timeout=_REQUEST_TIMEOUT,
+                retry=True,
+            )
+            payload = self._json_or_error(response)
+            page = payload.get(result_key) or []
+            fresh = []
+            for item in page:
+                key = str(item.get("id"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                fresh.append(item)
+            items.extend(fresh)
+            # A repeated page means offset was ignored: stop rather than loop.
+            if len(page) < _PAGE_SIZE or not fresh:
+                break
+            offset += _PAGE_SIZE
+        return items
+
+    @staticmethod
+    def _json_or_error(response) -> dict:
+        """Return the JSON body, or raise when the portal hid a refusal in it."""
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict) and data.get("error"):
+            raise ResanaPortalError(str(data["error"]))
+        if not isinstance(data, dict):
+            raise ResanaPortalError("Portal response is not a JSON object")
+        return data
 
     def get_workspaces(self) -> list[dict]:
         """Return all unlocked workspaces accessible to the current user as {slug, name, uuid} dicts."""

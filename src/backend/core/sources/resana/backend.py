@@ -171,7 +171,16 @@ class ResanaSourceBackend(AbstractSourceBackend):
                     continue
             elif ws["uuid"] not in manager_uuids:
                 continue
-            workspaces.append(SourceWorkspace(id=ws["uuid"], title=name, raw_data=ws))
+            organization_id, organization_name = _shared_organization(ws)
+            workspaces.append(
+                SourceWorkspace(
+                    id=ws["uuid"],
+                    title=name,
+                    raw_data=ws,
+                    organization_id=organization_id,
+                    organization_name=organization_name,
+                )
+            )
         return workspaces
 
     @staticmethod
@@ -483,3 +492,22 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 )
             )
         return folder
+
+
+def _shared_organization(workspace: dict) -> tuple[str | None, str]:
+    """Return the organization id and name carried by a GED workspace.
+
+    Personal spaces are never attached. The field is optional and may be a
+    string id or an object with id/uuid and name/nom.
+    """
+    if workspace.get("isPersonalWorkspace"):
+        return None, ""
+    raw = workspace.get("organization")
+    if isinstance(raw, str) and raw:
+        return raw, ""
+    if isinstance(raw, dict):
+        org_id = raw.get("id") or raw.get("uuid")
+        if org_id:
+            name = raw.get("name") or raw.get("nom") or ""
+            return str(org_id), html.unescape(str(name)) if name else ""
+    return None, ""

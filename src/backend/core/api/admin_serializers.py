@@ -157,3 +157,14 @@ class AdminContextSerializer(serializers.Serializer):  # pylint: disable=abstrac
             }
         )
 
+
+class AdminSynchronizeSerializer(serializers.Serializer):  # pylint: disable=abstract-method
+    """Identifier of the workspace-sync task that was queued.
+
+    The instance is the task id string.
+    """
+
+    task_id = serializers.CharField()
+
+    def to_representation(self, instance):
+        return {"task_id": self.fields["task_id"].to_representation(instance)}

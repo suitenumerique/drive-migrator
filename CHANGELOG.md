@@ -11,6 +11,7 @@ and this project adheres to
 ### Added
 
 - backend: add organization admin reporting
+- backend: sync Resana organizations and their workspaces
 
 ### Fixed
 
