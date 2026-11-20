@@ -1,6 +1,5 @@
 """DriveBackend — HTTP client for La Suite Drive API."""
 
-import functools
 import json
 import logging
 import time
@@ -11,13 +10,13 @@ from enum import StrEnum
 from django.conf import settings
 from django.utils import timezone
 
+import requests
 from celery.utils.log import get_task_logger
 from menshen_client import (
     APIError,
-    Configuration,
     MenshenClientError,
+    ResponseParsingError,
     ServerUnavailableError,
-    TokenExchangeClient,
     TokenExchangeRequest,
     TokenType,
 )
@@ -33,6 +32,7 @@ from tenacity import (
 
 from core.backends.destination import DestinationTokenExpired
 from core.encryption import decrypt_token, encrypt_token
+from core.menshen import get_menshen_client
 from core.retry_utils import log_final_failure_and_reraise
 from core.retrying_session import RetryingSession, is_transient_error
 from core.utils import (
@@ -224,6 +224,18 @@ def _menshen_error_payload(error: APIError):
         return json.loads(error.body)
     except ValueError:
         return None
+
+
+def _menshen_error_response(error: APIError) -> requests.Response:
+    """A minimal requests.Response carrying Menshen's error body, so the
+    translated HTTPError behaves like the ones callers already handle."""
+    response = requests.Response()
+    response.status_code = error.status_code
+    response.url = error.url
+    response.headers["Content-Type"] = "application/json"
+    # pylint: disable-next=protected-access
+    response._content = error.body.encode()  # noqa: SLF001
+    return response
 
 
 def clear_drive_tokens(user) -> None:
@@ -759,19 +771,6 @@ class DriveUserTokenBackend(DriveBackend):
         )
 
 
-@functools.cache
-def _get_menshen_client() -> TokenExchangeClient:
-    """One long-lived client per process, as the Menshen client recommends."""
-    return TokenExchangeClient(
-        config=Configuration(
-            client_id=settings.MENSHEN_CLIENT_ID,
-            client_secret=settings.MENSHEN_CLIENT_SECRET,
-            server_root_url=settings.MENSHEN_SERVER_ROOT_URL,
-            requests_timeout=settings.MENSHEN_REQUESTS_TIMEOUT,
-        )
-    )
-
-
 class DriveUserExchangedTokenBackend(DriveBackend):
     """Uses a Drive token exchanged with Menshen (RFC 8693) for the user's
     ProConnect token. Targets /external_api/v1.0/.
@@ -793,7 +792,7 @@ class DriveUserExchangedTokenBackend(DriveBackend):
         # Refreshes, and stores, the ProConnect token when it has expired.
         subject_token = DriveUserTokenBackend(self._user)._get_token()  # noqa: SLF001  # pylint: disable=protected-access
         try:
-            response = _get_menshen_client().exchange(
+            response = get_menshen_client().exchange(
                 TokenExchangeRequest(
                     subject_token=subject_token,
                     subject_token_type=TokenType.ACCESS_TOKEN,
@@ -813,16 +812,29 @@ class DriveUserExchangedTokenBackend(DriveBackend):
                     f"Menshen refused the ProConnect token of user {self._user.email}."
                 ) from error
             # Raised as requests errors, which callers already handle: 5xx are
-            # transient, other refusals are configuration errors.
+            # transient, other refusals are configuration errors. The translated
+            # HTTPError carries Menshen's response, so callers reading it (status,
+            # body) do not break.
             if error.status_code >= 500:
                 raise RequestsConnectionError(
                     f"Menshen returned {error.status_code}"
                 ) from error
-            raise HTTPError(f"Menshen returned {error.status_code}") from error
+            raise HTTPError(
+                f"Menshen returned {error.status_code}",
+                response=_menshen_error_response(error),
+            ) from error
         except ServerUnavailableError as error:
             self._log_exchange_failure(
                 f"Menshen request failed ({type(error).__name__})"
             )
+            raise RequestsConnectionError(
+                f"Menshen request failed ({type(error).__name__})"
+            ) from error
+        except ResponseParsingError as error:
+            # Menshen answered something the client cannot parse (unexpected
+            # body, wrong URL): a server-side problem, raised as the request
+            # errors callers already handle.
+            self._log_exchange_failure("Menshen returned an invalid response")
             raise RequestsConnectionError(
                 f"Menshen request failed ({type(error).__name__})"
             ) from error

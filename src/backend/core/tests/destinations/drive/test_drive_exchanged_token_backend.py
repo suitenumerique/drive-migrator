@@ -69,7 +69,7 @@ def fixture_menshen():
     client.exchange.return_value = MagicMock(
         access_token="exchanged-tok", expires_in=3 * 24 * 3600
     )
-    with patch.object(drive_backend, "_get_menshen_client", return_value=client):
+    with patch.object(drive_backend, "get_menshen_client", return_value=client):
         yield client
 
 
@@ -129,20 +129,6 @@ def test_invalid_auth_mode_falls_back_to_the_service_account(settings):
     assert uses_user_identity() is False
 
 
-def test_menshen_client_is_configured_from_the_settings():
-    """The client authenticates to the configured Menshen server."""
-    drive_backend._get_menshen_client.cache_clear()
-    try:
-        config = drive_backend._get_menshen_client().config
-    finally:
-        drive_backend._get_menshen_client.cache_clear()
-
-    assert config.client_id == "migrator"
-    assert config.client_secret == "migrator-secret"
-    assert config.token_url == "https://menshen.example.com/auth/token/exchange/"
-    assert config.requests_timeout == 12.0
-
-
 # ---------------------------------------------------------------------------
 # exchange()
 # ---------------------------------------------------------------------------
@@ -198,7 +184,10 @@ def test_exchange_refreshes_an_expired_proconnect_token_first(menshen):
         (_menshen_error(503), RequestsConnectionError),
         (ServerUnavailableError("refused"), RequestsConnectionError),
         (ServerTimeoutError("timed out"), RequestsConnectionError),
-        (ResponseParsingError("Invalid token exchange response"), ResponseParsingError),
+        (
+            ResponseParsingError("Invalid token exchange response"),
+            RequestsConnectionError,
+        ),
     ],
 )
 @freeze_time(NOW)
@@ -210,7 +199,7 @@ def test_exchange_failures_are_mapped_and_store_nothing(menshen, error, expected
 
     with (
         patch.object(drive_backend, "logger") as mock_logger,
-        pytest.raises(expected),
+        pytest.raises(expected) as exc_info,
     ):
         DriveUserExchangedTokenBackend(user).exchange()
 
@@ -220,6 +209,27 @@ def test_exchange_failures_are_mapped_and_store_nothing(menshen, error, expected
     assert mock_logger.warning.call_args.args[0] == (
         "Drive (Menshen) token exchange failed for user %s: %s"
     )
+    if expected is HTTPError:
+        assert exc_info.value.response.status_code == error.status_code
+        assert exc_info.value.response.text == error.body
+
+
+@freeze_time(NOW)
+def test_expired_exchanged_token_menshen_4xx_keeps_its_response(menshen):
+    """A Menshen 4xx during a migration carries its response: the Drive calls
+    that log it read the status and body instead of breaking."""
+    user = _make_user(
+        exchanged_token="old-exchanged-tok",
+        exchanged_expires_at=NOW - timedelta(seconds=1),
+    )
+    menshen.exchange.side_effect = _menshen_error(403, {"error": "invalid_client"})
+
+    with patch_drive_http():
+        with pytest.raises(HTTPError) as exc_info:
+            DriveUserExchangedTokenBackend(user).create_folder("Workspace")
+
+    assert exc_info.value.response.status_code == 403
+    assert exc_info.value.response.json() == {"error": "invalid_client"}
 
 
 def test_exchange_with_an_unrefreshable_proconnect_token_asks_for_a_login(menshen):
