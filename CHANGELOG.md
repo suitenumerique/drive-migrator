@@ -12,6 +12,7 @@ and this project adheres to
 
 - backend: add organization admin reporting
 - backend: sync Resana organizations and their workspaces
+- frontend: add organization admin read-only view
 
 ### Fixed
 
