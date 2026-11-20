@@ -1,0 +1,385 @@
+#!/usr/bin/env python3
+"""Prepare a release: close the changelog and bump the project version.
+
+The project version lives in:
+
+- src/backend/pyproject.toml
+- src/frontend/package.json
+- src/frontend/apps/main/package.json
+- src/mail/package.json
+
+``src/helm/chart/Chart.yaml`` is left unchanged: its chart version does not
+follow the application version.
+
+Usage:
+  bin/release patch|minor|major|X.Y.Z [--dry-run] [--commit] [--tag]
+              [--date YYYY-MM-DD]
+
+By default the script only edits files, on a clean worktree, so the diff can
+be reviewed. ``--commit`` creates a signed-off commit. ``--tag`` also creates
+the annotated tag ``vX.Y.Z`` and requires ``--commit``. Nothing is pushed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import difflib
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+VERSION_FILES = (
+    ROOT / "src/backend/pyproject.toml",
+    ROOT / "src/frontend/package.json",
+    ROOT / "src/frontend/apps/main/package.json",
+    ROOT / "src/mail/package.json",
+)
+CHANGELOG = ROOT / "CHANGELOG.md"
+UPGRADE = ROOT / "UPGRADE.md"
+
+VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
+PYPROJECT_VERSION = re.compile(
+    r'^(version = ")(?P<version>\d+\.\d+\.\d+)(")\s*$',
+    re.MULTILINE,
+)
+PACKAGE_VERSION = re.compile(
+    r'^(\s*"version": ")(?P<version>\d+\.\d+\.\d+)(",)\s*$',
+    re.MULTILINE,
+)
+UNRELEASED_HEADING = re.compile(r"^## \[Unreleased\][ \t]*$", re.MULTILINE)
+RELEASE_HEADING = re.compile(
+    r"^## \[(?:Unreleased|v?\d+\.\d+\.\d+)",
+    re.MULTILINE,
+)
+UNRELEASED_LINK = re.compile(
+    r"^\[unreleased\]: https://github.com/"
+    r"(?P<repo>[^/\s]+/[^/\s]+)/compare/v"
+    r"(?P<old>\d+\.\d+\.\d+)\.\.\.(?P<ref>\S+)[ \t]*$",
+    re.MULTILINE,
+)
+CHANGELOG_LINK = re.compile(r"^\[.*\]: https://github.com")
+
+
+def parse_version(value: str) -> tuple[int, int, int]:
+    """Return ``(major, minor, patch)`` or exit if ``value`` is not ``X.Y.Z``."""
+    if not VERSION_RE.fullmatch(value):
+        raise SystemExit(
+            f"Invalid version {value!r}. Expected X.Y.Z, patch, minor or major."
+        )
+    major, minor, patch = (int(part) for part in value.split("."))
+    return major, minor, patch
+
+
+def bump_version(current: str, kind: str) -> str:
+    """Return the version produced by ``patch``, ``minor``, ``major`` or ``X.Y.Z``."""
+    normalized = kind[1:] if kind.startswith("v") else kind
+    if normalized in {"patch", "minor", "major"}:
+        major, minor, patch = parse_version(current)
+        if normalized == "major":
+            return f"{major + 1}.0.0"
+        if normalized == "minor":
+            return f"{major}.{minor + 1}.0"
+        return f"{major}.{minor}.{patch + 1}"
+
+    parse_version(normalized)
+    if parse_version(normalized) <= parse_version(current):
+        raise SystemExit(
+            f"Version {normalized} is not newer than the current version {current}."
+        )
+    return normalized
+
+
+def version_pattern(path: Path) -> re.Pattern[str]:
+    """Return the version regex for a tracked project file."""
+    if path.suffix == ".toml":
+        return PYPROJECT_VERSION
+    return PACKAGE_VERSION
+
+
+def read_version(path: Path) -> str:
+    """Read the project version stored in ``path``."""
+    match = version_pattern(path).search(path.read_text(encoding="utf-8"))
+    if match is None:
+        raise SystemExit(f"No version field found in {path.relative_to(ROOT)}.")
+    return match.group("version")
+
+
+def replace_version(path: Path, current: str, new: str) -> str:
+    """Return ``path`` with its project version set to ``new``."""
+    text = path.read_text(encoding="utf-8")
+    found = read_version(path)
+    if found != current:
+        relative = path.relative_to(ROOT)
+        raise SystemExit(
+            f"{relative} is at {found}, expected {current} "
+            "(from src/backend/pyproject.toml). Align the versions first."
+        )
+
+    def _replace(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{new}{match.group(3)}"
+
+    updated, count = version_pattern(path).subn(_replace, text, count=1)
+    if count != 1:
+        raise SystemExit(f"Failed to update the version in {path.relative_to(ROOT)}.")
+    return updated
+
+
+def promote_unreleased(text: str, version: str, date: str, *, required: bool) -> str:
+    """Move the ``## [Unreleased]`` notes under ``## [v<version>] - <date>``.
+
+    An empty section is left untouched. ``required`` makes that an error, which
+    is what the changelog needs: a release with no notes is refused.
+    """
+    heading = UNRELEASED_HEADING.search(text)
+    if heading is None:
+        raise SystemExit("No ## [Unreleased] section found.")
+
+    body_start = heading.end()
+    if body_start < len(text) and text[body_start] == "\n":
+        body_start += 1
+    following = RELEASE_HEADING.search(text, body_start)
+    if following is None:
+        body = text[body_start:]
+        rest = ""
+    else:
+        body = text[body_start : following.start()]
+        rest = text[following.start() :]
+
+    notes = body.strip("\n")
+    if not notes:
+        if required:
+            raise SystemExit("Nothing to release: ## [Unreleased] is empty.")
+        return text
+
+    marker = f"## [v{version}]"
+    if re.search(rf"^## \[v{re.escape(version)}\]", text, re.MULTILINE):
+        raise SystemExit(f"{marker} is already present.")
+
+    return (
+        f"{text[: heading.start()]}## [Unreleased]\n\n"
+        f"{marker} - {date}\n\n{notes}\n\n{rest}"
+    )
+
+
+def rewrite_changelog_links(text: str, current: str, new: str) -> str:
+    """Point the ``[unreleased]`` compare link at ``new`` and add its release link."""
+    match = UNRELEASED_LINK.search(text)
+    if match is None:
+        raise SystemExit("CHANGELOG.md has no [unreleased] compare link.")
+    if match.group("old") != current:
+        raise SystemExit(
+            f"Changelog compare link points at v{match.group('old')}, "
+            f"but the project version is {current}."
+        )
+
+    repo = match.group("repo")
+    ref = match.group("ref")
+    release_link = f"[v{new}]: https://github.com/{repo}/releases/v{new}"
+    if release_link in text:
+        raise SystemExit(f"Changelog already links {release_link}.")
+
+    replacement = (
+        f"[unreleased]: https://github.com/{repo}/compare/v{new}...{ref}\n"
+        f"{release_link}"
+    )
+    return UNRELEASED_LINK.sub(replacement, text, count=1)
+
+
+def check_changelog_line_length(text: str) -> None:
+    """Fail when a changelog line would be rejected by the CI length check."""
+    too_long = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if CHANGELOG_LINK.match(line):
+            continue
+        if len(line) >= 80:
+            too_long.append(f"{number}: {line}")
+    if too_long:
+        details = "\n".join(too_long)
+        raise SystemExit(
+            "CHANGELOG.md would contain lines of 80 characters or more:\n" + details
+        )
+
+
+def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run a git command from the repository root."""
+    return subprocess.run(
+        ["git", *args],
+        cwd=ROOT,
+        check=check,
+        text=True,
+        capture_output=True,
+    )
+
+
+def ensure_clean_worktree() -> None:
+    """Refuse to edit the tree when it already has uncommitted changes."""
+    status = git("status", "--porcelain").stdout
+    if status.strip():
+        raise SystemExit(
+            "Working tree is not clean. Commit or stash changes before "
+            "cutting a release.\n" + status
+        )
+
+
+def ensure_tag_absent(version: str) -> None:
+    """Refuse to reuse an existing ``vX.Y.Z`` tag."""
+    tag = f"v{version}"
+    existing = git("rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False)
+    if existing.returncode == 0:
+        raise SystemExit(f"Tag {tag} already exists.")
+
+
+def info(message: str = "") -> None:
+    """Print a status line on stderr, leaving stdout for the dry-run diff."""
+    print(message, file=sys.stderr)
+
+
+def show_diff(relative: str, old: str, new: str) -> None:
+    """Print a unified diff for one rewritten file."""
+    diff = difflib.unified_diff(
+        old.splitlines(keepends=True),
+        new.splitlines(keepends=True),
+        fromfile=f"a/{relative}",
+        tofile=f"b/{relative}",
+    )
+    sys.stdout.writelines(diff)
+
+
+def planned_files(current: str, new: str, date: str) -> dict[Path, str]:
+    """Return the files a release would write, mapped to their new contents."""
+    changelog = promote_unreleased(
+        CHANGELOG.read_text(encoding="utf-8"),
+        new,
+        date,
+        required=True,
+    )
+    changelog = rewrite_changelog_links(changelog, current, new)
+    check_changelog_line_length(changelog)
+
+    upgrade = promote_unreleased(
+        UPGRADE.read_text(encoding="utf-8"),
+        new,
+        date,
+        required=False,
+    )
+
+    files = {CHANGELOG: changelog}
+    if upgrade != UPGRADE.read_text(encoding="utf-8"):
+        files[UPGRADE] = upgrade
+    for path in VERSION_FILES:
+        files[path] = replace_version(path, current, new)
+    return files
+
+
+def commit_release(current: str, version: str, paths: list[Path]) -> None:
+    """Create the signed-off release commit for the given paths."""
+    git("add", "--", *[str(path.relative_to(ROOT)) for path in paths])
+    title = f"🔖(project) release v{version}"
+    body = f"Publish the notes accumulated since v{current}."
+    subprocess.run(
+        ["git", "commit", "--signoff", "-m", title, "-m", body],
+        cwd=ROOT,
+        check=True,
+    )
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse the release command line."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Close the Unreleased changelog section and bump the project version."
+        )
+    )
+    parser.add_argument(
+        "version",
+        help="patch, minor, major, or an explicit X.Y.Z version",
+    )
+    parser.add_argument(
+        "--date",
+        default=dt.date.today().isoformat(),
+        help="release date written in the changelog (default: today)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the diff without writing files",
+    )
+    parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="create a signed-off commit with the release changes",
+    )
+    parser.add_argument(
+        "--tag",
+        action="store_true",
+        help="create the annotated tag vX.Y.Z (requires --commit)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Prepare the release described on the command line."""
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.tag and not args.commit:
+        raise SystemExit("--tag requires --commit, so the tag points at the release.")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.date):
+        raise SystemExit(f"Invalid date {args.date!r}. Expected YYYY-MM-DD.")
+
+    current = read_version(VERSION_FILES[0])
+    new = bump_version(current, args.version)
+    ensure_tag_absent(new)
+
+    info(f"Current version: {current}")
+    info(f"New version:     {new}")
+    info(f"Date:            {args.date}")
+    info("Helm chart version is left unchanged (src/helm/chart/Chart.yaml).")
+
+    files = planned_files(current, new, args.date)
+    if args.dry_run:
+        for path, updated in files.items():
+            show_diff(
+                str(path.relative_to(ROOT)),
+                path.read_text(encoding="utf-8"),
+                updated,
+            )
+        return
+
+    ensure_clean_worktree()
+    for path, updated in files.items():
+        path.write_text(updated, encoding="utf-8")
+        info(f"Updated {path.relative_to(ROOT)}")
+
+    if args.commit:
+        commit_release(current, new, list(files))
+        info(f"Committed 🔖(project) release v{new}")
+    if args.tag:
+        subprocess.run(
+            ["git", "tag", "-a", f"v{new}", "-m", f"v{new}"],
+            cwd=ROOT,
+            check=True,
+        )
+        info(f"Created tag v{new}")
+
+    info()
+    info("Nothing was pushed.")
+    info("Next:" if args.commit else "When the diff looks right:")
+    if not args.commit:
+        added = " ".join(str(path.relative_to(ROOT)) for path in files)
+        info(f"  git add {added}")
+        info(f"  git commit --signoff -m '🔖(project) release v{new}' \\")
+        info(f"    -m 'Publish the notes accumulated since v{current}.'")
+    if not args.tag:
+        info(f"  git tag -a v{new} -m 'v{new}'")
+    info(f"  git push origin HEAD v{new}")
+    info(
+        f"Pushing v{new} publishes the Docker images. Create the GitHub release "
+        f"from the ## [v{new}] section of CHANGELOG.md."
+    )
+
+
+if __name__ == "__main__":
+    main()

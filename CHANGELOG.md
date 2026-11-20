@@ -16,6 +16,7 @@ and this project adheres to
 
 ### Added
 
+- ✨(project) add a script to prepare a release
 - Add the architecture documentation
 - Add a guide to run the migrator with a local La Suite Drive
 
