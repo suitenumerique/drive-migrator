@@ -13,6 +13,7 @@ import { fetchAPI } from '@/api/fetchApi';
 import { AdminOrganization } from '@/hooks/useAdminContext';
 
 import './AdminBoard.scss';
+import { ManagersModal } from './ManagersModal';
 import { Selector } from './Selector';
 import { StatusBadge } from './StatusBadge';
 import {
@@ -24,7 +25,13 @@ import {
   showsTarget,
   statusView,
 } from './query';
-import { KpiFilter, OrganizationStats, WorkspacePage, WorkspaceRow } from './types';
+import {
+  KpiFilter,
+  ManagersTarget,
+  OrganizationStats,
+  WorkspacePage,
+  WorkspaceRow,
+} from './types';
 
 type Props = {
   organizations: AdminOrganization[];
@@ -62,6 +69,9 @@ export const AdminBoard = ({
   const [stats, setStats] = useState<OrganizationStats | null>(null);
   const [pageData, setPageData] = useState<WorkspacePage | null>(null);
   const [loading, setLoading] = useState(true);
+  const [managersTarget, setManagersTarget] = useState<ManagersTarget | null>(
+    null,
+  );
 
   useEffect(() => {
     setFilters(EMPTY_FILTERS);
@@ -385,6 +395,7 @@ export const AdminBoard = ({
             onSort={sort}
             locale={i18n.language}
             emptyLabel={t('Aucun espace ne correspond à ces critères.')}
+            onOpenManagers={setManagersTarget}
           />
         )}
         <Pagination
@@ -397,6 +408,10 @@ export const AdminBoard = ({
           }
         />
       </section>
+      <ManagersModal
+        target={managersTarget}
+        onClose={() => setManagersTarget(null)}
+      />
     </div>
   );
 };
@@ -426,12 +441,14 @@ const WorkspaceTable = ({
   onSort,
   locale,
   emptyLabel,
+  onOpenManagers,
 }: {
   rows: WorkspaceRow[];
   ordering: string;
   onSort: (field: string) => void;
   locale: string;
   emptyLabel: string;
+  onOpenManagers: (target: ManagersTarget) => void;
 }) => {
   const { t } = useTranslation();
   if (rows.length === 0) {
@@ -498,14 +515,28 @@ const WorkspaceTable = ({
                   {(!showsTarget(row.status) || !row.target) && '—'}
                 </td>
                 <td>
-                  <span
-                    className={row.connected_count === 0 ? 'adm-warn' : undefined}
+                  <button
+                    type="button"
+                    className={`adm-managers-btn${row.connected_count === 0 ? ' adm-warn' : ''}`}
+                    aria-label={t(
+                      'Voir les animateurs de {{title}} : {{connected}} sur {{managers}}',
+                      {
+                        title: row.title,
+                        connected: formatCount(row.connected_count),
+                        managers: formatCount(row.managers_count),
+                      },
+                    )}
+                    onClick={() =>
+                      onOpenManagers({ id: row.id, title: row.title })
+                    }
                   >
-                    {t('{{connected}} sur {{managers}}', {
-                      connected: formatCount(row.connected_count),
-                      managers: formatCount(row.managers_count),
-                    })}
-                  </span>
+                    <span>
+                      {t('{{connected}} sur {{managers}}', {
+                        connected: formatCount(row.connected_count),
+                        managers: formatCount(row.managers_count),
+                      })}
+                    </span>
+                  </button>
                 </td>
                 <td>{files}</td>
                 <td className="adm-muted">

@@ -33,3 +33,21 @@ export type KpiFilter = {
   target?: string;
   connected?: string;
 };
+
+export type ManagerRow = {
+  name: string;
+  email: string;
+  connected: boolean;
+  last_login: string | null;
+};
+
+export type ManagersResponse = {
+  connected_count: number;
+  managers_count: number;
+  results: ManagerRow[];
+};
+
+export type ManagersTarget = {
+  id: string;
+  title: string;
+};
