@@ -6,7 +6,6 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password
 
 import factory.fuzzy
-from faker import Faker
 
 from core import models
 
@@ -27,6 +26,18 @@ class UserFactory(factory.django.DjangoModelFactory):
     resana_access_token = ""
     resana_refresh_token = ""
     resana_token_expires_at = None
+
+
+class OrganizationFactory(factory.django.DjangoModelFactory):
+    """An organization created by hand, as in the Django admin."""
+
+    class Meta:
+        model = models.Organization
+
+    source_id = factory.Sequence(lambda n: f"org-{n}")
+    name = factory.Faker("company")
+    can_backup = False
+    last_sync = None
 
 
 class WorkspaceFactory(factory.django.DjangoModelFactory):

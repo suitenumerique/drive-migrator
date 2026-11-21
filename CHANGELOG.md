@@ -8,9 +8,18 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- backend: add organization admin reporting
+- backend: sync Resana organizations and their workspaces
+- frontend: add organization admin read-only view
+- frontend: add managers modal on admin workspace list
+- frontend: add resana organization sync on admin page
+
+
 ### Fixed
 
-- Drop Resana folder permissions and email the list before exporting #321 
+- Drop Resana folder permissions and email the list before exporting #321
 
 ## [v0.13.0] - 2026-11-19
 

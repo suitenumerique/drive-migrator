@@ -30,3 +30,17 @@
   align-items: center;
   gap: 0.5rem;
 }
+
+.header__views {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.header__view {
+  text-decoration: none;
+
+  &[aria-current='page'] {
+    background: var(--c--contextuals--background--semantic--neutral--tertiary);
+  }
+}
