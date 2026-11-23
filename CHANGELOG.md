@@ -11,6 +11,7 @@ and this project adheres to
 ### Added
 
 - frontend: add organization admin read-only view
+- frontend: add managers modal on admin workspace list
 
 ### Fixed
 
