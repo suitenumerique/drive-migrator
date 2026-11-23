@@ -115,6 +115,10 @@
   text-align: left;
   cursor: pointer;
 
+  &--static {
+    cursor: default;
+  }
+
   &:focus-visible {
     outline: 2px solid var(--c--contextuals--border--semantic--brand--primary);
     outline-offset: 2px;
@@ -132,6 +136,10 @@
     font-size: var(--c--globals--font--sizes--h3);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+
+    &--na {
+      color: var(--c--contextuals--content--semantic--neutral--secondary);
+    }
   }
 
   &__hint {

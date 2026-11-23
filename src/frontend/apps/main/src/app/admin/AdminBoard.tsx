@@ -6,6 +6,7 @@ import {
   Input,
   Loader,
   Pagination,
+  Tooltip,
   VariantType,
 } from '@gouvfr-lasuite/cunningham-react';
 import { Filter } from '@gouvfr-lasuite/ui-kit';
@@ -169,6 +170,8 @@ export const AdminBoard = ({
     hint: string;
     filter: KpiFilter;
     tone: string;
+    /** Portal lock state is not synced yet; show N/A and no list filter. */
+    unavailable?: boolean;
   }[] = [
     {
       label: t('Espaces dans Resana'),
@@ -199,6 +202,7 @@ export const AdminBoard = ({
       hint: '\u00a0',
       filter: { status: 'LOCKED' },
       tone: 'neutral-fill',
+      unavailable: true,
     },
     {
       label: t('Migrés vers Fichiers'),
@@ -321,22 +325,56 @@ export const AdminBoard = ({
           {organization?.name}
         </h2>
         <div className="adm-kpis">
-          {tiles.map((tile) => (
-            <button
-              key={tile.label}
-              type="button"
-              className={`adm-kpi adm-kpi--${tile.tone}`}
-              onClick={() => applyKpi(tile.filter)}
-              aria-label={t('{{label}} : {{value}}. Filtrer la liste', {
-                label: tile.label,
-                value: formatCount(tile.value),
-              })}
-            >
-              <span className="adm-kpi__label">{tile.label}</span>
-              <span className="adm-kpi__value">{formatCount(tile.value)}</span>
-              <span className="adm-kpi__hint">{tile.hint}</span>
-            </button>
-          ))}
+          {tiles.map((tile) => {
+            const inner = (
+              <>
+                <span className="adm-kpi__label">{tile.label}</span>
+                <span
+                  className={`adm-kpi__value${tile.unavailable ? ' adm-kpi__value--na' : ''}`}
+                >
+                  {tile.unavailable ? t('N/A') : formatCount(tile.value)}
+                </span>
+                <span className="adm-kpi__hint">{tile.hint}</span>
+              </>
+            );
+            if (tile.unavailable) {
+              return (
+                <Tooltip
+                  key={tile.label}
+                  placement="top"
+                  content={t(
+                    "Le verrouillage Resana n'est pas encore disponible dans le migrateur.",
+                  )}
+                >
+                  <div
+                    className={`adm-kpi adm-kpi--${tile.tone} adm-kpi--static`}
+                    aria-label={t(
+                      '{{label}} : N/A. Information non disponible',
+                      {
+                        label: tile.label,
+                      },
+                    )}
+                  >
+                    {inner}
+                  </div>
+                </Tooltip>
+              );
+            }
+            return (
+              <button
+                key={tile.label}
+                type="button"
+                className={`adm-kpi adm-kpi--${tile.tone}`}
+                onClick={() => applyKpi(tile.filter)}
+                aria-label={t('{{label}} : {{value}}. Filtrer la liste', {
+                  label: tile.label,
+                  value: formatCount(tile.value),
+                })}
+              >
+                {inner}
+              </button>
+            );
+          })}
         </div>
       </section>
 
