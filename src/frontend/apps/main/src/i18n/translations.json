@@ -76,6 +76,11 @@
       "Administration": "Administration",
       "Vues": "Views",
       "Migré le": "Migrated on",
+      "Actualiser les espaces Resana": "Refresh Resana spaces",
+      "Synchronisation en cours…": "Synchronization in progress…",
+      "Les espaces Resana ont été actualisés.": "Resana spaces have been refreshed.",
+      "La synchronisation prend plus de temps que prévu. Réessayez dans quelques instants.": "Synchronization is taking longer than expected. Try again in a moment.",
+      "Vous n’administrez pas cette organisation.": "You do not administer this organization.",
       "{{connected}} sur {{managers}} connecté au migrateur": "{{connected}} of {{managers}} connected to the migrator"
     }
   },
@@ -160,6 +165,11 @@
       "Administration": "Administration",
       "Vues": "Vues",
       "Migré le": "Migré le",
+      "Actualiser les espaces Resana": "Actualiser les espaces Resana",
+      "Synchronisation en cours…": "Synchronisation en cours…",
+      "Les espaces Resana ont été actualisés.": "Les espaces Resana ont été actualisés.",
+      "La synchronisation prend plus de temps que prévu. Réessayez dans quelques instants.": "La synchronisation prend plus de temps que prévu. Réessayez dans quelques instants.",
+      "Vous n’administrez pas cette organisation.": "Vous n’administrez pas cette organisation.",
       "{{connected}} sur {{managers}} connecté au migrateur": "{{connected}} sur {{managers}} connecté au migrateur"
     }
   }

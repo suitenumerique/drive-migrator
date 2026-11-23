@@ -15,10 +15,13 @@ if (fs.existsSync(commonEnvPath)) {
 }
 
 const frontendTheme = process.env.FRONTEND_THEME || 'default';
+const adminOrgSyncTimeoutSeconds =
+  process.env.ADMIN_ORG_SYNC_TIMEOUT_SECONDS || '900';
 
 const nextConfig = {
   env: {
     FRONTEND_THEME: frontendTheme,
+    ADMIN_ORG_SYNC_TIMEOUT_SECONDS: adminOrgSyncTimeoutSeconds,
   },
   output: 'export',
   outputFileTracingRoot: frontendRoot,

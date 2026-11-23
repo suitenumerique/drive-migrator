@@ -7,10 +7,11 @@ import {
   VariantType,
 } from '@gouvfr-lasuite/cunningham-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAdminContext } from '@/hooks/useAdminContext';
+import { useOrganizationSync } from '@/hooks/useOrganizationSync';
 
 import { AdminBoard } from './AdminBoard';
 import './AdminBoard.scss';
@@ -21,7 +22,20 @@ const AdminPageContent = () => {
   const router = useRouter();
   const params = useSearchParams();
   const organizationId = params.get('organization');
-  const { result, loading } = useAdminContext();
+  const { result, loading, refresh } = useAdminContext();
+  const [dataRevision, setDataRevision] = useState(0);
+  const organizations = useMemo(
+    () => (result?.kind === 'ready' ? result.data.organizations : []),
+    [result],
+  );
+  const { syncing, feedback, dismissFeedback, startSync } = useOrganizationSync(
+    {
+      organizationId: organizationId ?? '',
+      organizations,
+      refreshContext: refresh,
+      onSyncComplete: () => setDataRevision((value) => value + 1),
+    },
+  );
 
   useEffect(() => {
     if (result?.kind !== 'ready' || !result.data.is_organization_admin) {
@@ -106,6 +120,11 @@ const AdminPageContent = () => {
       onOrganizationChange={(id) =>
         router.replace(`/admin/?organization=${encodeURIComponent(id)}`)
       }
+      onSyncRequest={() => void startSync()}
+      syncing={syncing}
+      syncFeedback={feedback}
+      onDismissSyncFeedback={dismissFeedback}
+      dataRevision={dataRevision}
     />
   );
 };
