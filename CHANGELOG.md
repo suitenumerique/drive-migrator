@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- frontend: add organization admin read-only view
+
 ### Fixed
 
 - Drop Resana folder permissions and email the list before exporting #321 

@@ -1,0 +1,72 @@
+.adm-selector {
+  position: relative;
+
+  &__button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--c--globals--spacings--2xs);
+    max-width: 100%;
+    padding: var(--c--globals--spacings--2xs) var(--c--globals--spacings--xs);
+    border: 0;
+    border-radius: 4px;
+    background: var(--c--contextuals--background--semantic--neutral--tertiary);
+    color: var(--c--contextuals--content--semantic--neutral--primary);
+    font: inherit;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--c--contextuals--border--semantic--brand--primary);
+      outline-offset: 2px;
+    }
+  }
+
+  &__title {
+    color: var(--c--contextuals--content--semantic--neutral--secondary);
+  }
+
+  &__value {
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__menu {
+    position: absolute;
+    z-index: 5;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 100%;
+    max-width: 420px;
+    margin: 0;
+    padding: var(--c--globals--spacings--2xs);
+    list-style: none;
+    border: 1px solid var(--c--contextuals--border--surface--primary);
+    border-radius: 4px;
+    background: var(--c--contextuals--background--surface--primary);
+  }
+
+  &__option {
+    display: flex;
+    align-items: center;
+    gap: var(--c--globals--spacings--2xs);
+    width: 100%;
+    padding: var(--c--globals--spacings--2xs);
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    .material-icons {
+      width: 1.15em;
+    }
+
+    &:hover,
+    &[aria-selected='true'] {
+      background: var(--c--contextuals--background--semantic--neutral--tertiary);
+    }
+  }
+}
