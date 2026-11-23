@@ -1,4 +1,4 @@
-"""The export task emails folders whose Resana permissions were deleted."""
+"""The export task emails that Resana folder access stays limited to the starter."""
 
 from unittest.mock import patch
 
@@ -58,10 +58,35 @@ def test_export_emails_removed_folders_to_the_starter():
         "folder_permissions_removed",
         {
             "title": (
-                f"Des permissions de dossiers ont été retirées "
-                f"de l'espace {workspace.title}"
+                f"Les accès aux dossiers de l'espace "
+                f"{workspace.title} ont été limités"
             ),
             "removed_folders": ["Secret"],
+        },
+    )
+    workspace.refresh_from_db()
+    assert workspace.source_lock_state["permissions_mail_sent"] is True
+
+
+def test_export_emails_when_only_folders_were_granted():
+    """saveDroit left in place is enough to notify, even with no dropped droits."""
+    user = UserFactory(email="starter@example.com")
+    workspace = WorkspaceFactory(
+        source_type="resana",
+        source_lock_state={"folders_granted_by_us": ["root"]},
+    )
+    mock_mails = _run_export(workspace, user)
+
+    mock_mails.return_value.send_migration_mail.assert_called_once_with(
+        user,
+        workspace,
+        "folder_permissions_removed",
+        {
+            "title": (
+                f"Les accès aux dossiers de l'espace "
+                f"{workspace.title} ont été limités"
+            ),
+            "removed_folders": [],
         },
     )
     workspace.refresh_from_db()

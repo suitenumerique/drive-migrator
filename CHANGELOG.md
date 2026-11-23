@@ -14,6 +14,7 @@ and this project adheres to
 
 ### Changed
 
+- Keep Resana folder rights after export; other animators can change them #332
 - backend: add has_integrity_check_passed beside the old field #126
 - backend: rename boolean API fields to is_/has_ #126
 - backend: start the request ids sent by the migrator with its task

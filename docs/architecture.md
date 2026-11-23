@@ -66,8 +66,8 @@ A source implements:
   `begin_export` (before reading the tree), `prepare_export` (fills
   `workspace.members`), `finalize_export` (always, in a `finally`, must not
   raise). Resana uses `begin_export` / `finalize_export` to lock the workspace
-  and grant the migration account access to its top-level folders, then restore
-  what the run changed
+  and grant the migration account access to its top-level folders. Folder
+  grants stay in place; `finalize_export` only unfreezes the workspace
   (`core/sources/resana/resana_lock_client.py`, issue #215).
 
 ### Destinations: `DESTINATION_BACKENDS`

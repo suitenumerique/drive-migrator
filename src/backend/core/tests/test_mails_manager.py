@@ -51,7 +51,7 @@ def test_send_migration_mail_renders_named_template_and_sends(template_name):
 
 @pytest.mark.django_db
 def test_send_migration_mail_lists_removed_folder_permissions():
-    """The removed-permissions mail names the workspace and each folder."""
+    """The restricted-access mail names the workspace and each dropped folder."""
     workspace = WorkspaceFactory(title="Équipe <projet>")
     user = UserFactory(email="starter@example.com")
 
@@ -60,7 +60,7 @@ def test_send_migration_mail_lists_removed_folder_permissions():
         workspace,
         "folder_permissions_removed",
         {
-            "title": "Des permissions de dossiers ont été retirées",
+            "title": "Les accès aux dossiers ont été limités",
             "removed_folders": ["Secret", "Au fond"],
         },
     )
@@ -70,7 +70,32 @@ def test_send_migration_mail_lists_removed_folder_permissions():
     assert "Secret" in sent.body
     assert "Au fond" in sent.body
     assert "Équipe" in sent.body
-    assert "ne sont pas rétablis" in sent.body
+    assert "Vous seul avez les droits d'accès" in sent.body
+    assert "autres animateurs" in sent.body
+    assert "Les accès limités des dossiers suivants ont été supprimés" in sent.body
+    assert "ne sont pas rétablis" not in sent.body
+
+
+@pytest.mark.django_db
+def test_send_migration_mail_restricted_access_without_removed_folders():
+    """With no dropped droits, the mail still explains exclusive access."""
+    workspace = WorkspaceFactory(title="Équipe")
+    user = UserFactory(email="starter@example.com")
+
+    MailsManager().send_migration_mail(
+        user,
+        workspace,
+        "folder_permissions_removed",
+        {
+            "title": "Les accès aux dossiers ont été limités",
+            "removed_folders": [],
+        },
+    )
+
+    sent = mail.outbox[0]
+    assert "Vous seul avez les droits d'accès" in sent.body
+    assert "autres animateurs" in sent.body
+    assert "Les accès limités des dossiers suivants ont été supprimés" not in sent.body
 
 
 @pytest.mark.django_db

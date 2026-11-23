@@ -11,10 +11,13 @@
           </mj-text>
           <mj-divider border-width="1px" border-style="solid" border-color="#DDDDDD" width="30%" align="left"/>
 
-          <mj-text>{% blocktrans %}Pendant la migration de l'espace <strong>{{workspace_name}}</strong>, les accès limités des dossiers suivants ont été supprimés. Ils ne sont pas rétablis.{% endblocktrans %}</mj-text>
+          <mj-text>{% blocktrans %}Pendant la migration de l'espace <strong>{{workspace_name}}</strong>, les accès aux dossiers ont été limités à votre compte. Vous seul avez les droits d'accès. Les autres animateurs de l'espace peuvent modifier ces limites.{% endblocktrans %}</mj-text>
+          <mj-raw>{% if removed_folders %}</mj-raw>
+          <mj-text>{% trans "Les accès limités des dossiers suivants ont été supprimés :" %}</mj-text>
           <mj-raw>{% for folder_name in removed_folders %}</mj-raw>
           <mj-text>{{ folder_name }}</mj-text>
           <mj-raw>{% endfor %}</mj-raw>
+          <mj-raw>{% endif %}</mj-raw>
 
           <mj-include path="./partial/support.mjml" />
 

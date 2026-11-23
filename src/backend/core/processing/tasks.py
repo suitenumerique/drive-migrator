@@ -34,12 +34,13 @@ logger = get_task_logger(__name__)
 
 
 def _notify_removed_folder_permissions(user, workspace) -> None:
-    """Email the starter the folders whose permissions were deleted. Once only."""
+    """Email the starter that folder access stays limited to their account. Once only."""
     state = workspace.source_lock_state
     if not isinstance(state, dict):
         return
+    granted = state.get("folders_granted_by_us") or []
     removed = state.get("permissions_removed") or []
-    if not removed or state.get("permissions_mail_sent"):
+    if (not granted and not removed) or state.get("permissions_mail_sent"):
         return
     try:
         MailsManager().send_migration_mail(
@@ -48,8 +49,8 @@ def _notify_removed_folder_permissions(user, workspace) -> None:
             "folder_permissions_removed",
             {
                 "title": _(
-                    f"Des permissions de dossiers ont été retirées "
-                    f"de l'espace {workspace.title}"
+                    f"Les accès aux dossiers de l'espace "
+                    f"{workspace.title} ont été limités"
                 ),
                 "removed_folders": [
                     item.get("name") or item.get("id") for item in removed
@@ -61,7 +62,7 @@ def _notify_removed_folder_permissions(user, workspace) -> None:
         # this runs in the export task's finally - a notification failure must not
         # mask the migration's own exception.
         logger.exception(
-            "Could not email removed folder permissions for workspace %s",
+            "Could not email folder access limits for workspace %s",
             workspace.id,
         )
         return
@@ -218,7 +219,7 @@ def export(self, data):  # pylint: disable=unused-argument
     finally:
         logger.info("Calling finalize_export ...")
         source_backend.finalize_export(workspace)
-        # Permissions are already gone even when the migration failed afterwards.
+        # Folder restrictions stay even when the migration itself failed.
         _notify_removed_folder_permissions(user, workspace)
 
     logger.info("Task done")

@@ -232,8 +232,8 @@ def test_begin_export_drops_child_permissions_before_granting_the_root(settings)
     assert "grand" not in workspace.source_lock_state["folders_granted_by_us"]
 
 
-def test_finalize_export_drops_removed_permissions_after_unlocking_roots(settings):
-    """After root cleanup, the same folders are deleted again and stay recorded."""
+def test_finalize_export_leaves_folder_grants_in_place_after_unlocking(settings):
+    """Folder saveDroit restrictions stay; only the workspace freeze is reversed."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = WorkspaceFactory(
         source_type="resana",
@@ -259,8 +259,10 @@ def test_finalize_export_drops_removed_permissions_after_unlocking_roots(setting
                 )
                 ResanaSourceBackend().finalize_export(workspace)
 
-    assert order == ["root", "unlock", "child"]
+    assert order == ["unlock"]
+    mock_lock.return_value.release_folder_access.assert_not_called()
     workspace.refresh_from_db()
+    assert workspace.source_lock_state["folders_granted_by_us"] == ["root"]
     assert workspace.source_lock_state["permissions_removed"] == [
         {"id": "child", "name": "Secret"}
     ]
@@ -452,7 +454,8 @@ def test_begin_export_keeps_previous_run_state_after_crash(settings):
 
 def test_begin_export_records_changes_before_remote_calls(settings):
     """Lock and grants are saved as ours before being sent, so a crash right after
-    a remote call can't leave a change finalize_export() doesn't know to reverse."""
+    a remote call still records the lock for finalize_export() and the grants
+    for a retry and the notification mail."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.title = "TEST Worskspace"
@@ -595,8 +598,8 @@ def test_finalize_export_does_not_raise_when_lock_client_cannot_be_built(setting
     assert workspace.source_lock_state["folders_granted_by_us"] == ["f1"]
 
 
-def test_finalize_export_clears_lock_state_after_successful_cleanup(settings):
-    """Once released and unlocked, nothing is left recorded as ours to reverse."""
+def test_finalize_export_clears_lock_flag_after_successful_unlock(settings):
+    """Once unlocked, the freeze flag is cleared; folder grants stay recorded."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.source_lock_state = {
@@ -613,12 +616,12 @@ def test_finalize_export_clears_lock_state_after_successful_cleanup(settings):
                 ResanaSourceBackend().finalize_export(workspace)
 
     assert workspace.source_lock_state["workspace_locked_by_us"] is False
-    assert workspace.source_lock_state["folders_granted_by_us"] == []
+    assert workspace.source_lock_state["folders_granted_by_us"] == ["f1", "f2"]
     workspace.save.assert_called_once_with(update_fields=["source_lock_state"])
 
 
 def test_finalize_export_keeps_what_failed_to_be_reversed(settings):
-    """Folders not released and a failed unlock stay recorded for a later retry."""
+    """A failed unlock stays recorded for a later retry; folder grants stay."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.source_lock_state = {
@@ -627,10 +630,6 @@ def test_finalize_export_keeps_what_failed_to_be_reversed(settings):
         "folders_granted_by_us": ["f1", "f2"],
     }
     manager = MagicMock()
-    manager.release_folder_access.side_effect = [
-        None,
-        requests.RequestException("boom"),
-    ]
     manager.unlock_workspace.side_effect = requests.RequestException("boom")
 
     with patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm:
@@ -642,7 +641,8 @@ def test_finalize_export_keeps_what_failed_to_be_reversed(settings):
                 ResanaSourceBackend().finalize_export(workspace)
 
     assert workspace.source_lock_state["workspace_locked_by_us"] is True
-    assert workspace.source_lock_state["folders_granted_by_us"] == ["f2"]
+    assert workspace.source_lock_state["folders_granted_by_us"] == ["f1", "f2"]
+    manager.release_folder_access.assert_not_called()
 
 
 def test_finalize_export_does_not_raise_when_saving_lock_state_fails(settings):
@@ -671,7 +671,7 @@ def test_finalize_export_does_not_raise_when_saving_lock_state_fails(settings):
 
 
 def test_finalize_export_unlocks_workspace_when_we_locked_it(settings):
-    """Releases our folders first, then unlocks the workspace we locked."""
+    """Unlocks the workspace we locked, without releasing folder grants."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.title = "TEST Worskspace"
@@ -696,7 +696,8 @@ def test_finalize_export_unlocks_workspace_when_we_locked_it(settings):
             ):
                 ResanaSourceBackend().finalize_export(workspace)
 
-    assert calls == [("release", "f1"), ("release", "f2"), ("unlock", "2137419")]
+    assert calls == [("unlock", "2137419")]
+    manager.release_folder_access.assert_not_called()
 
 
 def test_finalize_export_does_not_unlock_workspace_we_did_not_lock(settings):
@@ -721,7 +722,7 @@ def test_finalize_export_does_not_unlock_workspace_we_did_not_lock(settings):
                 ResanaSourceBackend().finalize_export(workspace)
 
     manager.unlock_workspace.assert_not_called()
-    manager.release_folder_access.assert_called_once_with("2137419", "f1")
+    manager.release_folder_access.assert_not_called()
 
 
 def test_finalize_export_does_not_unlock_when_lock_state_is_missing(settings):
@@ -745,8 +746,8 @@ def test_finalize_export_does_not_unlock_when_lock_state_is_missing(settings):
     manager.release_folder_access.assert_not_called()
 
 
-def test_finalize_export_only_releases_folders_recorded_as_granted_by_us(settings):
-    """finalize_export() must not list folders, only release what was recorded."""
+def test_finalize_export_does_not_release_or_list_folders(settings):
+    """finalize_export() must not list or release folders, only unlock."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = _make_workspace()
     workspace.title = "TEST Worskspace"
@@ -766,39 +767,8 @@ def test_finalize_export_only_releases_folders_recorded_as_granted_by_us(setting
             ):
                 ResanaSourceBackend().finalize_export(workspace)
 
-    manager.release_folder_access.assert_called_once_with("2137419", "f1")
+    manager.release_folder_access.assert_not_called()
     manager.list_folders.assert_not_called()
-
-
-def test_finalize_export_swallows_error_from_one_folder_and_continues(settings):
-    """A failure releasing one folder must not prevent releasing the others or unlocking."""
-    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
-    workspace = _make_workspace()
-    workspace.title = "TEST Worskspace"
-    workspace.source_lock_state = {
-        "slug": "2137419",
-        "workspace_locked_by_us": True,
-        "folders_granted_by_us": ["f1", "f2"],
-    }
-    manager = MagicMock()
-    manager.release_folder_access.side_effect = [
-        requests.RequestException("boom"),
-        None,
-    ]
-
-    with (
-        patch("core.sources.resana.backend.ResanaTokenManager") as mock_tm,
-        patch("core.sources.resana.backend.ResanaMembersClient") as mock_members,
-        patch("core.sources.resana.backend.ResanaLockClient", return_value=manager),
-        patch("core.sources.resana.backend.logger") as mock_logger,
-    ):
-        mock_tm.return_value.get_valid_token.return_value = "tok"
-        _patch_members_client(mock_members, slug="2137419")
-        ResanaSourceBackend().finalize_export(workspace)  # must not raise
-
-    mock_logger.error.assert_called_once()
-    assert {"2137419", "f1"} <= set(mock_logger.error.call_args[0])
-    assert manager.release_folder_access.call_count == 2
     manager.unlock_workspace.assert_called_once_with("2137419")
 
 
@@ -881,7 +851,7 @@ def test_finalize_export_unlocks_based_only_on_recorded_flag_ignoring_concurrent
 
 
 def test_finalize_export_persists_remaining_lock_state_in_database(settings):
-    """What failed to be reversed must reach the database, so a later retry can reverse it."""
+    """A failed unlock must reach the database, so a later retry can reverse it."""
     settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
     workspace = WorkspaceFactory(
         source_type="resana",
@@ -896,18 +866,14 @@ def test_finalize_export_persists_remaining_lock_state_in_database(settings):
         mock_tm.return_value.get_valid_token.return_value = "tok"
         with patch("core.sources.resana.backend.ResanaMembersClient") as mock_members:
             _patch_members_client(mock_members, is_locked=True)
-            with patch("core.sources.resana.backend.ResanaLockClient") as mock_lock:
-                mock_lock.return_value.release_folder_access.side_effect = [
-                    None,
-                    requests.RequestException("boom"),
-                ]
+            with patch("core.sources.resana.backend.ResanaLockClient"):
                 ResanaSourceBackend().finalize_export(workspace)
 
     workspace.refresh_from_db()
     assert workspace.source_lock_state == {
         "slug": "2137419",
         "workspace_locked_by_us": True,
-        "folders_granted_by_us": ["f2"],
+        "folders_granted_by_us": ["f1", "f2"],
     }
 
 

@@ -259,11 +259,11 @@ class ResanaSourceBackend(AbstractSourceBackend):
         Runs before any file is read, so a concurrent edit can't be missed and a
         folder we otherwise lack rights on doesn't get silently skipped (#215).
         Lists folders once: drops blocking droits first, then grants root access.
+        Folder grants stay in place after the run; finalize_export() only
+        unfreezes the workspace.
 
         Idempotent: if the workspace is already locked, or a folder is already
-        restricted to exactly our account, we don't touch it again, and we
-        record exactly what *we* changed this run, so finalize_export() only
-        reverses that.
+        restricted to exactly our account, we don't touch it again.
         """
         self._user = workspace.migration_user
         # A task that waited in the queue past the offline token idle timeout
@@ -286,10 +286,11 @@ class ResanaSourceBackend(AbstractSourceBackend):
         already_locked = members_client.is_workspace_locked(slug)
 
         # Merge with a previous run's state: if it was killed before
-        # finalize_export(), what it locked/granted is still ours to reverse.
-        # Each change is recorded before its remote call, so a crash in between
-        # can't leave a change we don't know to reverse (reversing a change that
-        # didn't happen is harmless).
+        # finalize_export(), the workspace lock is still ours to reverse.
+        # Folder grants stay in place (they are the intended end state) and
+        # are recorded so a retry does not grant them twice.
+        # The lock is recorded before its remote call, so a crash in between
+        # can't leave a lock we don't know to reverse.
         granted_folder_ids = list(previous_state.get("folders_granted_by_us", []))
         workspace.source_lock_state = {
             **previous_state,
@@ -326,8 +327,8 @@ class ResanaSourceBackend(AbstractSourceBackend):
             lock_client.grant_folder_access(slug, folder_id, user_id)
 
     def finalize_export(self, workspace) -> None:
-        """Reverse begin_export(): release only the folders we granted, then unlock
-        only if we locked the workspace ourselves (#215).
+        """Unlock the workspace if we locked it ourselves (#215). Folder
+        saveDroit restrictions stay in place.
 
         Always runs, even if the migration failed. Never raises: every call is
         best-effort and logged individually so one failure doesn't prevent the
@@ -356,23 +357,6 @@ class ResanaSourceBackend(AbstractSourceBackend):
             )
             return
 
-        # Only what failed to be reversed stays recorded, for a later retry.
-        remaining_folder_ids = []
-        for folder_id in lock_state.get("folders_granted_by_us", []):
-            try:
-                lock_client.release_folder_access(slug, folder_id)
-            except _FINALIZE_EXPORT_EXCEPTIONS:
-                remaining_folder_ids.append(folder_id)
-                logger.error(
-                    "Could not release access on folder %s of Resana workspace %s "
-                    "(workspace %s)",
-                    folder_id,
-                    slug,
-                    workspace.id,
-                    exc_info=True,
-                )
-        lock_state["folders_granted_by_us"] = remaining_folder_ids
-
         if lock_state.get("workspace_locked_by_us", False):
             try:
                 self._unlock_workspace(lock_client, members_client, slug)
@@ -390,9 +374,6 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 "leaving its lock state untouched.",
                 workspace.id,
             )
-
-        # Root deverouille can cascade and put a child droit back.
-        self._drop_recorded_permissions(workspace, lock_client, slug, lock_state)
 
         workspace.source_lock_state = lock_state
         try:
@@ -413,9 +394,9 @@ class ResanaSourceBackend(AbstractSourceBackend):
         """Delete explicit folder droits that hide files, deepest folder first.
 
         `folders` is the list already fetched by the caller (one getFolders).
-        Ids are collected before the deletions, then persisted afterwards. They
-        are not granted droits: finalize_export drops them again instead of
-        restoring them.
+        Ids are collected before the deletions, then persisted afterwards.
+        They are not restored: root saveDroit restrictions stay after
+        finalize_export, and the list is emailed to the user.
         """
         blocking = _blocking_folders(folders, user_id)
         if not blocking:
@@ -428,22 +409,6 @@ class ResanaSourceBackend(AbstractSourceBackend):
             lock_client.release_folder_access(slug, folder["id"])
         workspace.source_lock_state["permissions_removed"] = removed
         workspace.save(update_fields=["source_lock_state"])
-
-    @staticmethod
-    def _drop_recorded_permissions(workspace, lock_client, slug, lock_state) -> None:
-        """Delete again the folders already recorded. The record itself stays."""
-        for folder in lock_state.get("permissions_removed") or []:
-            try:
-                lock_client.release_folder_access(slug, folder["id"])
-            except _FINALIZE_EXPORT_EXCEPTIONS:
-                logger.error(
-                    "Could not drop permission on folder %s of Resana workspace %s "
-                    "(workspace %s)",
-                    folder.get("id"),
-                    slug,
-                    workspace.id,
-                    exc_info=True,
-                )
 
     @staticmethod
     def _unlock_workspace(lock_client, members_client, slug: str) -> None:

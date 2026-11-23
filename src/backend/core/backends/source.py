@@ -153,8 +153,8 @@ class AbstractSourceBackend(ABC):
         Optional hook always called after begin_export(), in a `finally` block,
         even if get_workspace_structure(), the download, or a destination raises.
 
-        Implementations should reverse whatever begin_export() did (release any
-        access it granted, unfreeze the workspace) and must not raise: an
+        Implementations should reverse what begin_export() must not leave in
+        place (typically unfreeze the workspace) and must not raise: an
         exception here would replace/mask the migration's own exception, since
         this hook runs inside a `finally`. Swallow and log errors instead.
 

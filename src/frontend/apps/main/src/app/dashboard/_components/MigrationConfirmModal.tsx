@@ -179,9 +179,11 @@ export const MigrationConfirmModal = ({
                 />
               </svg>
             }
-            title={t('Les permissions de dossiers Resana seront retirées')}
+            title={t(
+              'Les accès aux dossiers Resana seront limités à votre compte',
+            )}
             description={t(
-              'Si des dossiers ont des accès limités, ils sont supprimés pour migrer tous les fichiers. Ces accès ne sont pas rétablis. Un e-mail vous indiquera les dossiers concernés.',
+              'Les accès limités existants sont supprimés pour migrer tous les fichiers, et tous les dossiers resteront restreints à vous. Les autres animateurs pourront modifier ces limites. Un e-mail confirmera ces changements et listera les dossiers concernés.',
             )}
           />
           <InfoItem

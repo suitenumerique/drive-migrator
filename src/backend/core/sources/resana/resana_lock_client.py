@@ -193,8 +193,8 @@ class ResanaLockClient:
         """Restrict a folder to a nominative list containing only `user_id`.
 
         This overwrites whatever access was previously configured on the folder
-        (and cascades to its sub-folders/files). Call release_folder_access to
-        clear that restriction afterwards.
+        (and cascades to its sub-folders/files). The restriction is left in
+        place after the migration.
         """
         resp = self.session.post(
             f"{self.base_url}/public/dossier/saveDroit",
@@ -213,8 +213,8 @@ class ResanaLockClient:
     def release_folder_access(self, slug: str, folder_id: str) -> None:
         """Clear the folder's current droit via deverouilleDossier.
 
-        Undoes a grant we made, or removes a pre-existing restriction we need
-        gone so the migration can see every file.
+        Used at the start of a migration to remove a pre-existing restriction
+        that would hide files from the migration account.
         """
         resp = self.session.post(
             f"{self.base_url}/public/dossier/deverouilleDossier",
