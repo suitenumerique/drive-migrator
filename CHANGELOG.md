@@ -16,6 +16,7 @@ and this project adheres to
 - backend: sync one organization workspaces on demand
 - frontend: add organization admin read-only view
 - frontend: add managers modal on admin workspace list
+- frontend: add resana organization sync on admin page
 
 ### Fixed
 
