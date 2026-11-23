@@ -1,5 +1,6 @@
 import {
   EMPTY_FILTERS,
+  STATUS_OPTIONS,
   isListFiltered,
   listQuery,
   nextOrdering,
@@ -38,6 +39,15 @@ describe('isListFiltered', () => {
   it('is false until a search or a filter is set', () => {
     expect(isListFiltered(EMPTY_FILTERS)).toBe(false);
     expect(isListFiltered({ ...EMPTY_FILTERS, connected: 'yes' })).toBe(true);
+  });
+});
+
+describe('STATUS_OPTIONS', () => {
+  it('does not offer the locked filter while the tile stays N/A', () => {
+    expect(STATUS_OPTIONS.map((option) => option.value)).not.toContain(
+      'LOCKED',
+    );
+    expect(statusView('LOCKED', null).label).toBe('Verrouillé dans Resana');
   });
 });
 

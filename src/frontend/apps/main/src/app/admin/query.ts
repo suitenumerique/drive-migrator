@@ -20,6 +20,15 @@ export const EMPTY_FILTERS: ListFilters = {
 
 export const PAGE_SIZES = [25, 50, 100];
 
+export const STATUS_OPTIONS = [
+  { value: 'not_migrated', label: 'Non migré' },
+  { value: 'NONE', label: 'À migrer' },
+  { value: 'PENDING', label: 'En cours' },
+  { value: 'migrated', label: 'Migré' },
+  { value: 'GAP', label: 'Migré avec écarts' },
+  { value: 'FAILURE', label: 'Échec' },
+];
+
 const STATUS_VIEWS: Record<
   string,
   { label: string; icon: string; tone: string }

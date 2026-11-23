@@ -13,6 +13,7 @@ and this project adheres to
 - frontend: add organization admin read-only view
 - frontend: add managers modal on admin workspace list
 - frontend: add resana organization sync on admin page
+- frontend: show N/A and tooltip on locked Resana KPI tile
 
 ### Fixed
 
