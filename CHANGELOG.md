@@ -14,6 +14,7 @@ and this project adheres to
 - backend: add organization admin reporting
 - backend: sync administered resana organizations
 - backend: sync one organization workspaces on demand
+- frontend: add organization admin read-only view
 
 ### Fixed
 
