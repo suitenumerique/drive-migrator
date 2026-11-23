@@ -65,12 +65,18 @@
       "Aucun espace ne correspond à ces critères.": "No space matches these criteria.",
       "Espace": "Space",
       "Animateurs déjà connectés": "Managers already connected",
+      "Animateurs de « {{title}} »": "Managers of “{{title}}”",
+      "Jamais connecté": "Never connected",
+      "Connecté le {{date}}": "Connected on {{date}}",
+      "Fermer": "Close",
+      "Voir les animateurs de {{title}} : {{connected}} sur {{managers}}": "View managers of {{title}}: {{connected}} of {{managers}}",
       "{{connected}} sur {{managers}}": "{{connected}} of {{managers}}",
       "En file d'attente": "Queued",
       "Mes espaces": "My spaces",
       "Administration": "Administration",
       "Vues": "Views",
-      "Migré le": "Migrated on"
+      "Migré le": "Migrated on",
+      "{{connected}} sur {{managers}} connecté au migrateur": "{{connected}} of {{managers}} connected to the migrator"
     }
   },
   "fr": {
@@ -143,12 +149,18 @@
       "Aucun espace ne correspond à ces critères.": "Aucun espace ne correspond à ces critères.",
       "Espace": "Espace",
       "Animateurs déjà connectés": "Animateurs déjà connectés",
+      "Animateurs de « {{title}} »": "Animateurs de « {{title}} »",
+      "Jamais connecté": "Jamais connecté",
+      "Connecté le {{date}}": "Connecté le {{date}}",
+      "Fermer": "Fermer",
+      "Voir les animateurs de {{title}} : {{connected}} sur {{managers}}": "Voir les animateurs de {{title}} : {{connected}} sur {{managers}}",
       "{{connected}} sur {{managers}}": "{{connected}} sur {{managers}}",
       "En file d'attente": "En file d'attente",
       "Mes espaces": "Mes espaces",
       "Administration": "Administration",
       "Vues": "Vues",
-      "Migré le": "Migré le"
+      "Migré le": "Migré le",
+      "{{connected}} sur {{managers}} connecté au migrateur": "{{connected}} sur {{managers}} connecté au migrateur"
     }
   }
 }
