@@ -244,14 +244,17 @@ class WorkspaceAdmin(admin.ModelAdmin):
         "source_id",
         "source_type",
         "title",
+        "organization",
         "status",
         "destination_statuses",
         "get_migration_user_email",
     )
-    list_filter = ("status", "source_type", "is_file_integrity_tracked")
+    list_filter = ("status", "source_type", "is_file_integrity_tracked", "organization")
+    autocomplete_fields = ("organization",)
     search_fields = (
         "id",
         "source_id",
+        "portal_id",
         "title",
         "migration_user__email",
     )
@@ -350,6 +353,15 @@ class WorkspaceAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(".")
 
         return super().response_change(request, obj)
+
+
+@admin.register(models.Organization)
+class OrganizationAdmin(admin.ModelAdmin):
+    """Organizations, their administrators and the backup habilitation."""
+
+    list_display = ("name", "source_id", "can_backup", "last_sync")
+    search_fields = ("name", "source_id")
+    filter_horizontal = ("admins",)
 
 
 @admin.register(models.FeatureFlag)
