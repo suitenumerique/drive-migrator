@@ -26,6 +26,9 @@ from core.processing.folder_helper import ArchiveManager
 from core.processing.integrity import IntegrityTracker, Stage
 from core.processing.rejected_files import RejectedFilesArchive
 from core.processing.token_status import log_token_status
+from core.sources.resana.organization_sync import (
+    sync_administered_organizations as run_administered_organizations_sync,
+)
 from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app
@@ -264,6 +267,12 @@ def _export_workspace(workspace, user, folder, source_backend, integrity_tracker
             # Registered first so a destination that fails midway is still checked.
             integrity_tracker.add_exported_destination(dest_backend)
             dest_backend.export(workspace, user, local_path)
+
+
+@app.task
+def sync_administered_organizations(user_id):
+    """Refresh the organizations this user administers on Resana."""
+    run_administered_organizations_sync(user_id)
 
 
 # From https://github.com/celery/django-celery-results/issues/286#issuecomment-1279161047

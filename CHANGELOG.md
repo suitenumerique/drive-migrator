@@ -12,6 +12,7 @@ and this project adheres to
 
 - backend: add organization model and admin reporting migration
 - backend: add organization admin reporting
+- backend: sync administered resana organizations
 
 ### Fixed
 
