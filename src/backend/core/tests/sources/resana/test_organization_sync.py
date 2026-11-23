@@ -14,7 +14,10 @@ from core.backends.source import (
 from core.factories import OrganizationFactory, UserFactory, WorkspaceFactory
 from core.models import Organization, Workspace
 from core.sources.resana.backend import ResanaSourceBackend
-from core.sources.resana.organization_sync import sync_administered_organizations
+from core.sources.resana.organization_sync import (
+    sync_administered_organizations,
+    sync_organization_workspaces,
+)
 from core.sources.resana.resana_members_client import (
     ResanaMembersClient,
     ResanaPortalError,
@@ -105,6 +108,18 @@ def test_administered_organizations_page_until_a_short_page():
     assert first.kwargs["data"]["licence"] == "true"
 
 
+def test_organization_workspaces_send_the_organization_id():
+    client = _client()
+    client.session.post.return_value = _response(
+        {"tabPerimetreFilles": [{"id": "4521", "nom": "Espace"}]}
+    )
+    result = client.get_organization_workspaces("12")
+    assert result[0]["nom"] == "Espace"
+    sent = client.session.post.call_args.kwargs["data"]
+    assert sent["id_perimetre_mere"] == "12"
+    assert sent["json_uniquement"] == "true"
+
+
 def test_portal_error_object_is_a_failure():
     """HTTP 200 with an error object is a refusal, not an empty list."""
     client = _client()
@@ -113,6 +128,15 @@ def test_portal_error_object_is_a_failure():
     )
     with pytest.raises(ResanaPortalError):
         client.get_administered_organizations()
+
+
+def test_portal_http_error_is_raised():
+    client = _client()
+    response = _response({})
+    response.raise_for_status.side_effect = requests.HTTPError("500")
+    client.session.post.return_value = response
+    with pytest.raises(requests.HTTPError):
+        client.get_organization_workspaces("12")
 
 
 def test_repeated_page_does_not_loop():
@@ -179,6 +203,52 @@ def test_sync_administered_organizations_keeps_admins_when_the_portal_fails(sett
         with pytest.raises(ResanaPortalError):
             sync_administered_organizations(user.id)
     assert user in organization.admins.all()
+
+
+def test_sync_organization_workspaces_creates_the_organization_and_rows(settings):
+    settings.RESANA_WEB_ENDPOINT = "https://resana.example"
+    user = UserFactory()
+    existing = WorkspaceFactory(
+        source_id="02-01-abc",
+        portal_id="4521",
+        source_type="resana",
+        title="Old",
+    )
+    Workspace.objects.filter(pk=existing.pk).update(source_id="02-01-abc")
+    orphan = WorkspaceFactory(source_id="02-01-keep", title="Keep")
+    blank = WorkspaceFactory(source_type="resana", title="Blank")
+    Workspace.objects.filter(pk=blank.pk).update(source_id="", portal_id="7")
+
+    with patch("core.sources.resana.organization_sync.ResanaTokenManager"), patch(
+        "core.sources.resana.organization_sync.ResanaMembersClient"
+    ) as members:
+        members.return_value.get_organization_workspaces.return_value = [
+            {"id": "4521", "nom": "Renamed"},
+            {"id": "4522", "nom": "Fresh"},
+            {"id": "7", "nom": "Filled"},
+            {"nom": "no id"},
+        ]
+        sync_organization_workspaces(user.id, "12")
+
+    organization = Organization.objects.get(source_id="12")
+    assert organization.name == "12"
+    assert organization.portal_id == "12"
+    assert organization.last_sync is not None
+    assert user in organization.admins.all()
+    existing.refresh_from_db()
+    assert existing.source_id == "02-01-abc"
+    assert existing.title == "Renamed"
+    assert existing.organization == organization
+    fresh = Workspace.objects.get(portal_id="4522")
+    assert fresh.source_id == "portal:4522"
+    assert fresh.source_type == "resana"
+    assert fresh.title == "Fresh"
+    assert fresh.organization == organization
+    blank.refresh_from_db()
+    assert blank.source_id == "portal:7"
+    assert blank.title == "Filled"
+    assert Workspace.objects.filter(pk=orphan.pk).exists()
+    members.return_value.get_organization_workspaces.assert_called_once_with("12")
 
 
 class _GedSource(AbstractSourceBackend):

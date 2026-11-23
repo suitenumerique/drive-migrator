@@ -13,6 +13,7 @@ and this project adheres to
 - backend: add organization model and admin reporting migration
 - backend: add organization admin reporting
 - backend: sync administered resana organizations
+- backend: sync one organization workspaces on demand
 
 ### Fixed
 
@@ -20,6 +21,7 @@ and this project adheres to
 
 ### Changed
 
+- ♻️(frontend) admin org sync timeout via ADMIN_ORG_SYNC_TIMEOUT_SECONDS
 - backend: add has_integrity_check_passed beside the old field #126
 - backend: rename boolean API fields to is_/has_ #126
 

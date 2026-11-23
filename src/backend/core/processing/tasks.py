@@ -29,6 +29,9 @@ from core.processing.token_status import log_token_status
 from core.sources.resana.organization_sync import (
     sync_administered_organizations as run_administered_organizations_sync,
 )
+from core.sources.resana.organization_sync import (
+    sync_organization_workspaces as run_organization_workspaces_sync,
+)
 from core.utils import get_dir_size, sizeof_fmt
 
 from main.celery_app import app
@@ -273,6 +276,12 @@ def _export_workspace(workspace, user, folder, source_backend, integrity_tracker
 def sync_administered_organizations(user_id):
     """Refresh the organizations this user administers on Resana."""
     run_administered_organizations_sync(user_id)
+
+
+@app.task
+def sync_organization_workspaces(user_id, source_id):
+    """Refresh the shared workspaces of one organization on Resana."""
+    run_organization_workspaces_sync(user_id, source_id)
 
 
 # From https://github.com/celery/django-celery-results/issues/286#issuecomment-1279161047

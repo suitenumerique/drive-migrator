@@ -32,6 +32,12 @@ class GeneralMixin:
     AUTH_USER_MODEL = "core.User"
     INVITATION_VALIDITY_DURATION = 604800  # 7 days, in seconds
 
+    ADMIN_ORG_SYNC_TIMEOUT_SECONDS = values.PositiveIntegerValue(
+        900,
+        environ_name="ADMIN_ORG_SYNC_TIMEOUT_SECONDS",
+        environ_prefix=None,
+    )
+
     INTERNAL_IPS = [
         "127.0.0.1",
     ]

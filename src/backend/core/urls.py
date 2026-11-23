@@ -9,6 +9,7 @@ from rest_framework.routers import DefaultRouter
 from core.api import viewsets
 from core.api.views.admin_reporting import (
     AdminContextAPIView,
+    AdminOrganizationSynchronizeAPIView,
     AdminStatsAPIView,
     AdminWorkspaceManagersAPIView,
     AdminWorkspacesAPIView,
@@ -58,6 +59,10 @@ urlpatterns = [
                 path(
                     "admin/workspaces/<uuid:workspace_id>/managers",
                     AdminWorkspaceManagersAPIView.as_view(),
+                ),
+                path(
+                    "admin/organizations/<str:source_id>/synchronize",
+                    AdminOrganizationSynchronizeAPIView.as_view(),
                 ),
                 path("migration-config", MigrationConfigApiView.as_view()),
                 path("super-secret-error-test", ErrorApiView.as_view()),

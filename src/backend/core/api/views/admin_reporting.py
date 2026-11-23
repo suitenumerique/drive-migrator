@@ -2,6 +2,7 @@
 
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.status import HTTP_202_ACCEPTED
 from rest_framework.views import APIView
 
 from core.admin_reporting import (
@@ -18,10 +19,13 @@ from core.api.admin_serializers import (
     AdminContextSerializer,
     AdminManagersSerializer,
     AdminStatsSerializer,
+    AdminSynchronizeSerializer,
     AdminWorkspaceSerializer,
 )
 from core.api.permissions import IsAuthenticated
 from core.models import Workspace
+from core.processing.tasks import sync_organization_workspaces
+from core.sources.resana.organization_sync import claim_organization_sync
 
 
 class AdminWorkspacePagination(PageNumberPagination):
@@ -104,6 +108,24 @@ class AdminWorkspaceManagersAPIView(APIView):
             raise APIException("NotOrganizationAdmin") from exc
         ensure_workspace_admin(request.user, workspace)
         return Response(AdminManagersSerializer(workspace).data)
+
+
+class AdminOrganizationSynchronizeAPIView(APIView):
+    """Enqueue a refresh of one organization's workspaces. Nothing runs inline."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, source_id):
+        _ensure_admin_access()
+        organization = require_organization(request.user, source_id)
+        task_id, created = claim_organization_sync(organization.source_id)
+        if created:
+            sync_organization_workspaces.apply_async(
+                args=[str(request.user.id), organization.source_id],
+                task_id=task_id,
+            )
+        body = AdminSynchronizeSerializer(task_id).data
+        return Response(body, status=HTTP_202_ACCEPTED)
 
 
 def _ensure_admin_access() -> None:
