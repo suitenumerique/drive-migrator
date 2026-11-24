@@ -268,7 +268,7 @@ class SourceManager:
             now = timezone.now()
             synced = 0
             with transaction.atomic():
-                organization = Organization.for_external_id(
+                organization = Organization.from_external_id(
                     organization_id,
                     "",
                     from_portal=backend.portal_organization_ids,
