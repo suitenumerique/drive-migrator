@@ -90,13 +90,13 @@ def manager_rows(workspace: Workspace) -> list[dict]:
         label = " ".join(part for part in (first, last) if part).strip()
         if not label:
             label = email or "—"
-        connected = bool(email and email.lower() in linked)
+        is_linked = bool(email and email.lower() in linked)
         rows.append(
             {
                 "name": label,
                 "email": email,
-                "connected": connected,
-                "last_login": linked.get(email.lower()) if connected else None,
+                "connected": is_linked,
+                "last_login": linked.get(email.lower()) if is_linked else None,
             }
         )
     rows.sort(
@@ -164,8 +164,8 @@ def organization_stats(organization: Organization) -> dict:
 
     One aggregate. Status counts read Workspace.status. Drive and archive
     each count a successful destination, so a workspace migrated to both is
-    counted twice. Only the connected tile needs the member-link subquery.
-    Locked workspaces are not stored, so that count stays zero.
+    counted twice.     Only the connected tile needs the member-link subquery.
+    Locked counts workspaces whose source currently reports them as locked.
     """
     totals = (
         Workspace.objects.filter(organization=organization)
@@ -187,6 +187,7 @@ def organization_stats(organization: Organization) -> dict:
                 "pk",
                 filter=Q(destination_statuses__archive=Workspace.Status.SUCCESS),
             ),
+            locked=Count("pk", filter=Q(is_source_locked=True)),
         )
     )
     return {
@@ -194,7 +195,7 @@ def organization_stats(organization: Organization) -> dict:
         "resana": totals["resana"],
         "connected": totals["connected"],
         "not_migrated": totals["not_migrated"],
-        "locked": 0,
+        "locked": totals["locked"],
         "drive": totals["drive"],
         "archive": totals["archive"],
         "pending": totals["pending"],
@@ -206,19 +207,31 @@ def eligible_count(queryset, status_filter: str | None) -> int:
     """How many rows of `queryset` an administrator could launch.
 
     NONE and FAILURE, plus LOCKED only when the list is filtered on LOCKED.
-    Locked workspaces are not stored yet, so that branch stays empty.
+    R1 has no admin-launch route; the count stays for the R2 contract.
     """
     if status_filter == "LOCKED":
-        return queryset.filter(status="LOCKED").count()
+        return queryset.filter(is_source_locked=True).count()
     return queryset.filter(
         status__in=[Workspace.Status.NONE, Workspace.Status.FAILURE]
     ).count()
 
 
 def display_status(workspace: Workspace) -> str:
-    """SUCCESS with refused files or a failed integrity check is shown as GAP."""
+    """SUCCESS with refused files or a failed integrity check is shown as GAP.
+
+    A source lock is LOCKED unless a migration is already pending, failed,
+    or finished.
+    """
     if _is_gap(workspace):
         return "GAP"
+    if workspace.status in (
+        Workspace.Status.PENDING,
+        Workspace.Status.FAILURE,
+        Workspace.Status.SUCCESS,
+    ):
+        return workspace.status
+    if workspace.is_source_locked:
+        return "LOCKED"
     return workspace.status
 
 
@@ -301,12 +314,17 @@ def annotate_admin_workspaces(queryset):
 def _apply_filters(queryset, params: dict):
     """Restrict the annotated queryset to the validated list query.
 
-    LOCKED and origin=admin match nothing: locked workspaces are not stored
-    and no route records an administrator launch yet.
+    origin=admin matches nothing: no route records an administrator launch yet.
     """
     match params["status"]:
         case "LOCKED":
-            queryset = queryset.none()
+            queryset = queryset.filter(is_source_locked=True).exclude(
+                status__in=[
+                    Workspace.Status.PENDING,
+                    Workspace.Status.FAILURE,
+                    Workspace.Status.SUCCESS,
+                ]
+            )
         case "not_migrated":
             queryset = queryset.filter(
                 status__in=[Workspace.Status.NONE, Workspace.Status.FAILURE]

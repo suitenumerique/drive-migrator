@@ -10,10 +10,7 @@ and this project adheres to
 
 ### Added
 
-- backend: add organization model and admin reporting migration
-- backend: add organization admin reporting
-- backend: sync administered resana organizations
-- backend: sync one organization workspaces on demand
+- backend: add organization admin reporting API #331
 
 ### Fixed
 

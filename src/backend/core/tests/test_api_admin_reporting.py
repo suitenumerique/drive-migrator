@@ -454,20 +454,23 @@ def test_origin_admin_matches_nothing(client):
 
 
 @reporting
-def test_locked_filter_is_empty(client):
-    """Resana locks are not stored, so the locked filter stays empty."""
+def test_locked_filter_uses_source_lock(client):
+    """A workspace locked on the source is listed as LOCKED."""
     user = factories.UserFactory()
     client.force_login(user)
     org = factories.OrganizationFactory()
     org.admins.add(user)
-    factories.WorkspaceFactory(organization=org)
+    factories.WorkspaceFactory(organization=org, title="Open")
+    factories.WorkspaceFactory(organization=org, title="Frozen", is_source_locked=True)
 
     body = client.get(
         WORKSPACES, {"organization": org.source_id, "status": "LOCKED"}
     ).json()
 
-    assert body["count"] == 0
-    assert body["eligible_count"] == 0
+    assert body["count"] == 1
+    assert body["results"][0]["title"] == "Frozen"
+    assert body["results"][0]["status"] == "LOCKED"
+    assert body["eligible_count"] == 1
 
 
 @reporting
@@ -679,6 +682,21 @@ def test_stats_count_the_whole_organization(client):
     assert body["archive"] == 1
     assert body["locked"] == 0
     assert body["connected"] == 0
+
+
+@reporting
+def test_stats_count_locked_workspaces(client):
+    user = factories.UserFactory()
+    client.force_login(user)
+    organization = factories.OrganizationFactory(source_id="org")
+    organization.admins.add(user)
+    factories.WorkspaceFactory(organization=organization)
+    factories.WorkspaceFactory(organization=organization, is_source_locked=True)
+
+    body = client.get(STATS, {"organization": "org"}).json()
+
+    assert body["resana"] == 2
+    assert body["locked"] == 1
 
 
 def test_stats_use_one_query(django_assert_num_queries):
