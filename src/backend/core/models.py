@@ -71,14 +71,14 @@ class BaseModel(models.Model):
 class Organization(BaseModel):
     """A source organization and the users who administer it.
 
-    Rows come from the Resana portal, or are created by hand in the Django admin.
+    Rows come from the source backend, or are created by hand in the Django admin.
     """
 
     source_id = models.CharField(
         max_length=256,
         unique=True,
         help_text=_(
-            "Opaque identifier of the organization on the source platform, "
+            "Primary identifier of the organization on the source platform, "
             "exposed as id by the admin API."
         ),
     )
@@ -88,8 +88,8 @@ class Organization(BaseModel):
         null=True,
         blank=True,
         help_text=_(
-            "Numeric identifier of this organization on the Resana portal. "
-            "Empty when only a GED id is known."
+            "Optional second identifier when the source has two namespaces "
+            "(numeric portal vs GED uuid). Empty when only source_id is known."
         ),
     )
     name = models.CharField(max_length=256)
@@ -114,12 +114,13 @@ class Organization(BaseModel):
         return self.name
 
     @classmethod
-    def for_external_id(cls, external_id: str, name: str, *, from_portal: bool):
+    def from_external_id(cls, external_id: str, name: str, *, from_portal: bool):
         """Return the organization for this id, creating it when missing.
 
-        Looks up source_id, then portal_id. A GED id therefore reuses the
-        portal row only when the two strings are equal. A different GED id
-        stays a second row. An empty name does not replace a stored one.
+        Looks up source_id, then portal_id. The two namespaces are distinct
+        (portal numeric id vs GED uuid); a row is reused only when the strings
+        happen to be equal. A different id stays a second row. An empty name
+        does not replace a stored one.
         """
         organization = cls.objects.filter(source_id=external_id).first()
         if organization is None:
