@@ -29,6 +29,17 @@ class UserFactory(factory.django.DjangoModelFactory):
     resana_token_expires_at = None
 
 
+class OrganizationFactory(factory.django.DjangoModelFactory):
+    """An organization created by hand, as in the Django admin."""
+
+    class Meta:
+        model = models.Organization
+
+    source_id = factory.Sequence(lambda n: f"org-{n}")
+    name = factory.Faker("company")
+    last_sync = None
+
+
 class WorkspaceFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = models.Workspace
