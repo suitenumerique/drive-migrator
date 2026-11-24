@@ -63,7 +63,8 @@ class ResanaMembersClient:
         """Return the organizations this session administers.
 
         Interstis includes Administrateur, Ambassadeur and Animateur
-        d'organisation. Each item has a numeric id (as a string), a name and
+        d'organisation. The backend keeps Administrateur when a role field
+        is present. Each item has a numeric id (as a string), a name and
         a type. There is no organization UUID.
         """
         return self._paginate(

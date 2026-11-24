@@ -90,6 +90,27 @@ _FINALIZE_EXPORT_EXCEPTIONS = (
 PORTAL_SOURCE_PREFIX = "portal:"
 
 
+_ADMIN_ORG_ROLE_LABELS = {"administrateur"}
+_ADMIN_ORG_ROLE_CODES = {"ADMINISTRATEUR"}
+
+
+def _organization_admin_role(entry: dict) -> bool | None:
+    """True when the entry is an organisation Administrateur.
+
+    Interstis getPerimetre also returns Ambassadeur and Animateur
+    d'organisation. The documented sample has no role key; None means we
+    cannot tell and the caller must keep the row.
+    """
+    label = str(entry.get("profilDroitLibelle") or entry.get("role") or "").strip()
+    code = str(entry.get("profilDroitCode") or entry.get("droit") or "").strip()
+    if not label and not code:
+        return None
+    return (
+        label.casefold() in _ADMIN_ORG_ROLE_LABELS
+        or code.upper() in _ADMIN_ORG_ROLE_CODES
+    )
+
+
 class ResanaSourceBackend(AbstractSourceBackend):
     source_type = "resana"
     label = "Resana"
@@ -193,8 +214,17 @@ class ResanaSourceBackend(AbstractSourceBackend):
         self._user = user
         ResanaTokenManager(user).ensure_offline_token()
         entries = self._get_members_client().get_administered_organizations()
+        can_filter = any(
+            _organization_admin_role(entry) is not None for entry in entries
+        )
+        if entries and not can_filter:
+            logger.warning(
+                "getPerimetre entries have no role field; keeping all organisations"
+            )
         organizations = []
         for entry in entries:
+            if can_filter and not _organization_admin_role(entry):
+                continue
             source_id = _portal_entry_id(entry)
             if source_id is None:
                 continue

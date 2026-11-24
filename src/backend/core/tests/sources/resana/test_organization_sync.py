@@ -188,6 +188,39 @@ def test_sync_administered_organizations_upserts_and_drops_stale_links(settings)
     token_manager.return_value.ensure_offline_token.assert_called_once()
 
 
+def test_sync_administered_organizations_keeps_only_administrators(settings):
+    """Ambassadors and organisation animators are not stored as admins."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana.example"
+    settings.SOURCE_BACKEND = RESANA_BACKEND
+    user = UserFactory()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager"), patch(
+        "core.sources.resana.backend.ResanaMembersClient"
+    ) as members:
+        members.return_value.get_administered_organizations.return_value = [
+            {
+                "id": "12",
+                "name": "Kept",
+                "profilDroitLibelle": "Administrateur",
+            },
+            {
+                "id": "13",
+                "name": "Ambassador",
+                "profilDroitLibelle": "Ambassadeur",
+            },
+            {
+                "id": "14",
+                "name": "Org animator",
+                "profilDroitLibelle": "Animateur d'organisation",
+            },
+        ]
+        SourceManager().sync_administered_organizations(user)
+
+    assert list(
+        Organization.objects.filter(admins=user).values_list("source_id", flat=True)
+    ) == ["12"]
+
+
 def test_sync_administered_organizations_keeps_admins_when_the_portal_fails(settings):
     settings.RESANA_WEB_ENDPOINT = "https://resana.example"
     settings.SOURCE_BACKEND = RESANA_BACKEND
