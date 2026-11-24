@@ -51,11 +51,20 @@ def limited_retries(max_attempts: int):
         _max_attempts_cap.reset(token)
 
 
+def _new_request_id() -> str:
+    """Return a request id starting with the task or request making the call."""
+    context = structlog.contextvars.get_contextvars()
+    parent = context.get("task_id") or context.get("request_id")
+    return "_".join(
+        filter(None, [settings.REQUEST_ID_PREFIX, parent, secrets.token_hex(8)])
+    )
+
+
 @contextmanager
 def same_request_id():
     """Send one request id with every RetryingSession call made inside the block,
     e.g. the attempts of a retry loop that calls the session again."""
-    token = _request_id.set(_request_id.get() or secrets.token_hex(16))
+    token = _request_id.set(_request_id.get() or _new_request_id())
     try:
         yield
     finally:
@@ -182,7 +191,7 @@ class RetryingSession(requests.Session):
         # Unless the caller or a same_request_id() block gives one, a new id
         # per call, kept by its attempts
         kwargs["headers"] = {
-            "X-Request-ID": _request_id.get() or secrets.token_hex(16),
+            "X-Request-ID": _request_id.get() or _new_request_id(),
             **(kwargs.get("headers") or {}),
         }
         if retry is None:

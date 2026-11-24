@@ -43,7 +43,7 @@ main/
 | `I18nMixin` | `i18n.py` | Languages, locale paths, timezone |
 | `EmailMixin` | `email.py` | SMTP (`EMAIL_*`) |
 | `CorsMixin` | `cors.py` | CORS (`CORS_*`) |
-| `LoggingMixin` | `logging.py` | `LOGGING`, django-structlog (`DJANGO_STRUCTLOG_*`) |
+| `LoggingMixin` | `logging.py` | `LOGGING`, django-structlog (`DJANGO_STRUCTLOG_*`), `REQUEST_ID_PREFIX` of the outgoing calls |
 | `ObservabilityMixin` | `observability.py` | Sentry, PostHog, thumbnails |
 | `CeleryMixin` | `celery.py` | Celery (`CELERY_*`) |
 | `OIDCMixin` | `oidc.py` | OpenID Connect and login/logout redirects |

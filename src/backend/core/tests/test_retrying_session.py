@@ -6,6 +6,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 import requests
+import structlog
 import urllib3
 from requests.exceptions import ChunkedEncodingError, ProxyError, SSLError, Timeout
 from requests.exceptions import ConnectionError as RequestsConnectionError
@@ -411,6 +412,32 @@ def test_the_calls_of_a_same_request_id_block_share_their_request_id(base_reques
         call.kwargs["headers"]["X-Request-ID"] for call in base_request.call_args_list
     )
     assert first == second != outside
+
+
+@pytest.mark.parametrize(
+    "context, prefix",
+    [
+        ({"task_id": "task-1", "request_id": "request-1"}, "app_task-1_"),
+        ({"request_id": "request-1"}, "app_request-1_"),
+        ({}, "app_"),
+    ],
+)
+def test_the_request_id_holds_the_task_or_request_making_the_call(
+    base_request, settings, context, prefix
+):
+    """The request id of a call starts with its Celery task, or else its request."""
+    settings.REQUEST_ID_PREFIX = "app"
+    base_request.return_value = _response(200)
+
+    with structlog.contextvars.bound_contextvars(**context):
+        _session().get(URL)
+        with same_request_id():
+            _session().get(URL)
+
+    for call in base_request.call_args_list:
+        request_id = call.kwargs["headers"]["X-Request-ID"]
+        assert request_id.startswith(prefix)
+        assert len(request_id) == len(prefix) + 16
 
 
 def test_a_path_holding_a_file_name_is_not_logged(base_request, console_logs):

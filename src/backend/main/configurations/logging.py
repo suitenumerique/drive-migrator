@@ -98,3 +98,7 @@ class LoggingMixin:
     # Personal data, which the access logs already hold
     DJANGO_STRUCTLOG_IP_LOGGING_ENABLED = False
     DJANGO_STRUCTLOG_CELERY_ENABLED = True
+    # Start of the X-Request-ID sent with every outgoing call
+    REQUEST_ID_PREFIX = values.Value(
+        "migrator", environ_name="REQUEST_ID_PREFIX", environ_prefix=None
+    )
