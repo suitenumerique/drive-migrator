@@ -23,9 +23,9 @@ from core.api.admin_serializers import (
     AdminWorkspaceSerializer,
 )
 from core.api.permissions import IsAuthenticated
+from core.backends.organization_sync import claim_organization_sync
 from core.models import Workspace
 from core.processing.tasks import sync_organization_workspaces
-from core.sources.resana.organization_sync import claim_organization_sync
 
 
 class AdminWorkspacePagination(PageNumberPagination):

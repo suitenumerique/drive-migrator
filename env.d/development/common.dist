@@ -15,6 +15,9 @@ PYTHONPATH=/app
 
 # impress settings
 
+# Admin Resana refresh: UI poll timeout and org sync lock TTL (seconds).
+ADMIN_ORG_SYNC_TIMEOUT_SECONDS=900
+
 # Migration source/destination
 # Filesystem source + archive (zip) destination require no external API
 # credentials, unlike the Osmose/Resana/Drive backends, so they are the
