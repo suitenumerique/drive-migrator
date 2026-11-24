@@ -169,6 +169,10 @@ class Workspace(BaseModel):
             "Empty when only the GED uuid is known."
         ),
     )
+    is_source_locked = models.BooleanField(
+        default=False,
+        help_text=_("Whether the source currently reports this workspace as locked."),
+    )
 
     migration_user = models.ForeignKey("User", models.SET_NULL, blank=True, null=True)
 
@@ -199,8 +203,8 @@ class Workspace(BaseModel):
     # Arbitrary per-destination metadata (IDs, job IDs, file counts, etc.).
     destination_metadata = models.JSONField(default=dict, blank=True)
 
-    # Workspace members populated by the source backend during prepare_export().
-    # Each entry: {"name": str, "firstName": str, "email": str}
+    # Workspace members. Filled from the source during org sync and again
+    # during prepare_export(). Each entry: {"name": str, "firstName": str, "email": str}
     members = models.JSONField(default=list, blank=True)
 
     # Set by the export task when MIGRATION_FILE_LIMIT_PER_WORKSPACE truncated

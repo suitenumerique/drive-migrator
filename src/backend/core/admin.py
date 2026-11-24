@@ -357,7 +357,7 @@ class WorkspaceAdmin(admin.ModelAdmin):
 
 @admin.register(models.Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    """Organizations, their administrators and the backup habilitation."""
+    """Organizations and their administrators."""
 
     list_display = ("name", "source_id", "last_sync")
     search_fields = ("name", "source_id")
