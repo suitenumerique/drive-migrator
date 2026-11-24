@@ -244,7 +244,7 @@ class SourceManager:
         kept = []
         with transaction.atomic():
             for entry in entries:
-                organization = Organization.for_external_id(
+                organization = Organization.from_external_id(
                     entry.id,
                     entry.name,
                     from_portal=backend.portal_organization_ids,
@@ -298,7 +298,7 @@ def _organization_for(source_ws: SourceWorkspace) -> Organization:
     Reuses a portal row when its id equals the GED id. A different GED id
     creates its own row and leaves portal_id empty.
     """
-    return Organization.for_external_id(
+    return Organization.from_external_id(
         source_ws.organization_id,
         source_ws.organization_name,
         from_portal=False,
