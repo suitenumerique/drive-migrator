@@ -6,7 +6,6 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password
 
 import factory.fuzzy
-from faker import Faker
 
 from core import models
 
