@@ -453,6 +453,10 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
             raise ValueError("User has no email address.")
         mail.send_mail(subject, message, from_email, [self.email], **kwargs)
 
+    def get_administered_organization(self, source_id: str) -> Organization | None:
+        """Return the organization with this source_id if self is one of its admins."""
+        return self.administered_organizations.filter(source_id=source_id).first()
+
 
 class FeatureFlag(models.Model):
     class Name(models.TextChoices):

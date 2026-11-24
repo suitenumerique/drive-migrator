@@ -6,13 +6,12 @@ from rest_framework.status import HTTP_202_ACCEPTED
 from rest_framework.views import APIView
 
 from core.admin_reporting import (
-    admin_reporting_is_enabled,
     admin_workspaces,
     eligible_count,
     ensure_workspace_admin,
     organization_stats,
-    parse_list_params,
     require_organization,
+    validate_list_params,
 )
 from core.api import APIException
 from core.api.admin_serializers import (
@@ -22,7 +21,7 @@ from core.api.admin_serializers import (
     AdminSynchronizeSerializer,
     AdminWorkspaceSerializer,
 )
-from core.api.permissions import IsAuthenticated
+from core.api.permissions import AdminReportingEnabled
 from core.backends.organization_sync import claim_organization_sync
 from core.models import Workspace
 from core.processing.tasks import sync_organization_workspaces
@@ -54,21 +53,19 @@ class AdminWorkspacePagination(PageNumberPagination):
 class AdminContextAPIView(APIView):
     """Organizations the signed-in user administers."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AdminReportingEnabled]
 
     def get(self, request):
-        _ensure_admin_access()
         return Response(AdminContextSerializer(request.user).data)
 
 
 class AdminWorkspacesAPIView(APIView):
     """Workspaces of one organization the user administers."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AdminReportingEnabled]
 
     def get(self, request):
-        _ensure_admin_access()
-        params = parse_list_params(request.query_params)
+        params = validate_list_params(request.query_params)
         organization = require_organization(
             request.user, request.query_params.get("organization")
         )
@@ -83,10 +80,9 @@ class AdminWorkspacesAPIView(APIView):
 class AdminStatsAPIView(APIView):
     """Organization-wide counts behind the indicator tiles."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AdminReportingEnabled]
 
     def get(self, request):
-        _ensure_admin_access()
         organization = require_organization(
             request.user, request.query_params.get("organization")
         )
@@ -96,10 +92,9 @@ class AdminStatsAPIView(APIView):
 class AdminWorkspaceManagersAPIView(APIView):
     """Managers of one workspace, loaded when the admin opens the modal."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AdminReportingEnabled]
 
     def get(self, request, workspace_id):
-        _ensure_admin_access()
         try:
             workspace = Workspace.objects.select_related("organization").get(
                 pk=workspace_id
@@ -113,10 +108,9 @@ class AdminWorkspaceManagersAPIView(APIView):
 class AdminOrganizationSynchronizeAPIView(APIView):
     """Enqueue a refresh of one organization's workspaces. Nothing runs inline."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AdminReportingEnabled]
 
     def post(self, request, source_id):
-        _ensure_admin_access()
         organization = require_organization(request.user, source_id)
         task_id, created = claim_organization_sync(organization.source_id)
         if created:
@@ -126,12 +120,3 @@ class AdminOrganizationSynchronizeAPIView(APIView):
             )
         body = AdminSynchronizeSerializer(task_id).data
         return Response(body, status=HTTP_202_ACCEPTED)
-
-
-def _ensure_admin_access() -> None:
-    """The flag is the only gate. Admin membership is read from the database.
-
-    No Resana call: who administers what is stored on Organization.admins.
-    """
-    if not admin_reporting_is_enabled():
-        raise APIException("FeatureNotEnabled")

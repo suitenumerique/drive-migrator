@@ -76,8 +76,9 @@ def manager_rows(workspace: Workspace) -> list[dict]:
     raw_members = workspace.members if isinstance(workspace.members, list) else []
     linked = {
         account.email.lower(): account.last_login
-        for account in User.objects.filter(workspaces=workspace).exclude(email="")
-        if account.email
+        for account in User.objects.filter(
+            workspaces=workspace, email__isnull=False
+        ).exclude(email="")
     }
     rows = []
     for entry in raw_members:
@@ -112,17 +113,18 @@ def require_organization(user, source_id: str | None) -> Organization:
     """Return the organization `user` administers, or refuse the request.
 
     An unknown id and an organization the user does not administer both
-    answer NotOrganizationAdmin.
+    answer NotOrganizationAdmin. The M2M lookup lives on User; this
+    helper only maps the result onto API errors.
     """
     if not source_id:
         raise APIException("InvalidQueryParam")
-    organization = Organization.objects.filter(source_id=source_id, admins=user).first()
+    organization = user.get_administered_organization(source_id)
     if organization is None:
         raise APIException("NotOrganizationAdmin")
     return organization
 
 
-def parse_list_params(params) -> dict:
+def validate_list_params(params) -> dict:
     """Validate the list query string. Raises InvalidQueryParam."""
     page_size = params.get("page_size")
     if page_size in (None, ""):
@@ -297,39 +299,52 @@ def annotate_admin_workspaces(queryset):
 
 
 def _apply_filters(queryset, params: dict):
-    status = params["status"]
-    if status == "LOCKED":
-        queryset = queryset.none()
-    elif status == "not_migrated":
-        queryset = queryset.filter(
-            status__in=[Workspace.Status.NONE, Workspace.Status.FAILURE]
-        )
-    elif status == "migrated":
-        queryset = queryset.filter(status=Workspace.Status.SUCCESS)
-    elif status == "GAP":
-        queryset = queryset.filter(_gap_q())
-    elif status is not None:
-        queryset = queryset.filter(status=status)
+    """Restrict the annotated queryset to the validated list query.
+
+    LOCKED and origin=admin match nothing: locked workspaces are not stored
+    and no route records an administrator launch yet.
+    """
+    match params["status"]:
+        case "LOCKED":
+            queryset = queryset.none()
+        case "not_migrated":
+            queryset = queryset.filter(
+                status__in=[Workspace.Status.NONE, Workspace.Status.FAILURE]
+            )
+        case "migrated":
+            queryset = queryset.filter(status=Workspace.Status.SUCCESS)
+        case "GAP":
+            queryset = queryset.filter(_gap_q())
+        case None:
+            pass
+        case status:
+            queryset = queryset.filter(status=status)
 
     if params["target"]:
         queryset = queryset.exclude(status=Workspace.Status.NONE).filter(
             admin_target=params["target"]
         )
-    if params["connected"] == "yes":
-        queryset = queryset.filter(connected_count__gt=0)
-    elif params["connected"] == "no":
-        queryset = queryset.filter(connected_count=0)
-    if params["origin"] == "manager":
-        queryset = queryset.filter(has_run=True)
-    elif params["origin"] == "admin":
-        # No route records an administrator launch yet.
-        queryset = queryset.none()
+    match params["connected"]:
+        case "yes":
+            queryset = queryset.filter(connected_count__gt=0)
+        case "no":
+            queryset = queryset.filter(connected_count=0)
+        case _:
+            pass
+    match params["origin"]:
+        case "manager":
+            queryset = queryset.filter(has_run=True)
+        case "admin":
+            queryset = queryset.none()
+        case _:
+            pass
     if params["search"]:
         queryset = _apply_search(queryset, params["search"])
     return queryset
 
 
 def _apply_search(queryset, term: str):
+    """Match the title (unaccent) or a manager name/email inside members JSON."""
     match = RawSQL(
         _members_match_sql(),
         [term],
@@ -341,6 +356,7 @@ def _apply_search(queryset, term: str):
 
 
 def _choice(params, name: str, allowed: set[str]) -> str | None:
+    """Return a query value if it is one of `allowed`, else InvalidQueryParam."""
     value = params.get(name)
     if value in (None, ""):
         return None
@@ -350,12 +366,14 @@ def _choice(params, name: str, allowed: set[str]) -> str | None:
 
 
 def _gap_q() -> Q:
+    """SUCCESS rows the list displays as GAP (refused files or failed integrity)."""
     return Q(status=Workspace.Status.SUCCESS) & (
         Q(has_integrity_check_passed=False) | ~Q(upload_errors=[])
     )
 
 
 def _is_gap(workspace: Workspace) -> bool:
+    """Python counterpart of `_gap_q` for a serialized row."""
     if workspace.status != Workspace.Status.SUCCESS:
         return False
     if workspace.upload_errors:
@@ -364,6 +382,7 @@ def _is_gap(workspace: Workspace) -> bool:
 
 
 def workspace_queue(workspace: Workspace) -> str | None:
+    """queued or running when the workspace is PENDING, else None."""
     if workspace.status != Workspace.Status.PENDING:
         return None
     if workspace.latest_task_status == RUNNING_TASK_STATUS:
@@ -371,10 +390,15 @@ def workspace_queue(workspace: Workspace) -> str | None:
     return "queued"
 
 
+# JSON members / integrity: Postgres expressions the ORM cannot express.
+# members is a JSON list of objects; filter, sort and count must run in SQL.
+
+
 def _source_files_count() -> RawSQL:
     """Integer file count of the latest run, so the column can be ordered.
 
-    The shared integrity annotation is jsonb and does not cast to integer.
+    with_latest_integrity already reads this path as jsonb, which ORDER BY
+    cannot use as an integer.
     """
     report = _q(ExtraTaskInfo._meta.db_table)  # noqa: SLF001
     workspace = _q(Workspace._meta.db_table)  # noqa: SLF001
@@ -395,6 +419,7 @@ def _source_files_count() -> RawSQL:
 
 
 def _json_members_expr() -> str:
+    """Treat a non-array members value as [] so jsonb_array_* does not error."""
     members = f"{_q(Workspace._meta.db_table)}.members"  # noqa: SLF001
     return (
         "CASE WHEN jsonb_typeof("
@@ -406,6 +431,10 @@ def _json_members_expr() -> str:
 
 
 def _connected_count_sql() -> RawSQL:
+    """Count distinct member emails that match a User linked to this workspace.
+
+    Needs jsonb_array_elements joined to User.email; Django cannot unnest JSON.
+    """
     link = User.workspaces.through
     members = _json_members_expr()
     sql = (
@@ -434,11 +463,13 @@ def _connected_count_sql() -> RawSQL:
 
 
 def _managers_count_sql() -> RawSQL:
+    """Length of the members JSON array, guarded when the value is not an array."""
     sql = "(SELECT jsonb_array_length(" + _json_members_expr() + "))"
     return RawSQL(sql, [], output_field=IntegerField())
 
 
 def _members_match_sql() -> str:
+    """Unaccent search on concatenated firstName, name and email of each member."""
     return (
         "EXISTS (SELECT 1 FROM jsonb_array_elements("  # noqa: S608
         + _json_members_expr()
@@ -449,4 +480,5 @@ def _members_match_sql() -> str:
 
 
 def _q(name: str) -> str:
+    """Quote a SQL identifier for the current database."""
     return connection.ops.quote_name(name)
