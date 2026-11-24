@@ -7,6 +7,13 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from core.api import viewsets
+from core.api.views.admin_reporting import (
+    AdminContextAPIView,
+    AdminOrganizationSynchronizeAPIView,
+    AdminStatsAPIView,
+    AdminWorkspaceManagersAPIView,
+    AdminWorkspacesAPIView,
+)
 from core.api.views.available_destinations import (
     AvailableDestinationsAPIView,
     DestinationAccountStatusAPIView,
@@ -46,6 +53,17 @@ urlpatterns = [
                     DestinationAccountStatusAPIView.as_view(),
                 ),
                 path("feature-flags", FeatureFlagsApiView.as_view()),
+                path("admin/context", AdminContextAPIView.as_view()),
+                path("admin/stats", AdminStatsAPIView.as_view()),
+                path("admin/workspaces", AdminWorkspacesAPIView.as_view()),
+                path(
+                    "admin/workspaces/<uuid:workspace_id>/managers",
+                    AdminWorkspaceManagersAPIView.as_view(),
+                ),
+                path(
+                    "admin/organizations/<str:source_id>/synchronize",
+                    AdminOrganizationSynchronizeAPIView.as_view(),
+                ),
                 path("migration-config", MigrationConfigApiView.as_view()),
                 path("super-secret-error-test", ErrorApiView.as_view()),
                 path(

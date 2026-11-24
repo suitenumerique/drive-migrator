@@ -11,6 +11,7 @@ and this project adheres to
 ### Added
 
 - backend: add organization model and admin reporting migration
+- backend: add organization admin reporting
 
 ### Fixed
 
