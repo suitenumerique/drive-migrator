@@ -285,6 +285,104 @@ def test_sync_organization_workspaces_creates_the_organization_and_rows(settings
     members.return_value.get_organization_workspaces.assert_called_once_with("12")
 
 
+def test_portal_sync_reuses_the_ged_workspace_by_uuid(settings):
+    """A portal id that maps to a GED uuid updates that row instead of a second one."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana.example"
+    settings.SOURCE_BACKEND = RESANA_BACKEND
+    user = UserFactory()
+    ged = WorkspaceFactory(
+        source_id="02-01-abc",
+        source_type="resana",
+        title="Old",
+        status=Workspace.Status.SUCCESS,
+    )
+
+    with patch("core.sources.resana.backend.ResanaTokenManager"), patch(
+        "core.sources.resana.backend.ResanaMembersClient"
+    ) as members:
+        members.return_value.get_organization_workspaces.return_value = [
+            {"id": "4521", "nom": "Renamed", "figer": 0},
+        ]
+        members.return_value.get_workspaces.return_value = [
+            {"slug": "4521", "name": "Renamed", "uuid": "02-01-abc"},
+        ]
+        members.return_value.get_locked_workspaces.return_value = []
+        members.return_value.list_workspace_members.return_value = []
+        SourceManager().sync_organization_workspaces(user, "12")
+
+    ged.refresh_from_db()
+    assert Workspace.objects.filter(source_type="resana").count() == 1
+    assert ged.source_id == "02-01-abc"
+    assert ged.portal_id == "4521"
+    assert ged.title == "Renamed"
+    assert ged.status == Workspace.Status.SUCCESS
+
+
+def test_portal_sync_collapses_a_placeholder_into_the_ged_row(settings):
+    """A portal: placeholder is deleted once the GED uuid is known."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana.example"
+    settings.SOURCE_BACKEND = RESANA_BACKEND
+    user = UserFactory()
+    ged = WorkspaceFactory(
+        source_id="02-01-abc",
+        source_type="resana",
+        title="Migrated",
+        status=Workspace.Status.SUCCESS,
+    )
+    WorkspaceFactory(
+        source_id="portal:4521",
+        portal_id="4521",
+        source_type="resana",
+        title="Placeholder",
+    )
+
+    with patch("core.sources.resana.backend.ResanaTokenManager"), patch(
+        "core.sources.resana.backend.ResanaMembersClient"
+    ) as members:
+        members.return_value.get_organization_workspaces.return_value = [
+            {"id": "4521", "nom": "Shared"},
+        ]
+        members.return_value.get_workspaces.return_value = [
+            {"slug": "4521", "name": "Shared", "uuid": "02-01-abc"},
+        ]
+        members.return_value.get_locked_workspaces.return_value = []
+        members.return_value.list_workspace_members.return_value = []
+        SourceManager().sync_organization_workspaces(user, "12")
+
+    assert Workspace.objects.filter(source_id="portal:4521").exists() is False
+    ged.refresh_from_db()
+    assert ged.portal_id == "4521"
+    assert ged.title == "Shared"
+    assert Workspace.objects.filter(source_type="resana").count() == 1
+
+
+def test_portal_sync_fills_members_and_lock(settings):
+    """Unmigrated portal rows get members and the figer lock from the org list."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana.example"
+    settings.SOURCE_BACKEND = RESANA_BACKEND
+    user = UserFactory()
+
+    with patch("core.sources.resana.backend.ResanaTokenManager"), patch(
+        "core.sources.resana.backend.ResanaMembersClient"
+    ) as members:
+        members.return_value.get_organization_workspaces.return_value = [
+            {"id": "7", "nom": "Frozen", "figer": 1},
+        ]
+        members.return_value.get_workspaces.return_value = []
+        members.return_value.get_locked_workspaces.return_value = []
+        members.return_value.list_workspace_members.return_value = [
+            {"name": "Dupont", "firstName": "Anne", "email": "anne@example.com"},
+        ]
+        SourceManager().sync_organization_workspaces(user, "12")
+
+    workspace = Workspace.objects.get(portal_id="7")
+    assert workspace.source_id == "portal:7"
+    assert workspace.is_source_locked is True
+    assert workspace.members == [
+        {"name": "Dupont", "firstName": "Anne", "email": "anne@example.com"},
+    ]
+
+
 class _GedSource(AbstractSourceBackend):
     """One shared workspace whose organization id the test sets."""
 

@@ -62,6 +62,8 @@ class SourceWorkspace:
     # Set when the source names the organization. Personal spaces leave it empty.
     organization_id: str | None = None
     organization_name: str = ""
+    # Portal numeric id when the source has a second namespace (Resana slug).
+    portal_id: str | None = None
 
 
 def truncate_folder_files(folder: SourceFolder, limit: int) -> bool:
@@ -231,6 +233,8 @@ class SourceManager:
             # previous link in place: the GED list often omits the field.
             if source_ws.organization_id:
                 workspace.organization = _organization_for(source_ws)
+            if source_ws.portal_id:
+                workspace.portal_id = source_ws.portal_id
             workspace.save()
             user.workspaces.add(workspace)
         # Note: workspaces that disappear from the source are NOT deleted from the DB.
