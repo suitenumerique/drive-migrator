@@ -13,8 +13,10 @@ from core.backends.source import (
     AbstractSourceBackend,
     SourceFile,
     SourceFolder,
+    SourceOrganization,
     SourceWorkspace,
 )
+from core.models import Workspace
 from core.sources.resana.interstis_client import InterstisClient
 from core.sources.resana.resana_lock_client import ResanaLockClient, ResanaLockError
 from core.sources.resana.resana_members_client import (
@@ -85,9 +87,13 @@ _FINALIZE_EXPORT_EXCEPTIONS = (
 )
 
 
+PORTAL_SOURCE_PREFIX = "portal:"
+
+
 class ResanaSourceBackend(AbstractSourceBackend):
     source_type = "resana"
     label = "Resana"
+    portal_organization_ids = True
 
     def __init__(self):
         self._user = None
@@ -171,8 +177,91 @@ class ResanaSourceBackend(AbstractSourceBackend):
                     continue
             elif ws["uuid"] not in manager_uuids:
                 continue
-            workspaces.append(SourceWorkspace(id=ws["uuid"], title=name, raw_data=ws))
+            organization_id, organization_name = _shared_organization(ws)
+            workspaces.append(
+                SourceWorkspace(
+                    id=ws["uuid"],
+                    title=name,
+                    raw_data=ws,
+                    organization_id=organization_id,
+                    organization_name=organization_name,
+                )
+            )
         return workspaces
+
+    def get_administered_organizations(self, user) -> list[SourceOrganization]:
+        self._user = user
+        ResanaTokenManager(user).ensure_offline_token()
+        entries = self._get_members_client().get_administered_organizations()
+        organizations = []
+        for entry in entries:
+            source_id = _portal_entry_id(entry)
+            if source_id is None:
+                continue
+            organizations.append(
+                SourceOrganization(
+                    id=source_id,
+                    name=_portal_organization_name(entry, ""),
+                )
+            )
+        return organizations
+
+    def get_organization_workspaces(
+        self, user, organization_id: str
+    ) -> list[SourceWorkspace]:
+        self._user = user
+        ResanaTokenManager(user).ensure_offline_token()
+        entries = self._get_members_client().get_organization_workspaces(
+            organization_id
+        )
+        workspaces = []
+        for entry in entries:
+            portal_id = _portal_entry_id(entry)
+            if portal_id is None:
+                continue
+            title = html.unescape(str(entry.get("nom") or portal_id))
+            workspaces.append(
+                SourceWorkspace(
+                    id=f"{PORTAL_SOURCE_PREFIX}{portal_id}",
+                    title=title,
+                    organization_id=organization_id,
+                    raw_data={"portal_id": portal_id},
+                )
+            )
+        return workspaces
+
+    def upsert_organization_workspace(
+        self, organization, source_ws: SourceWorkspace
+    ) -> Workspace | None:
+        portal_id = source_ws.raw_data.get("portal_id")
+        if not portal_id and source_ws.id.startswith(PORTAL_SOURCE_PREFIX):
+            portal_id = source_ws.id.removeprefix(PORTAL_SOURCE_PREFIX)
+        if not portal_id:
+            logger.warning("Skipping a portal workspace with no id")
+            return None
+        placeholder = f"{PORTAL_SOURCE_PREFIX}{portal_id}"
+        workspace = Workspace.objects.filter(portal_id=portal_id).first()
+        if workspace is None:
+            workspace = Workspace.objects.filter(source_id=placeholder).first()
+        if workspace is None:
+            workspace = Workspace(
+                portal_id=portal_id,
+                source_id=placeholder,
+                source_type=self.source_type,
+                title=source_ws.title,
+                organization=organization,
+            )
+            workspace.save()
+            return workspace
+        workspace.portal_id = portal_id
+        workspace.title = source_ws.title
+        workspace.organization = organization
+        if not workspace.source_type:
+            workspace.source_type = self.source_type
+        if not workspace.source_id:
+            workspace.source_id = placeholder
+        workspace.save()
+        return workspace
 
     @staticmethod
     def _get_managed_locked_workspace_uuids(
@@ -483,3 +572,37 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 )
             )
         return folder
+
+
+def _shared_organization(workspace: dict) -> tuple[str | None, str]:
+    """Return the organization id and name carried by a GED workspace.
+
+    Personal spaces are never attached. The field is optional and may be a
+    string id or an object with id/uuid and name/nom.
+    """
+    if workspace.get("isPersonalWorkspace"):
+        return None, ""
+    raw = workspace.get("organization")
+    if isinstance(raw, str) and raw:
+        return raw, ""
+    if isinstance(raw, dict):
+        org_id = raw.get("id") or raw.get("uuid")
+        if org_id:
+            name = raw.get("name") or raw.get("nom") or ""
+            return str(org_id), html.unescape(str(name)) if name else ""
+    return None, ""
+
+
+def _portal_entry_id(entry: dict) -> str | None:
+    raw = entry.get("id")
+    if raw in (None, ""):
+        logger.warning("Skipping a portal entry with no id")
+        return None
+    return str(raw)
+
+
+def _portal_organization_name(entry: dict, fallback: str) -> str:
+    name = entry.get("name")
+    if not name:
+        return fallback
+    return html.unescape(str(name))
