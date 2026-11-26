@@ -267,6 +267,20 @@ def _export_workspace(workspace, user, folder, source_backend, integrity_tracker
             dest_backend.export(workspace, user, local_path)
 
 
+@app.task
+def sync_administered_organizations(user_id):
+    """Refresh the organizations this user administers on the configured source."""
+    user = User.objects.get(id=user_id)
+    SourceManager().sync_administered_organizations(user)
+
+
+@app.task
+def sync_organization_workspaces(user_id, source_id):
+    """Refresh the shared workspaces of one organization on the configured source."""
+    user = User.objects.get(id=user_id)
+    SourceManager().sync_organization_workspaces(user, source_id)
+
+
 # From https://github.com/celery/django-celery-results/issues/286#issuecomment-1279161047
 @before_task_publish.connect
 def create_task_result_on_publish(sender=None, headers=None, body=None, **kwargs):  # pylint: disable=unused-argument

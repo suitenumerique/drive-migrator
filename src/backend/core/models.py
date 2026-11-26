@@ -68,6 +68,81 @@ class BaseModel(models.Model):
         super().save(*args, **kwargs)
 
 
+class Organization(BaseModel):
+    """A source organization and the users who administer it.
+
+    Rows come from the source backend, or are created by hand in the Django admin.
+    """
+
+    source_id = models.CharField(
+        max_length=256,
+        unique=True,
+        help_text=_(
+            "Primary identifier of the organization on the source platform, "
+            "exposed as id by the admin API."
+        ),
+    )
+    portal_id = models.CharField(
+        max_length=256,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text=_(
+            "Optional second identifier when the source has two namespaces "
+            "(numeric portal vs GED uuid). Empty when only source_id is known."
+        ),
+    )
+    name = models.CharField(max_length=256)
+    last_sync = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_(
+            "When this organization's data was last refreshed from the source."
+        ),
+    )
+    admins = models.ManyToManyField(
+        "User",
+        blank=True,
+        related_name="administered_organizations",
+        help_text=_("Users allowed to report on this organization's workspaces."),
+    )
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def from_external_id(cls, external_id: str, name: str, *, from_portal: bool):
+        """Return the organization for this id, creating it when missing.
+
+        Looks up source_id, then portal_id. The two namespaces are distinct
+        (portal numeric id vs GED uuid); a row is reused only when the strings
+        happen to be equal. A different id stays a second row. An empty name
+        does not replace a stored one.
+        """
+        organization = cls.objects.filter(source_id=external_id).first()
+        if organization is None:
+            organization = cls.objects.filter(portal_id=external_id).first()
+        if organization is None:
+            return cls.objects.create(
+                source_id=external_id,
+                name=name or external_id,
+                portal_id=external_id if from_portal else None,
+            )
+        changed = False
+        if from_portal and not organization.portal_id:
+            organization.portal_id = external_id
+            changed = True
+        if name and organization.name != name:
+            organization.name = name
+            changed = True
+        if changed:
+            organization.save()
+        return organization
+
+
 class Workspace(BaseModel):
     class Status(models.TextChoices):
         NONE = "NONE"
@@ -84,8 +159,33 @@ class Workspace(BaseModel):
         help_text=_("source backend type, e.g. 'osmose', 'filesystem'"),
         default="",
     )
+    portal_id = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text=_(
+            "Numeric identifier of this workspace on the Resana portal. "
+            "Empty when only the GED uuid is known."
+        ),
+    )
+    is_source_locked = models.BooleanField(
+        default=False,
+        help_text=_("Whether the source currently reports this workspace as locked."),
+    )
 
     migration_user = models.ForeignKey("User", models.SET_NULL, blank=True, null=True)
+
+    organization = models.ForeignKey(
+        "Organization",
+        models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="workspaces",
+        help_text=_(
+            "Organization this workspace belongs to. Personal spaces stay empty."
+        ),
+    )
 
     title = models.CharField()
 
@@ -103,8 +203,8 @@ class Workspace(BaseModel):
     # Arbitrary per-destination metadata (IDs, job IDs, file counts, etc.).
     destination_metadata = models.JSONField(default=dict, blank=True)
 
-    # Workspace members populated by the source backend during prepare_export().
-    # Each entry: {"name": str, "firstName": str, "email": str}
+    # Workspace members. Filled from the source during org sync and again
+    # during prepare_export(). Each entry: {"name": str, "firstName": str, "email": str}
     members = models.JSONField(default=list, blank=True)
 
     # Set by the export task when MIGRATION_FILE_LIMIT_PER_WORKSPACE truncated
@@ -358,6 +458,10 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
             raise ValueError("User has no email address.")
         mail.send_mail(subject, message, from_email, [self.email], **kwargs)
 
+    def get_administered_organization(self, source_id: str) -> Organization | None:
+        """Return the organization with this source_id if self is one of its admins."""
+        return self.administered_organizations.filter(source_id=source_id).first()
+
 
 class FeatureFlag(models.Model):
     class Name(models.TextChoices):
@@ -365,6 +469,7 @@ class FeatureFlag(models.Model):
         READ_ONLY_MODE = "read-only-mode"
         AUTO_VALIDATE_NEW_USERS = "auto-validate-new-users"
         FILE_INTEGRITY_TRACKING = "file-integrity-tracking"
+        ADMIN_REPORTING = "admin-reporting"
 
     name = models.CharField(
         max_length=32,

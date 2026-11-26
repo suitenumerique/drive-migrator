@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- backend: add organization admin reporting API #331
+
 ### Fixed
 
 - Drop Resana folder permissions and email the list before exporting #321 

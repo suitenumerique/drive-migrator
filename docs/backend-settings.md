@@ -34,7 +34,7 @@ main/
 
 | Mixin | File | Domain |
 | --- | --- | --- |
-| `GeneralMixin` | `general.py` | Debug flags, secret key, allowed hosts, URLs, app user, misc |
+| `GeneralMixin` | `general.py` | Debug flags, secret key, allowed hosts, URLs, app user, admin org sync timeout, misc |
 | `DatabaseMixin` | `database.py` | PostgreSQL connection (`DB_*`) |
 | `CacheMixin` | `cache.py` | Redis cache and sessions |
 | `StorageMixin` | `storage.py` | Static/media files and S3 (`AWS_S3_*`) |
@@ -70,6 +70,14 @@ main/
 
 3. Read it in the application through `from django.conf import settings` as usual.
 4. Add a line to `CHANGELOG.md` under `## [Unreleased]`.
+
+### `ADMIN_ORG_SYNC_TIMEOUT_SECONDS`
+
+Maximum time (seconds) the admin UI waits for a Resana organization refresh
+after **Actualiser les espaces Resana**, and the Redis lock TTL for
+`POST …/admin/organizations/{id}/synchronize`. Default: `900` (15 minutes). The
+frontend reads the same environment variable at build time via
+`next.config.js` → `env`.
 
 Keep settings that reference each other in the same mixin (e.g.
 `DRIVE_API_BASE_URL` defaults to `DRIVE_BASE_URL`), since that reference happens

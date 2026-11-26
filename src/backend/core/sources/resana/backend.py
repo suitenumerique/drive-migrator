@@ -13,8 +13,10 @@ from core.backends.source import (
     AbstractSourceBackend,
     SourceFile,
     SourceFolder,
+    SourceOrganization,
     SourceWorkspace,
 )
+from core.models import Workspace
 from core.sources.resana.interstis_client import InterstisClient
 from core.sources.resana.resana_lock_client import ResanaLockClient, ResanaLockError
 from core.sources.resana.resana_members_client import (
@@ -85,9 +87,113 @@ _FINALIZE_EXPORT_EXCEPTIONS = (
 )
 
 
+PORTAL_SOURCE_PREFIX = "portal:"
+
+
+def _portal_workspace_maps_from_listings(
+    *listings,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return slug→uuid and uuid→slug from portal workspace lists.
+
+    Interstis D6 does not return GED uuids. listerMesEspaces does, but only
+    for spaces the user is a member of (including locked ones).
+    """
+    uuid_by_slug = {}
+    for listing in listings:
+        if not isinstance(listing, list):
+            continue
+        for item in listing:
+            if not isinstance(item, dict):
+                continue
+            slug = item.get("slug")
+            uuid = item.get("uuid")
+            if slug and uuid:
+                uuid_by_slug[str(slug)] = str(uuid)
+    slug_by_uuid = {uuid: slug for slug, uuid in uuid_by_slug.items()}
+    return uuid_by_slug, slug_by_uuid
+
+
+def _portal_workspace_maps(members_client) -> tuple[dict[str, str], dict[str, str]]:
+    listings = []
+    for getter in (
+        members_client.get_workspaces,
+        members_client.get_locked_workspaces,
+    ):
+        try:
+            listings.append(getter())
+        except (
+            requests.RequestException,
+            ValueError,
+            TypeError,
+            AttributeError,
+            KeyError,
+        ):
+            logger.warning(
+                "Could not list portal workspaces for uuid mapping",
+                exc_info=True,
+            )
+    return _portal_workspace_maps_from_listings(*listings)
+
+
+def _portal_is_locked(raw: dict) -> bool:
+    """True when gererPerimetresInformations reports figer=1."""
+    return raw.get("figer") in (1, "1", True)
+
+
+_ADMIN_ORG_ROLE_LABELS = {"administrateur"}
+_ADMIN_ORG_ROLE_CODES = {"ADMINISTRATEUR"}
+
+
+def _organization_admin_role(entry: dict) -> bool | None:
+    """True when the entry is an organisation Administrateur.
+
+    Interstis getPerimetre also returns Ambassadeur and Animateur
+    d'organisation. The documented sample has no role key; None means we
+    cannot tell and the caller must keep the row.
+    """
+    label = str(entry.get("profilDroitLibelle") or entry.get("role") or "").strip()
+    code = str(entry.get("profilDroitCode") or entry.get("droit") or "").strip()
+    if not label and not code:
+        return None
+    return (
+        label.casefold() in _ADMIN_ORG_ROLE_LABELS
+        or code.upper() in _ADMIN_ORG_ROLE_CODES
+    )
+
+
+def _canonical_portal_workspace(portal_id: str, ged_uuid: str | None, placeholder: str):
+    """Return the GED row when both it and a portal placeholder exist.
+
+    Drops extra placeholder rows so the admin list does not count the same
+    Resana space twice.
+    """
+    candidates = []
+    if ged_uuid:
+        found = Workspace.objects.filter(source_id=ged_uuid).first()
+        if found is not None:
+            candidates.append(found)
+    found = Workspace.objects.filter(portal_id=portal_id).first()
+    if found is not None and found not in candidates:
+        candidates.append(found)
+    found = Workspace.objects.filter(source_id=placeholder).first()
+    if found is not None and found not in candidates:
+        candidates.append(found)
+    if not candidates:
+        return None
+    canonical = next(
+        (row for row in candidates if ged_uuid and row.source_id == ged_uuid),
+        candidates[0],
+    )
+    for extra in candidates:
+        if extra.pk != canonical.pk:
+            extra.delete()
+    return canonical
+
+
 class ResanaSourceBackend(AbstractSourceBackend):
     source_type = "resana"
     label = "Resana"
+    portal_organization_ids = True
 
     def __init__(self):
         self._user = None
@@ -148,10 +254,9 @@ class ResanaSourceBackend(AbstractSourceBackend):
             for ws in members_client.get_workspaces_with_role()
             if ws["role_code"] == GESTIONNAIRE_CODE
         }
+        portal_listing = members_client.get_workspaces()
         manager_uuids = {
-            ws["uuid"]
-            for ws in members_client.get_workspaces()
-            if ws["slug"] in manager_slugs
+            ws["uuid"] for ws in portal_listing if ws["slug"] in manager_slugs
         }
         raw_workspaces = client.get_workspaces()
         unresolved_uuids = {
@@ -163,6 +268,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
             members_client, unresolved_uuids
         )
 
+        _, slug_by_uuid = _portal_workspace_maps_from_listings(portal_listing)
         workspaces = []
         for ws in raw_workspaces:
             name = html.unescape(ws["name"])
@@ -171,8 +277,120 @@ class ResanaSourceBackend(AbstractSourceBackend):
                     continue
             elif ws["uuid"] not in manager_uuids:
                 continue
-            workspaces.append(SourceWorkspace(id=ws["uuid"], title=name, raw_data=ws))
+            organization_id, organization_name = _shared_organization(ws)
+            workspaces.append(
+                SourceWorkspace(
+                    id=ws["uuid"],
+                    title=name,
+                    raw_data=ws,
+                    organization_id=organization_id,
+                    organization_name=organization_name,
+                    portal_id=slug_by_uuid.get(ws["uuid"]),
+                )
+            )
         return workspaces
+
+    def get_administered_organizations(self, user) -> list[SourceOrganization]:
+        self._user = user
+        ResanaTokenManager(user).ensure_offline_token()
+        entries = self._get_members_client().get_administered_organizations()
+        can_filter = any(
+            _organization_admin_role(entry) is not None for entry in entries
+        )
+        if entries and not can_filter:
+            logger.warning(
+                "getPerimetre entries have no role field; keeping all organisations"
+            )
+        organizations = []
+        for entry in entries:
+            if can_filter and not _organization_admin_role(entry):
+                continue
+            source_id = _portal_entry_id(entry)
+            if source_id is None:
+                continue
+            organizations.append(
+                SourceOrganization(
+                    id=source_id,
+                    name=_portal_organization_name(entry, ""),
+                )
+            )
+        return organizations
+
+    def get_organization_workspaces(
+        self, user, organization_id: str
+    ) -> list[SourceWorkspace]:
+        self._user = user
+        ResanaTokenManager(user).ensure_offline_token()
+        members_client = self._get_members_client()
+        entries = members_client.get_organization_workspaces(organization_id)
+        uuid_by_slug, _ = _portal_workspace_maps(members_client)
+        workspaces = []
+        for entry in entries:
+            portal_id = _portal_entry_id(entry)
+            if portal_id is None:
+                continue
+            title = html.unescape(str(entry.get("nom") or portal_id))
+            ged_uuid = uuid_by_slug.get(portal_id)
+            raw = {
+                "portal_id": portal_id,
+                "uuid": ged_uuid,
+                "figer": entry.get("figer"),
+            }
+            try:
+                members = members_client.list_workspace_members(portal_id)
+            except (requests.RequestException, ValueError, KeyError, TypeError):
+                logger.warning(
+                    "Could not list members of portal workspace %s", portal_id
+                )
+            else:
+                if isinstance(members, list):
+                    raw["members"] = members
+            workspaces.append(
+                SourceWorkspace(
+                    id=ged_uuid or f"{PORTAL_SOURCE_PREFIX}{portal_id}",
+                    title=title,
+                    organization_id=organization_id,
+                    portal_id=portal_id,
+                    raw_data=raw,
+                )
+            )
+        return workspaces
+
+    def upsert_organization_workspace(
+        self, organization, source_ws: SourceWorkspace
+    ) -> Workspace | None:
+        portal_id = source_ws.portal_id or source_ws.raw_data.get("portal_id")
+        if not portal_id and source_ws.id.startswith(PORTAL_SOURCE_PREFIX):
+            portal_id = source_ws.id.removeprefix(PORTAL_SOURCE_PREFIX)
+        if not portal_id:
+            logger.warning("Skipping a portal workspace with no id")
+            return None
+        ged_uuid = source_ws.raw_data.get("uuid")
+        placeholder = f"{PORTAL_SOURCE_PREFIX}{portal_id}"
+        workspace = _canonical_portal_workspace(portal_id, ged_uuid, placeholder)
+        if workspace is None:
+            workspace = Workspace(
+                portal_id=portal_id,
+                source_id=ged_uuid or placeholder,
+                source_type=self.source_type,
+                title=source_ws.title,
+                organization=organization,
+            )
+        workspace.portal_id = portal_id
+        workspace.title = source_ws.title
+        workspace.organization = organization
+        if not workspace.source_type:
+            workspace.source_type = self.source_type
+        if ged_uuid:
+            workspace.source_id = ged_uuid
+        elif not workspace.source_id:
+            workspace.source_id = placeholder
+        workspace.is_source_locked = _portal_is_locked(source_ws.raw_data)
+        members = source_ws.raw_data.get("members")
+        if isinstance(members, list) and not workspace.members:
+            workspace.members = members
+        workspace.save()
+        return workspace
 
     @staticmethod
     def _get_managed_locked_workspace_uuids(
@@ -448,3 +666,37 @@ class ResanaSourceBackend(AbstractSourceBackend):
                 )
             )
         return folder
+
+
+def _shared_organization(workspace: dict) -> tuple[str | None, str]:
+    """Return the organization id and name carried by a GED workspace.
+
+    Personal spaces are never attached. The field is optional and may be a
+    string id or an object with id/uuid and name/nom.
+    """
+    if workspace.get("isPersonalWorkspace"):
+        return None, ""
+    raw = workspace.get("organization")
+    if isinstance(raw, str) and raw:
+        return raw, ""
+    if isinstance(raw, dict):
+        org_id = raw.get("id") or raw.get("uuid")
+        if org_id:
+            name = raw.get("name") or raw.get("nom") or ""
+            return str(org_id), html.unescape(str(name)) if name else ""
+    return None, ""
+
+
+def _portal_entry_id(entry: dict) -> str | None:
+    raw = entry.get("id")
+    if raw in (None, ""):
+        logger.warning("Skipping a portal entry with no id")
+        return None
+    return str(raw)
+
+
+def _portal_organization_name(entry: dict, fallback: str) -> str:
+    name = entry.get("name")
+    if not name:
+        return fallback
+    return html.unescape(str(name))

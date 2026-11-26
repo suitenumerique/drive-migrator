@@ -328,7 +328,9 @@ def test_callback_exchanges_the_code_with_the_stored_verifier(settings):
         "core.api.views.resana_auth.exchange_code_for_tokens"
     ) as mock_exchange, patch(
         "core.api.views.resana_auth.create_bridge_session"
-    ) as mock_bridge:
+    ) as mock_bridge, patch(
+        "core.api.views.resana_auth.sync_administered_organizations.delay"
+    ):
         mock_exchange.return_value = {
             "access_token": _make_access_jwt(),
             "refresh_token": "offline-tok",
@@ -364,7 +366,9 @@ def test_callback_stores_tokens_and_redirects_to_success(settings):
         "core.api.views.resana_auth.exchange_code_for_tokens"
     ) as mock_exchange, patch(
         "core.api.views.resana_auth.create_bridge_session"
-    ) as mock_bridge:
+    ) as mock_bridge, patch(
+        "core.api.views.resana_auth.sync_administered_organizations.delay"
+    ) as mock_delay:
         mock_exchange.return_value = {
             "access_token": _make_access_jwt(),
             "refresh_token": "offline-tok",
@@ -380,6 +384,7 @@ def test_callback_stores_tokens_and_redirects_to_success(settings):
 
     assert response.status_code == 302
     assert response.url == SUCCESS_URL
+    mock_delay.assert_called_once_with(str(user.id))
 
     user.refresh_from_db()
     assert decrypt_token(user.resana_refresh_token) == "offline-tok"
@@ -401,7 +406,9 @@ def test_callback_clears_the_pending_auth_so_it_cannot_be_replayed(settings):
         "core.api.views.resana_auth.exchange_code_for_tokens"
     ) as mock_exchange, patch(
         "core.api.views.resana_auth.create_bridge_session"
-    ) as mock_bridge:
+    ) as mock_bridge, patch(
+        "core.api.views.resana_auth.sync_administered_organizations.delay"
+    ):
         mock_exchange.return_value = {
             "access_token": _make_access_jwt(),
             "refresh_token": "offline-tok",
