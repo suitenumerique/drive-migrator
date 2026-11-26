@@ -22,5 +22,6 @@ namespace NodeJS {
     NEXT_PUBLIC_API_ORIGIN?: string;
     NEXT_PUBLIC_SIGNALING_URL?: string;
     FRONTEND_THEME?: string;
+    ADMIN_ORG_SYNC_TIMEOUT_SECONDS?: string;
   }
 }
