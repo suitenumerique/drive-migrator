@@ -4,11 +4,12 @@ Same auth setup as ResanaMembersClient: the interstis_access/PHPSESSID cookies a
 X-CSRF-TOKEN header come from ResanaTokenManager, not from decoding the JWT or scraping HTML.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import requests
 
+from core.retrying_session import RetryingSession
 from core.sources.resana.resana_lock_client import (
     ResanaChildDroitError,
     ResanaLockClient,
@@ -41,15 +42,23 @@ _GET_FOLDERS_RESPONSE = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _stub_retrying_session(monkeypatch):
+    """Keep _make_client() argument-free: RetryingSession is replaced by a MagicMock."""
+    monkeypatch.setattr(
+        "core.sources.resana.resana_lock_client.RetryingSession",
+        MagicMock(),
+    )
+
+
 def _make_client():
     """Build a ResanaLockClient with a mocked underlying RetryingSession."""
-    with patch("core.sources.resana.resana_lock_client.RetryingSession"):
-        client = ResanaLockClient(
-            access_token=ACCESS_TOKEN,
-            session_id=PHP_SESSION_ID,
-            csrf_token=CSRF_TOKEN,
-            base_url=BASE_URL,
-        )
+    client = ResanaLockClient(
+        access_token=ACCESS_TOKEN,
+        session_id=PHP_SESSION_ID,
+        csrf_token=CSRF_TOKEN,
+        base_url=BASE_URL,
+    )
     client.session = MagicMock()
     return client
 
@@ -59,66 +68,74 @@ def _make_client():
 # ---------------------------------------------------------------------------
 
 
-def test_init_sets_access_token_cookie():
+def test_init_sets_access_token_cookie(monkeypatch):
     """Constructor sets the interstis_access cookie with the provided token."""
-    with patch(
-        "core.sources.resana.resana_lock_client.RetryingSession"
-    ) as mock_session:
-        ResanaLockClient(
-            access_token=ACCESS_TOKEN,
-            session_id=PHP_SESSION_ID,
-            csrf_token=CSRF_TOKEN,
-            base_url=BASE_URL,
-        )
+    mock_session = MagicMock()
+    monkeypatch.setattr(
+        "core.sources.resana.resana_lock_client.RetryingSession",
+        mock_session,
+    )
+    ResanaLockClient(
+        access_token=ACCESS_TOKEN,
+        session_id=PHP_SESSION_ID,
+        csrf_token=CSRF_TOKEN,
+        base_url=BASE_URL,
+    )
 
     mock_session.return_value.cookies.set.assert_any_call(
         "interstis_access", ACCESS_TOKEN
     )
 
 
-def test_init_sets_php_session_id_cookie():
+def test_init_sets_php_session_id_cookie(monkeypatch):
     """Constructor sets PHPSESSID from the session_id argument."""
-    with patch(
-        "core.sources.resana.resana_lock_client.RetryingSession"
-    ) as mock_session:
-        ResanaLockClient(
-            access_token=ACCESS_TOKEN,
-            session_id=PHP_SESSION_ID,
-            csrf_token=CSRF_TOKEN,
-            base_url=BASE_URL,
-        )
+    mock_session = MagicMock()
+    monkeypatch.setattr(
+        "core.sources.resana.resana_lock_client.RetryingSession",
+        mock_session,
+    )
+    ResanaLockClient(
+        access_token=ACCESS_TOKEN,
+        session_id=PHP_SESSION_ID,
+        csrf_token=CSRF_TOKEN,
+        base_url=BASE_URL,
+    )
 
     mock_session.return_value.cookies.set.assert_any_call("PHPSESSID", PHP_SESSION_ID)
 
 
-def test_init_sets_csrf_header():
+def test_init_sets_csrf_header(monkeypatch):
     """Constructor sets X-CSRF-TOKEN from the csrf_token argument."""
-    with patch(
-        "core.sources.resana.resana_lock_client.RetryingSession"
-    ) as mock_session:
-        ResanaLockClient(
-            access_token=ACCESS_TOKEN,
-            session_id=PHP_SESSION_ID,
-            csrf_token=CSRF_TOKEN,
-            base_url=BASE_URL,
-        )
+    mock_session = MagicMock()
+    monkeypatch.setattr(
+        "core.sources.resana.resana_lock_client.RetryingSession",
+        mock_session,
+    )
+    ResanaLockClient(
+        access_token=ACCESS_TOKEN,
+        session_id=PHP_SESSION_ID,
+        csrf_token=CSRF_TOKEN,
+        base_url=BASE_URL,
+    )
 
     mock_session.return_value.headers.__setitem__.assert_any_call(
         "X-CSRF-TOKEN", CSRF_TOKEN
     )
 
 
-def test_init_uses_a_retrying_session_with_resana_settings():
+def test_init_uses_a_retrying_session_with_resana_settings(monkeypatch):
     """Constructor builds a RetryingSession driven by the RESANA_RETRY_* settings."""
-    with patch(
-        "core.sources.resana.resana_lock_client.RetryingSession"
-    ) as mock_session:
-        ResanaLockClient(
-            access_token=ACCESS_TOKEN,
-            session_id=PHP_SESSION_ID,
-            csrf_token=CSRF_TOKEN,
-            base_url=BASE_URL,
-        )
+    mock_session = MagicMock()
+    monkeypatch.setattr(
+        "core.sources.resana.resana_lock_client.RetryingSession",
+        mock_session,
+    )
+    ResanaLockClient(
+        access_token=ACCESS_TOKEN,
+        session_id=PHP_SESSION_ID,
+        csrf_token=CSRF_TOKEN,
+        base_url=BASE_URL,
+    )
 
     mock_session.assert_called_once()
     assert mock_session.call_args[0][0] == "RESANA"
@@ -139,7 +156,7 @@ def test_get_top_level_folder_ids_calls_get_folders():
     client.session.post.assert_called_once_with(
         f"{BASE_URL}/public/dossier/getFolders",
         params={"slug": SLUG},
-        data={"allFolders": "true"},
+        data={"allFolders": "true", "perimeterId": SLUG},
         timeout=30,
         retry=True,
     )
@@ -175,6 +192,20 @@ def test_list_folders_includes_nested_folders_and_droit():
             "dossier_mere": "12677577",
         },
     ]
+
+
+def test_list_folders_raises_when_perimeter_id_is_missing():
+    """HTTP 200 with the portal error must not be treated as an empty workspace."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "error": {
+            "message": ["perimeterId est manquant !"],
+            "titre": "getFoldersAction",
+        }
+    }
+
+    with pytest.raises(ResanaLockError, match="perimeterId"):
+        client.list_folders(SLUG)
 
 
 def test_grant_folder_access_raises_when_a_child_already_has_a_right():
@@ -433,13 +464,16 @@ def _status_response(status_code, payload=None):
 
 
 @pytest.fixture(name="base_request")
-def fixture_base_request():
+def fixture_base_request(monkeypatch):
     """Mock the requests.Session.request wrapped by RetryingSession, without sleeping."""
-    with (
-        patch("tenacity.nap.time.sleep"),
-        patch.object(requests.Session, "request") as mock_request,
-    ):
-        yield mock_request
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda *_args, **_kwargs: None)
+    mock_request = MagicMock()
+    monkeypatch.setattr(requests.Session, "request", mock_request)
+    monkeypatch.setattr(
+        "core.sources.resana.resana_lock_client.RetryingSession",
+        RetryingSession,
+    )
+    yield mock_request
 
 
 def test_get_top_level_folder_ids_is_retried_on_timeout(base_request):

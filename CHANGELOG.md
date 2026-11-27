@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Send perimeterId on Resana getFolders so locked folders are listed
+
 ## [v0.14.0] - 2026-11-26
 
 ### Fixed

@@ -100,11 +100,20 @@ class ResanaLockClient:
         resp = self.session.post(
             f"{self.base_url}/public/dossier/getFolders",
             params={"slug": slug},
-            data={"allFolders": "true"},
+            data={"allFolders": "true", "perimeterId": slug},
             timeout=_REQUEST_TIMEOUT,
             retry=True,
         )
         resp.raise_for_status()
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise ResanaLockError(f"Non-JSON response from {resp.url}") from exc
+        if not isinstance(payload, dict) or payload.get("error"):
+            raise ResanaLockError(f"Unsuccessful response from {resp.url}: {payload!r}")
+        folders = payload.get("folders")
+        if not isinstance(folders, list):
+            raise ResanaLockError(f"Unsuccessful response from {resp.url}: {payload!r}")
         listed = []
         seen = set()
 
@@ -127,7 +136,7 @@ class ResanaLockClient:
             for child in raw.get("children") or []:
                 visit(child, folder_id)
 
-        for raw in resp.json().get("folders", []):
+        for raw in folders:
             visit(raw, None)
         return listed
 
