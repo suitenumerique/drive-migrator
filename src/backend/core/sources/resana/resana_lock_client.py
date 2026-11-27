@@ -105,7 +105,7 @@ class ResanaLockClient:
     def list_folders(self, slug: str) -> list[dict]:
         """Return every folder from getFolders, including ones nested in children.
 
-        Each item has id, name, dossier_mere, and droit when the payload has it.
+        Each item has id, name, dossier_mere, and droit/defaut when the payload has them.
         A child that omits dossier_mere is recorded under the parent it was nested in.
         """
         resp = self.session.post(
@@ -143,6 +143,8 @@ class ResanaLockClient:
             }
             if "droit" in raw:
                 folder["droit"] = raw["droit"]
+            if "defaut" in raw:
+                folder["defaut"] = raw["defaut"]
             listed.append(folder)
             for child in raw.get("children") or []:
                 visit(child, folder_id)

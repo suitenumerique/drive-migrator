@@ -36,6 +36,39 @@ def test_begin_export_grants_unrestricted_root_without_unlocking(monkeypatch, se
     assert not workspace.source_lock_state.get("permissions_removed")
 
 
+def test_begin_export_skips_default_inbox_and_grants_other_roots(monkeypatch, settings):
+    """The portal default folder (defaut == "1") cannot be limited; other roots still are."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(source_type="resana")
+
+    _mock_tm, _members, mock_lock, _logger = _stub_resana_clients(monkeypatch)
+    mock_lock.return_value.list_folders.return_value = [
+        {
+            "id": "inbox",
+            "name": "A classer",
+            "dossier_mere": None,
+            "defaut": "1",
+        },
+        {
+            "id": "root",
+            "name": "DOSSIER VERROUILLE USER 1",
+            "dossier_mere": None,
+        },
+    ]
+    ResanaSourceBackend().begin_export(workspace)
+
+    mock_lock.return_value.grant_folder_access.assert_called_once_with(
+        "2137419", "root", "2040942"
+    )
+    mock_lock.return_value.release_folder_access.assert_not_called()
+    mock_lock.return_value.get_folder_access_owners.assert_called_once_with(
+        "2137419", "root"
+    )
+    workspace.refresh_from_db()
+    assert workspace.source_lock_state["folders_granted_by_us"] == ["root"]
+    assert not workspace.source_lock_state.get("permissions_removed")
+
+
 def test_begin_export_unlocks_root_limited_to_someone_else_then_grants(
     monkeypatch, settings
 ):

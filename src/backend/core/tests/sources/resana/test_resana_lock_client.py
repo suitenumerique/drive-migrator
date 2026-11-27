@@ -195,6 +195,33 @@ def test_list_folders_includes_nested_folders_and_droit():
     ]
 
 
+def test_list_folders_keeps_defaut_from_the_payload():
+    """The portal default inbox is flagged with defaut so begin_export can skip it."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "folders": [
+            {
+                "id": "12677569",
+                "name": "A classer",
+                "dossier_mere": None,
+                "defaut": "1",
+                "droit": None,
+                "children": [],
+            }
+        ]
+    }
+
+    assert client.list_folders(SLUG) == [
+        {
+            "id": "12677569",
+            "name": "A classer",
+            "dossier_mere": None,
+            "droit": None,
+            "defaut": "1",
+        }
+    ]
+
+
 def test_list_folders_raises_when_perimeter_id_is_missing():
     """HTTP 200 with the portal error must not be treated as an empty workspace."""
     client = _make_client()

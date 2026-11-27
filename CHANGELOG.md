@@ -10,6 +10,7 @@ and this project adheres to
 
 ### Fixed
 
+- Skip Resana default inbox when granting root folder access
 - Grant Resana roots first, recover from child or parent-locked errors
 - Send perimeterId on Resana getFolders so locked folders are listed
 

@@ -290,8 +290,10 @@ class ResanaSourceBackend(AbstractSourceBackend):
         Runs before any file is read, so a concurrent edit can't be missed and a
         folder we otherwise lack rights on doesn't get silently skipped (#215).
         For each root, saveDroit first; recover from a child-droit or already-
-        limited error by unlocking the blocker, then retry. Folder grants stay
-        in place after the run; finalize_export() only unfreezes the workspace.
+        limited error by unlocking the blocker, then retry. The portal default
+        inbox (defaut == "1") cannot be limited and is left as-is. Folder
+        grants stay in place after the run; finalize_export() only unfreezes
+        the workspace.
 
         Idempotent: if the workspace is already locked, or a folder is already
         restricted to exactly our account, we don't touch it again.
@@ -344,11 +346,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
         for folder in folders:
             if folder.get("dossier_mere") is not None:
                 continue
-<<<<<<< HEAD
-            if folder["id"] in granted_folder_ids:
-=======
             if str(folder.get("defaut") or "") == "1":
->>>>>>> 4ed2947 (🐛(backend) record a Resana root grant only after saveDroit)
                 continue
             current_owners = lock_client.get_folder_access_owners(slug, folder["id"])
             if current_owners == [user_id]:
