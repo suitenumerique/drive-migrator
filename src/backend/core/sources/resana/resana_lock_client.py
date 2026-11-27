@@ -28,11 +28,20 @@ class ResanaChildDroitError(ResanaLockError):
     """
 
 
+class ResanaParentDroitError(ResanaLockError):
+    """deverouilleDossier refused because an ancestor folder is still locked.
+
+    The portal answers HTTP 200 with this error and applies nothing.
+    """
+
+
 # The portal answers HTTP 200 with this body (success is absent), applying nothing:
 # {"error": {"message": "Un droit est déjà appliqué sur l'un des dossiers enfants !",
 #            "titre": ""}}
 # We match on the stable substring: the apostrophe in "l'un" is a straight quote.
 _CHILD_DROIT_MESSAGE = "dossiers enfants"
+# "Un dossier parent vérouillé bloque cette action."
+_PARENT_LOCKED_MESSAGE = "dossier parent"
 
 
 def _raise_unless_success(resp) -> None:
@@ -55,6 +64,8 @@ def _raise_unless_success(resp) -> None:
         message = str(error.get("message") or "")
     if _CHILD_DROIT_MESSAGE in message:
         raise ResanaChildDroitError(message)
+    if _PARENT_LOCKED_MESSAGE in message:
+        raise ResanaParentDroitError(message)
     raise ResanaLockError(f"Unsuccessful response from {resp.url}: {data!r}")
 
 

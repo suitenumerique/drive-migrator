@@ -14,6 +14,7 @@ from core.sources.resana.resana_lock_client import (
     ResanaChildDroitError,
     ResanaLockClient,
     ResanaLockError,
+    ResanaParentDroitError,
 )
 
 BASE_URL = "https://resana-web.example.test"
@@ -220,6 +221,20 @@ def test_grant_folder_access_raises_when_a_child_already_has_a_right():
 
     with pytest.raises(ResanaChildDroitError, match="dossiers enfants"):
         client.grant_folder_access(SLUG, "12677577", "2040942")
+
+
+def test_release_folder_access_raises_when_a_parent_is_locked():
+    """HTTP 200 with the parent-locked error is a failure: nothing was applied."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "error": {
+            "message": "Un dossier parent vérouillé bloque cette action.",
+            "titre": "",
+        }
+    }
+
+    with pytest.raises(ResanaParentDroitError, match="dossier parent"):
+        client.release_folder_access(SLUG, "12677578")
 
 
 def test_get_top_level_folder_ids_excludes_nested_folders():

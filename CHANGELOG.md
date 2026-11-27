@@ -10,6 +10,7 @@ and this project adheres to
 
 ### Fixed
 
+- Grant Resana roots first, recover from child or parent-locked errors
 - Send perimeterId on Resana getFolders so locked folders are listed
 
 ## [v0.14.0] - 2026-11-26
