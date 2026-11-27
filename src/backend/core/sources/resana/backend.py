@@ -92,14 +92,25 @@ def _php_folder_name_path(folder: dict, by_id: dict) -> tuple[str, ...]:
     return tuple(part for part in parts if part)
 
 
-def _ged_folder_at(root: SourceFolder, path: tuple[str, ...]) -> SourceFolder | None:
+def _ged_folder_at(
+    root: SourceFolder, path: tuple[str, ...]
+) -> tuple[SourceFolder | None, tuple[str, ...] | None]:
+    """Return the unique GED folder at `path`.
+
+    The second value is the path prefix that matched more than one child.
+    Both are None when a segment is missing.
+    """
     node = root
+    walked = []
     for name in path:
-        match = next((child for child in node.children if child.name == name), None)
-        if match is None:
-            return None
-        node = match
-    return node
+        matches = [child for child in node.children if child.name == name]
+        walked.append(name)
+        if len(matches) > 1:
+            return None, tuple(walked)
+        if not matches:
+            return None, None
+        node = matches[0]
+    return node, None
 
 
 def _php_file_name_parts(item: dict) -> tuple[str, str] | None:
@@ -307,7 +318,7 @@ class ResanaSourceBackend(AbstractSourceBackend):
         root = self._explore_folder(workspace.source_id, "", client)
         slug = (workspace.source_lock_state or {}).get("slug")
         if slug:
-            self._add_php_listed_files(root, slug)
+            self._add_php_listed_files(workspace, root, slug)
         return root
 
     def download_file(self, file: SourceFile, destination_path: str) -> None:
@@ -504,42 +515,86 @@ class ResanaSourceBackend(AbstractSourceBackend):
             drop_descendants()
             grant()
 
-    def _add_php_listed_files(self, root: SourceFolder, slug: str) -> None:
+    def _add_php_listed_files(self, workspace, root: SourceFolder, slug: str) -> None:
         """Append files the PHP GED lists that GED explore omitted.
 
         Folder saveDroit does not lift a file-level droit, so those files never
         appear in explore. The animator session can still list and download them.
-        Skip the default inbox: it is not migrated. Name+extension already in
-        the GED folder is treated as the same file.
+        Skip the default inbox: it is not migrated. A PHP file with no droit and
+        the same name as a GED file is the same file. A restricted file that
+        shares a name is kept under a disambiguated name. A folder path that
+        matches more than one GED folder is skipped. Both cases are recorded
+        for the starter's mail.
         """
         lock_client = self._get_lock_client()
         folders = lock_client.list_folders(slug)
         by_id = {folder["id"]: folder for folder in folders}
+        duplicates = []
         for folder in folders:
             if str(folder.get("defaut") or "") == "1":
                 continue
-            ged_folder = _ged_folder_at(root, _php_folder_name_path(folder, by_id))
+            path = _php_folder_name_path(folder, by_id)
+            ged_folder, ambiguous = _ged_folder_at(root, path)
+            if ambiguous is not None:
+                logger.warning(
+                    "Resana folder path %s matches more than one GED folder, "
+                    "skipping its PHP files",
+                    " / ".join(ambiguous),
+                )
+                duplicates.extend(
+                    self._unplaced_php_files(lock_client, slug, folder["id"], ambiguous)
+                )
+                continue
             if ged_folder is None:
                 continue
-            existing = {source.name_with_extension for source in ged_folder.files}
-            for item in lock_client.list_files(slug, folder["id"]):
-                parts = _php_file_name_parts(item)
-                if parts is None:
+            self._append_php_files(
+                ged_folder, lock_client, slug, folder["id"], path, duplicates
+            )
+        state = dict(workspace.source_lock_state or {})
+        state["duplicate_files"] = duplicates
+        workspace.source_lock_state = state
+        workspace.save(update_fields=["source_lock_state"])
+
+    def _append_php_files(  # noqa: PLR0913  # pylint: disable=too-many-arguments
+        self, ged_folder, lock_client, slug, folder_id, path, duplicates
+    ) -> None:
+        """Add PHP files missing from `ged_folder`, keeping a restricted name clash."""
+        folder_path = " / ".join(path)
+        existing = {source.name_with_extension for source in ged_folder.files}
+        for item in lock_client.list_files(slug, folder_id):
+            parts = _php_file_name_parts(item)
+            if parts is None:
+                continue
+            name, extension = parts
+            key = name + extension
+            if key in existing:
+                if not item.get("droit"):
                     continue
-                name, extension = parts
+                duplicates.append({"name": key, "path": folder_path})
+                name = f"{name} ({item['id']})"
                 key = name + extension
-                if key in existing:
-                    continue
-                ged_folder.files.append(
-                    SourceFile(
-                        id=item["id"],
-                        name=name,
-                        extension=extension,
-                        download_url=item["id"],
-                        raw_data={"php": True, "slug": slug},
-                    )
+            ged_folder.files.append(
+                SourceFile(
+                    id=item["id"],
+                    name=name,
+                    extension=extension,
+                    download_url=item["id"],
+                    raw_data={"php": True, "slug": slug},
                 )
-                existing.add(key)
+            )
+            existing.add(key)
+
+    def _unplaced_php_files(self, lock_client, slug, folder_id, path) -> list[dict]:
+        """Files we could not attach because their folder path was ambiguous."""
+        unplaced = []
+        folder_path = " / ".join(path)
+        for item in lock_client.list_files(slug, folder_id):
+            parts = _php_file_name_parts(item)
+            if parts is None:
+                continue
+            name, extension = parts
+            unplaced.append({"name": name + extension, "path": folder_path})
+        return unplaced
 
     @staticmethod
     def _release_folder(workspace, lock_client, slug, folder, by_id) -> None:

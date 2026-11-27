@@ -58,10 +58,11 @@ def test_export_emails_removed_folders_to_the_starter():
         "folder_permissions_removed",
         {
             "title": (
-                f"Les accès aux dossiers de l'espace "
-                f"{workspace.title} ont été limités"
+                f"Les accès aux dossiers de l'espace {workspace.title} ont été limités"
             ),
+            "access_limited": True,
             "removed_folders": ["Secret"],
+            "duplicate_files": [],
         },
     )
     workspace.refresh_from_db()
@@ -83,10 +84,11 @@ def test_export_emails_when_only_folders_were_granted():
         "folder_permissions_removed",
         {
             "title": (
-                f"Les accès aux dossiers de l'espace "
-                f"{workspace.title} ont été limités"
+                f"Les accès aux dossiers de l'espace {workspace.title} ont été limités"
             ),
+            "access_limited": True,
             "removed_folders": [],
+            "duplicate_files": [],
         },
     )
     workspace.refresh_from_db()
@@ -122,5 +124,30 @@ def test_export_emails_removed_folders_when_the_migration_fails():
     )
 
     mock_mails.return_value.send_migration_mail.assert_called_once()
+    workspace.refresh_from_db()
+    assert workspace.source_lock_state["permissions_mail_sent"] is True
+
+
+def test_export_emails_duplicate_files_without_a_permission_change():
+    """A name or path clash is mailed once, without claiming access changed."""
+    user = UserFactory(email="starter@example.com")
+    duplicates = [{"name": "open.odt", "path": "Dossier"}]
+    workspace = WorkspaceFactory(
+        source_type="resana",
+        source_lock_state={"duplicate_files": duplicates},
+    )
+    mock_mails = _run_export(workspace, user)
+
+    mock_mails.return_value.send_migration_mail.assert_called_once_with(
+        user,
+        workspace,
+        "folder_permissions_removed",
+        {
+            "title": f"Des fichiers en double dans l'espace {workspace.title}",
+            "access_limited": False,
+            "removed_folders": [],
+            "duplicate_files": duplicates,
+        },
+    )
     workspace.refresh_from_db()
     assert workspace.source_lock_state["permissions_mail_sent"] is True

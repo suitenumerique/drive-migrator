@@ -10,6 +10,7 @@ and this project adheres to
 
 ### Fixed
 
+- Email Resana duplicate file names and paths for the user to sort
 - Download Resana restricted files via the PHP portal, not file grants
 - List Resana folder files from tabInformation so restricted ones migrate
 - Skip Resana default inbox when granting root folder access

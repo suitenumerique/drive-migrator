@@ -378,6 +378,98 @@ def test_get_workspace_structure_skips_php_name_duplicates(monkeypatch, settings
     assert [item.id for item in result.children[0].files] == ["ged-1"]
 
 
+def test_get_workspace_structure_keeps_restricted_file_on_name_clash(
+    monkeypatch, settings
+):
+    """A restricted PHP file that shares a GED name is kept, and mailed."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(
+        source_type="resana",
+        migration_user=UserFactory(),
+        source_lock_state={"slug": "2137419"},
+    )
+
+    _mock_tm, _members, mock_lock, _logger = _stub_resana_clients(
+        monkeypatch, stub_members=False, configure_lock=False
+    )
+    mock_ged = MagicMock()
+    monkeypatch.setattr("core.sources.resana.backend.InterstisClient", mock_ged)
+    mock_ged.return_value.explore.side_effect = lambda uuid: _structure_explore(
+        uuid, workspace.source_id
+    )
+    mock_lock.return_value.list_folders.return_value = [
+        {
+            "id": "12677637",
+            "name": "DOSSIER AVEC FICHIER USER 1",
+            "dossier_mere": None,
+        }
+    ]
+    mock_lock.return_value.list_files.return_value = [
+        {
+            "id": "48006411",
+            "name": "open",
+            "extension": ".odt",
+            "droit": {"type": "utilisateur", "tabId": ["999"]},
+        }
+    ]
+    result = ResanaSourceBackend().get_workspace_structure(workspace)
+
+    names = [item.name_with_extension for item in result.children[0].files]
+    assert "open.odt" in names
+    assert "open (48006411).odt" in names
+    workspace.refresh_from_db()
+    assert workspace.source_lock_state["duplicate_files"] == [
+        {"name": "open.odt", "path": "DOSSIER AVEC FICHIER USER 1"}
+    ]
+
+
+def test_get_workspace_structure_skips_ambiguous_ged_folder_names(
+    monkeypatch, settings
+):
+    """PHP files under a path that matches two GED folders are not migrated."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(
+        source_type="resana",
+        migration_user=UserFactory(),
+        source_lock_state={"slug": "2137419"},
+    )
+
+    def _explore(uuid):
+        if uuid == workspace.source_id:
+            return [
+                {
+                    "folders": [
+                        {"uuid": "a", "name": "Doublon"},
+                        {"uuid": "b", "name": "Doublon"},
+                    ],
+                    "files": [],
+                }
+            ]
+        return [{"folders": [], "files": []}]
+
+    _mock_tm, _members, mock_lock, _logger = _stub_resana_clients(
+        monkeypatch, stub_members=False, configure_lock=False
+    )
+    mock_ged = MagicMock()
+    monkeypatch.setattr("core.sources.resana.backend.InterstisClient", mock_ged)
+    mock_ged.return_value.explore.side_effect = _explore
+    mock_lock.return_value.list_folders.return_value = [
+        {"id": "php-1", "name": "Doublon", "dossier_mere": None}
+    ]
+    mock_lock.return_value.list_files.return_value = [
+        {"id": "hidden", "name": "secret.odt"}
+    ]
+    result = ResanaSourceBackend().get_workspace_structure(workspace)
+
+    assert all(not folder.files for folder in result.children)
+    workspace.refresh_from_db()
+    assert workspace.source_lock_state["duplicate_files"] == [
+        {"name": "secret.odt", "path": "Doublon"}
+    ]
+
+
 def test_get_workspace_structure_skips_default_inbox_files(monkeypatch, settings):
     """The portal default folder is not migrated, including its PHP-listed files."""
     settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"

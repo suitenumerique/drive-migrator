@@ -61,6 +61,7 @@ def test_send_migration_mail_lists_removed_folder_permissions():
         "folder_permissions_removed",
         {
             "title": "Les accès aux dossiers ont été limités",
+            "access_limited": True,
             "removed_folders": ["Secret", "Au fond"],
         },
     )
@@ -88,6 +89,7 @@ def test_send_migration_mail_restricted_access_without_removed_folders():
         "folder_permissions_removed",
         {
             "title": "Les accès aux dossiers ont été limités",
+            "access_limited": True,
             "removed_folders": [],
         },
     )
@@ -96,6 +98,31 @@ def test_send_migration_mail_restricted_access_without_removed_folders():
     assert "Vous seul avez les droits d'accès" in sent.body
     assert "autres animateurs" in sent.body
     assert "Les accès limités des dossiers suivants ont été supprimés" not in sent.body
+
+
+@pytest.mark.django_db
+def test_send_migration_mail_lists_duplicate_files_for_the_user_to_handle():
+    """Duplicate names and paths are listed, and access is not claimed changed."""
+    workspace = WorkspaceFactory(title="Équipe")
+    user = UserFactory(email="starter@example.com")
+
+    MailsManager().send_migration_mail(
+        user,
+        workspace,
+        "folder_permissions_removed",
+        {
+            "title": "Des fichiers en double",
+            "access_limited": False,
+            "removed_folders": [],
+            "duplicate_files": [{"name": "open.odt", "path": "Dossier / Secret"}],
+        },
+    )
+
+    sent = mail.outbox[0]
+    assert "Vous seul avez les droits d'accès" not in sent.body
+    assert "Vous devez les traiter vous-même" in sent.body
+    assert "open.odt" in sent.body
+    assert "Dossier / Secret" in sent.body
 
 
 @pytest.mark.django_db

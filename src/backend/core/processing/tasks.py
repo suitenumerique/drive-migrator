@@ -34,27 +34,34 @@ logger = get_task_logger(__name__)
 
 
 def _notify_removed_folder_permissions(user, workspace) -> None:
-    """Email the starter that folder access stays limited to their account. Once only."""
+    """Email the starter about folder access and duplicate files. Once only."""
     state = workspace.source_lock_state
     if not isinstance(state, dict):
         return
     granted = state.get("folders_granted_by_us") or []
     removed = state.get("permissions_removed") or []
-    if (not granted and not removed) or state.get("permissions_mail_sent"):
+    duplicates = state.get("duplicate_files") or []
+    access_limited = bool(granted or removed)
+    if (not access_limited and not duplicates) or state.get("permissions_mail_sent"):
         return
+    if access_limited:
+        title = _(
+            f"Les accès aux dossiers de l'espace {workspace.title} ont été limités"
+        )
+    else:
+        title = _(f"Des fichiers en double dans l'espace {workspace.title}")
     try:
         MailsManager().send_migration_mail(
             user,
             workspace,
             "folder_permissions_removed",
             {
-                "title": _(
-                    f"Les accès aux dossiers de l'espace "
-                    f"{workspace.title} ont été limités"
-                ),
+                "title": title,
+                "access_limited": access_limited,
                 "removed_folders": [
                     item.get("name") or item.get("id") for item in removed
                 ],
+                "duplicate_files": duplicates,
             },
         )
     except Exception:  # pylint: disable=broad-exception-caught

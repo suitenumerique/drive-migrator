@@ -11,11 +11,20 @@
           </mj-text>
           <mj-divider border-width="1px" border-style="solid" border-color="#DDDDDD" width="30%" align="left"/>
 
+          <mj-raw>{% if access_limited %}</mj-raw>
           <mj-text>{% blocktrans %}Pendant la migration de l'espace <strong>{{workspace_name}}</strong>, les accès aux dossiers ont été limités à votre compte. Vous seul avez les droits d'accès. Les autres animateurs de l'espace peuvent modifier ces limites.{% endblocktrans %}</mj-text>
           <mj-raw>{% if removed_folders %}</mj-raw>
           <mj-text>{% trans "Les accès limités des dossiers suivants ont été supprimés :" %}</mj-text>
           <mj-raw>{% for folder_name in removed_folders %}</mj-raw>
           <mj-text>{{ folder_name }}</mj-text>
+          <mj-raw>{% endfor %}</mj-raw>
+          <mj-raw>{% endif %}</mj-raw>
+          <mj-raw>{% endif %}</mj-raw>
+
+          <mj-raw>{% if duplicate_files %}</mj-raw>
+          <mj-text>{% trans "Des fichiers portent le même nom ou le même chemin. Vous devez les traiter vous-même :" %}</mj-text>
+          <mj-raw>{% for item in duplicate_files %}</mj-raw>
+          <mj-text>{{ item.name }} — {{ item.path }}</mj-text>
           <mj-raw>{% endfor %}</mj-raw>
           <mj-raw>{% endif %}</mj-raw>
 
