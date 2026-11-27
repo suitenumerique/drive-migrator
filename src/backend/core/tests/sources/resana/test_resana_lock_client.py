@@ -636,9 +636,13 @@ def test_list_files_raises_when_the_payload_has_an_error():
         client.list_files(SLUG, "12677637")
 
 
-def _stream_response(content=b"%PDF binary", content_type="application/pdf"):
+def _stream_response(
+    content=b"%PDF binary", content_type="application/pdf", disposition=""
+):
     response = MagicMock()
     response.headers = {"Content-Type": content_type}
+    if disposition:
+        response.headers["Content-Disposition"] = disposition
     response.iter_content.return_value = iter([content])
     response.raise_for_status = MagicMock()
     response.url = f"{BASE_URL}/public/document/downloadFichier/222?slug={SLUG}"
@@ -674,6 +678,49 @@ def test_download_file_rejects_an_html_body(tmp_path):
 
     with pytest.raises(ResanaLockError, match="not a file"):
         client.download_file(SLUG, "222", str(tmp_path / "secret.pdf"))
+
+
+def test_download_file_writes_an_attached_html_file(tmp_path):
+    client = _make_client()
+    destination = str(tmp_path / "page.html")
+    body = b"<!DOCTYPE html><html><body>notes</body></html>"
+    client.session.get.return_value = _stream_response(
+        content=body,
+        content_type="text/html",
+        disposition='attachment; filename="page.html"',
+    )
+
+    client.download_file(SLUG, "222", destination)
+
+    with open(destination, "rb") as handle:
+        assert handle.read() == body
+
+
+def test_download_file_writes_an_attached_json_file(tmp_path):
+    client = _make_client()
+    destination = str(tmp_path / "notes.json")
+    body = b'{"title": "notes"}'
+    client.session.get.return_value = _stream_response(
+        content=body,
+        content_type="application/json",
+        disposition='attachment; filename="notes.json"',
+    )
+
+    client.download_file(SLUG, "222", destination)
+
+    with open(destination, "rb") as handle:
+        assert handle.read() == body
+
+
+def test_download_file_rejects_a_json_error(tmp_path):
+    client = _make_client()
+    client.session.get.return_value = _stream_response(
+        content=b'{"error": {"message": "nope"}}',
+        content_type="application/json",
+    )
+
+    with pytest.raises(ResanaLockError, match="not a file"):
+        client.download_file(SLUG, "222", str(tmp_path / "notes.json"))
 
 
 @pytest.mark.parametrize(

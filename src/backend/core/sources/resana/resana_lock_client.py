@@ -9,6 +9,7 @@ API hides behind a file-level droit.
 """
 
 import html
+import json
 import os
 import re
 
@@ -167,17 +168,33 @@ def _raise_unless_success(resp) -> None:
     raise ResanaLockError(f"Unsuccessful response from {resp.url}: {data!r}")
 
 
-def _looks_like_html_or_json_error(first: bytes, content_type: str) -> bool:
-    """True when downloadFichier returned a login page or a JSON error body."""
-    if content_type in ("text/html", "application/json"):
+def _json_has_error(body: bytes) -> bool:
+    """True when a JSON object carries an `error` key, including a partial chunk."""
+    stripped = body.lstrip()
+    if stripped.startswith(b'{"error"') or stripped.startswith(b'{ "error"'):
         return True
+    try:
+        data = json.loads(stripped.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return isinstance(data, dict) and "error" in data
+
+
+def _looks_like_portal_download_error(first: bytes, headers) -> bool:
+    """True when downloadFichier returned a login page or a JSON error body.
+
+    An attached HTML or JSON file is the document itself and is kept.
+    """
+    disposition = headers.get("Content-Disposition") or ""
+    if "attachment" in disposition.lower():
+        return False
+    content_type = (headers.get("Content-Type") or "").split(";", 1)[0]
+    content_type = content_type.strip().lower()
     stripped = first.lstrip()
     lowered = stripped.lower()
-    return (
-        lowered.startswith(b"<!doctype")
-        or lowered.startswith(b"<html")
-        or stripped.startswith(b'{"error"')
-    )
+    if content_type == "application/json" or stripped.startswith(b"{"):
+        return _json_has_error(stripped)
+    return lowered.startswith(b"<!doctype") or lowered.startswith(b"<html")
 
 
 class ResanaLockClient:
@@ -457,11 +474,9 @@ class ResanaLockClient:
             retry=True,
         ) as resp:
             resp.raise_for_status()
-            content_type = (resp.headers.get("Content-Type") or "").split(";", 1)[0]
-            content_type = content_type.strip().lower()
             iterator = resp.iter_content(chunk_size=_CHUNK_SIZE)
             first = next(iterator, b"")
-            if _looks_like_html_or_json_error(first, content_type):
+            if _looks_like_portal_download_error(first, resp.headers):
                 raise ResanaLockError(
                     f"Unsuccessful response from {resp.url}: not a file"
                 )
