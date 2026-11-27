@@ -51,6 +51,7 @@ def _patch_lock_client(mock_cls, top_level_folder_ids=None, folder_access_owners
         top_level_folder_ids or []
     )
     mock_cls.return_value.get_folder_access_owners.return_value = folder_access_owners
+    mock_cls.return_value.list_files.return_value = []
 
 
 _BACKEND = "core.sources.resana.backend"

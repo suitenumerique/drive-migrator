@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from core.backends.source import SourceFile
 from core.factories import UserFactory, WorkspaceFactory
 from core.sources.resana.backend import ResanaSourceBackend
 from core.sources.resana.resana_lock_client import (
@@ -268,6 +269,20 @@ def test_begin_export_raises_when_child_droit_remains_after_unlock(
     )
 
 
+def test_begin_export_does_not_list_or_grant_files(monkeypatch, settings):
+    """File-level droits are left in place; restricted files are downloaded later."""
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(source_type="resana")
+
+    _mock_tm, _members, mock_lock, _logger = _stub_resana_clients(
+        monkeypatch, top_level_folder_ids=["folder"]
+    )
+    ResanaSourceBackend().begin_export(workspace)
+
+    mock_lock.return_value.list_files.assert_not_called()
+    mock_lock.return_value.grant_file_access.assert_not_called()
+
+
 def _structure_explore(uuid, workspace_id="ws-uuid"):
     if uuid == workspace_id:
         return [
@@ -403,3 +418,28 @@ def test_get_workspace_structure_skips_default_inbox_files(monkeypatch, settings
 
     mock_lock.return_value.list_files.assert_not_called()
     assert result.children[0].files == []
+
+
+def test_download_file_uses_php_portal_for_php_files(monkeypatch, settings):
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    backend = ResanaSourceBackend()
+    backend._user = MagicMock()
+    source_file = SourceFile(
+        id="48006411",
+        name="secret",
+        extension=".pdf",
+        download_url="48006411",
+        raw_data={"php": True, "slug": "2137419"},
+    )
+
+    _mock_tm, _members, mock_lock, _logger = _stub_resana_clients(
+        monkeypatch, stub_members=False, configure_lock=False
+    )
+    mock_ged = MagicMock()
+    monkeypatch.setattr("core.sources.resana.backend.InterstisClient", mock_ged)
+    backend.download_file(source_file, "/tmp/secret.pdf")
+
+    mock_lock.return_value.download_file.assert_called_once_with(
+        "2137419", "48006411", "/tmp/secret.pdf"
+    )
+    mock_ged.return_value.download_file.assert_not_called()

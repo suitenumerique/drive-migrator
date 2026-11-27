@@ -10,6 +10,7 @@ and this project adheres to
 
 ### Fixed
 
+- Download Resana restricted files via the PHP portal, not file grants
 - List Resana folder files from tabInformation so restricted ones migrate
 - Skip Resana default inbox when granting root folder access
 - Grant Resana roots first, recover from child or parent-locked errors

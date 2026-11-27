@@ -601,6 +601,31 @@ def test_list_files_parses_information_ids_from_html_listing():
     ]
 
 
+def test_list_files_parses_title_and_extension_from_html_listing():
+    """The PHP GED HTML listing has span_titre and loupe value for name/extension."""
+    client = _make_client()
+    empty = MagicMock()
+    empty.json.return_value = {"tabInformation": []}
+    html = MagicMock()
+    html.json.side_effect = ValueError("not JSON")
+    html.text = (
+        '<li id="li_information_48006411">'
+        '<div class="actualite_loupe_viewer" value="48006411_.pdf"></div>'
+        "<span id='span_titre_48006411' class='notranslate'>"
+        "?-espace-administrateur,-contexte-pour-les-agents-de-code</span>"
+        "</li>"
+    )
+    client.session.post.side_effect = [empty, html]
+
+    assert client.list_files(SLUG, "12677637") == [
+        {
+            "id": "48006411",
+            "name": "?-espace-administrateur,-contexte-pour-les-agents-de-code",
+            "extension": ".pdf",
+        }
+    ]
+
+
 def test_list_files_raises_when_the_payload_has_an_error():
     client = _make_client()
     client.session.post.return_value.json.return_value = {
@@ -611,8 +636,50 @@ def test_list_files_raises_when_the_payload_has_an_error():
         client.list_files(SLUG, "12677637")
 
 
+def _stream_response(content=b"%PDF binary", content_type="application/pdf"):
+    response = MagicMock()
+    response.headers = {"Content-Type": content_type}
+    response.iter_content.return_value = iter([content])
+    response.raise_for_status = MagicMock()
+    response.url = f"{BASE_URL}/public/document/downloadFichier/222?slug={SLUG}"
+    response.__enter__ = lambda s: response
+    response.__exit__ = MagicMock(return_value=False)
+    return response
+
+
+def test_download_file_streams_download_fichier(tmp_path):
+    client = _make_client()
+    destination = str(tmp_path / "secret.pdf")
+    client.session.get.return_value = _stream_response()
+
+    client.download_file(SLUG, "222", destination)
+
+    client.session.get.assert_called_once_with(
+        f"{BASE_URL}/public/document/downloadFichier/222",
+        params={"slug": SLUG},
+        stream=True,
+        timeout=60,
+        retry=True,
+    )
+    with open(destination, "rb") as handle:
+        assert handle.read() == b"%PDF binary"
+
+
+def test_download_file_rejects_an_html_body(tmp_path):
+    client = _make_client()
+    client.session.get.return_value = _stream_response(
+        content=b"<!DOCTYPE html><html>login</html>",
+        content_type="text/html; charset=UTF-8",
+    )
+
+    with pytest.raises(ResanaLockError, match="not a file"):
+        client.download_file(SLUG, "222", str(tmp_path / "secret.pdf"))
+
+
 @pytest.mark.parametrize(
-    "call", ["grant_folder_access", "release_folder_access"], ids=lambda c: c
+    "call",
+    ["grant_folder_access", "release_folder_access"],
+    ids=lambda c: c,
 )
 def test_folder_access_calls_raise_on_unsuccessful_json(call):
     """A `{"success": false}` answer must not pass for a success."""
@@ -629,7 +696,9 @@ def test_folder_access_calls_raise_on_unsuccessful_json(call):
 
 
 @pytest.mark.parametrize(
-    "call", ["grant_folder_access", "release_folder_access"], ids=lambda c: c
+    "call",
+    ["grant_folder_access", "release_folder_access"],
+    ids=lambda c: c,
 )
 def test_folder_access_calls_raise_on_non_json_answer(call):
     """An expired session answers with the HTML login page: that's a failure too."""

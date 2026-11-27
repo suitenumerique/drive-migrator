@@ -4,10 +4,12 @@ Uses the same interstis_access token as the documented GED API, but talks to the
 undocumented internal PHP endpoints (reverse-engineered from the portal's XHR calls).
 Limited to what's needed to lock a workspace for the duration of a migration (#215):
 freeze it against edits, list folders (and clear blocking droits when needed),
-grant the migration account access to every folder, and list files the GED
+grant the migration account access to every folder, and download files the GED
 API hides behind a file-level droit.
 """
 
+import html
+import os
 import re
 
 from celery.utils.log import get_task_logger
@@ -50,6 +52,11 @@ _PARENT_LOCKED_MESSAGE = "dossier parent"
 
 
 _LI_INFORMATION_ID = re.compile(r"""id=["']li_information_(\d+)""")
+_SPAN_TITRE = re.compile(r"""id=["']span_titre_(\d+)["'][^>]*>([^<]*)""", re.I)
+_LOUPE_VALUE = re.compile(
+    r"""actualite_loupe_viewer["'][^>]*value=["'](\d+)_(.+?)["']""",
+    re.I,
+)
 _FILE_LIST_KEYS = ("tabInformation", "informations", "files")
 
 
@@ -72,6 +79,10 @@ def _information_item(raw: dict) -> dict | None:
         "id": str(file_id),
         "name": raw.get("name") or raw.get("titre") or "",
     }
+    extension = raw.get("extension")
+    if extension:
+        extension = str(extension)
+        item["extension"] = extension if extension.startswith(".") else f".{extension}"
     if "droit" in raw:
         item["droit"] = raw["droit"]
     if "verrouillage" in raw:
@@ -98,15 +109,36 @@ def _collect_informations(payload: dict) -> list[dict]:
     return listed
 
 
+def _loupe_extension(suffix: str) -> str:
+    """Turn the loupe `value` suffix (`_.pdf` or `name.pdf`) into an extension."""
+    suffix = html.unescape(suffix)
+    if suffix.startswith("."):
+        return suffix
+    _, extension = os.path.splitext(suffix)
+    return extension
+
+
 def _informations_from_html(markup: str) -> list[dict]:
-    """Pull information ids out of the PHP GED HTML listing."""
+    """Pull information ids, titles and extensions out of the PHP GED HTML listing."""
+    titles = {
+        file_id: html.unescape(title).strip()
+        for file_id, title in _SPAN_TITRE.findall(markup)
+    }
+    extensions = {}
+    for file_id, suffix in _LOUPE_VALUE.findall(markup):
+        extension = _loupe_extension(suffix)
+        if extension:
+            extensions[file_id] = extension
     listed = []
     seen = set()
     for file_id in _LI_INFORMATION_ID.findall(markup):
         if file_id in seen:
             continue
         seen.add(file_id)
-        listed.append({"id": file_id, "name": ""})
+        item = {"id": file_id, "name": titles.get(file_id, "")}
+        if file_id in extensions:
+            item["extension"] = extensions[file_id]
+        listed.append(item)
     return listed
 
 
@@ -133,6 +165,19 @@ def _raise_unless_success(resp) -> None:
     if _PARENT_LOCKED_MESSAGE in message:
         raise ResanaParentDroitError(message)
     raise ResanaLockError(f"Unsuccessful response from {resp.url}: {data!r}")
+
+
+def _looks_like_html_or_json_error(first: bytes, content_type: str) -> bool:
+    """True when downloadFichier returned a login page or a JSON error body."""
+    if content_type in ("text/html", "application/json"):
+        return True
+    stripped = first.lstrip()
+    lowered = stripped.lower()
+    return (
+        lowered.startswith(b"<!doctype")
+        or lowered.startswith(b"<html")
+        or stripped.startswith(b'{"error"')
+    )
 
 
 class ResanaLockClient:
@@ -223,7 +268,8 @@ class ResanaLockClient:
         """Return the ids of root folders only (dossier_mere is None).
 
         saveDroit/deverouilleDossier cascade to sub-folders. A file that
-        already has its own droit is left untouched.
+        already has its own droit is left untouched and is downloaded via
+        the PHP portal instead.
         """
         return [
             folder["id"]
@@ -282,7 +328,8 @@ class ResanaLockClient:
 
         This overwrites whatever access was previously configured on the folder
         (and cascades to sub-folders). A file that already has its own droit
-        keeps it. The restriction is left in place after the migration.
+        keeps it; those are downloaded via download_file(). The restriction is
+        left in place after the migration.
         """
         resp = self.session.post(
             f"{self.base_url}/public/dossier/saveDroit",
@@ -396,6 +443,33 @@ class ResanaLockClient:
         if not isinstance(payload, dict):
             raise ResanaLockError(f"Unsuccessful response from {resp.url}: {payload!r}")
         return payload
+
+    def download_file(
+        self, slug: str, information_id: str, destination_path: str
+    ) -> None:
+        """Download a file the PHP GED can see even when GED explore hides it."""
+        url = f"{self.base_url}/public/document/downloadFichier/{information_id}"
+        with self.session.get(
+            url,
+            params={"slug": slug},
+            stream=True,
+            timeout=_DOWNLOAD_TIMEOUT,
+            retry=True,
+        ) as resp:
+            resp.raise_for_status()
+            content_type = (resp.headers.get("Content-Type") or "").split(";", 1)[0]
+            content_type = content_type.strip().lower()
+            iterator = resp.iter_content(chunk_size=_CHUNK_SIZE)
+            first = next(iterator, b"")
+            if _looks_like_html_or_json_error(first, content_type):
+                raise ResanaLockError(
+                    f"Unsuccessful response from {resp.url}: not a file"
+                )
+            with open(destination_path, "wb") as handle:
+                if first:
+                    handle.write(first)
+                for chunk in iterator:
+                    handle.write(chunk)
 
     def release_folder_access(self, slug: str, folder_id: str) -> None:
         """Clear the folder's current droit via deverouilleDossier.

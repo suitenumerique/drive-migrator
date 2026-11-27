@@ -2,6 +2,7 @@
 
 import html
 import logging
+import os
 
 from django.conf import settings
 from django.db import DatabaseError
@@ -73,6 +74,45 @@ def _limited_to_someone_else(folder: dict, owners, user_id: str) -> bool:
         return True
     tab = _droit_ids(folder)
     return tab is not None and tab != ours
+
+
+def _php_folder_name_path(folder: dict, by_id: dict) -> tuple[str, ...]:
+    """Ancestor names of a PHP folder, root first, matching GED SourceFolder names."""
+    parts = []
+    current = folder
+    seen = set()
+    while current is not None:
+        parts.append(html.unescape(current.get("name") or ""))
+        parent_id = current.get("dossier_mere")
+        if not parent_id or parent_id in seen:
+            break
+        seen.add(parent_id)
+        current = by_id.get(parent_id)
+    parts.reverse()
+    return tuple(part for part in parts if part)
+
+
+def _ged_folder_at(root: SourceFolder, path: tuple[str, ...]) -> SourceFolder | None:
+    node = root
+    for name in path:
+        match = next((child for child in node.children if child.name == name), None)
+        if match is None:
+            return None
+        node = match
+    return node
+
+
+def _php_file_name_parts(item: dict) -> tuple[str, str] | None:
+    """Return (name, extension) for a PHP-listed file, or None if unnamed."""
+    name = html.unescape(item.get("name") or "").strip()
+    extension = str(item.get("extension") or "")
+    if extension and not extension.startswith("."):
+        extension = "." + extension
+    if not extension:
+        name, extension = os.path.splitext(name)
+    if not name:
+        return None
+    return name, extension
 
 
 def _is_descendant(folder: dict, ancestor_id: str, by_id: dict) -> bool:
@@ -264,9 +304,18 @@ class ResanaSourceBackend(AbstractSourceBackend):
     def get_workspace_structure(self, workspace) -> SourceFolder:
         self._user = workspace.migration_user
         client = self._get_client()
-        return self._explore_folder(workspace.source_id, "", client)
+        root = self._explore_folder(workspace.source_id, "", client)
+        slug = (workspace.source_lock_state or {}).get("slug")
+        if slug:
+            self._add_php_listed_files(root, slug)
+        return root
 
     def download_file(self, file: SourceFile, destination_path: str) -> None:
+        if file.raw_data.get("php"):
+            self._get_lock_client().download_file(
+                file.raw_data["slug"], file.id, destination_path
+            )
+            return
         client = self._get_client()
         client.download_file(file.download_url, destination_path)
 
@@ -290,10 +339,11 @@ class ResanaSourceBackend(AbstractSourceBackend):
         Runs before any file is read, so a concurrent edit can't be missed and a
         folder we otherwise lack rights on doesn't get silently skipped (#215).
         For each root, saveDroit first; recover from a child-droit or already-
-        limited error by unlocking the blocker, then retry. The portal default
-        inbox (defaut == "1") cannot be limited and is left as-is. Folder
-        grants stay in place after the run; finalize_export() only unfreezes
-        the workspace.
+        limited error by unlocking the blocker, then retry. File-level droits
+        are left as-is: restricted files are listed and downloaded via the
+        PHP portal later. The portal default inbox (defaut == "1") cannot be
+        limited and is left as-is. Folder grants stay in place after the run;
+        finalize_export() only unfreezes the workspace.
 
         Idempotent: if the workspace is already locked, or a folder is already
         restricted to exactly our account, we don't touch it again.
@@ -453,6 +503,43 @@ class ResanaSourceBackend(AbstractSourceBackend):
         except ResanaChildDroitError:
             drop_descendants()
             grant()
+
+    def _add_php_listed_files(self, root: SourceFolder, slug: str) -> None:
+        """Append files the PHP GED lists that GED explore omitted.
+
+        Folder saveDroit does not lift a file-level droit, so those files never
+        appear in explore. The animator session can still list and download them.
+        Skip the default inbox: it is not migrated. Name+extension already in
+        the GED folder is treated as the same file.
+        """
+        lock_client = self._get_lock_client()
+        folders = lock_client.list_folders(slug)
+        by_id = {folder["id"]: folder for folder in folders}
+        for folder in folders:
+            if str(folder.get("defaut") or "") == "1":
+                continue
+            ged_folder = _ged_folder_at(root, _php_folder_name_path(folder, by_id))
+            if ged_folder is None:
+                continue
+            existing = {source.name_with_extension for source in ged_folder.files}
+            for item in lock_client.list_files(slug, folder["id"]):
+                parts = _php_file_name_parts(item)
+                if parts is None:
+                    continue
+                name, extension = parts
+                key = name + extension
+                if key in existing:
+                    continue
+                ged_folder.files.append(
+                    SourceFile(
+                        id=item["id"],
+                        name=name,
+                        extension=extension,
+                        download_url=item["id"],
+                        raw_data={"php": True, "slug": slug},
+                    )
+                )
+                existing.add(key)
 
     @staticmethod
     def _release_folder(workspace, lock_client, slug, folder, by_id) -> None:
