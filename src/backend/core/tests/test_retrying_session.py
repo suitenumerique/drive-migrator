@@ -2,7 +2,7 @@
 
 import logging
 import ssl
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, MagicMock
 
 import pytest
 import requests
@@ -18,10 +18,9 @@ LOGGER_NAME = "core.tests.retrying_session"
 
 
 @pytest.fixture(autouse=True)
-def no_retry_delay():
+def no_retry_delay(monkeypatch):
     """Skip real sleeping so retry tests run instantly."""
-    with patch("tenacity.nap.time.sleep"):
-        yield
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda *_args, **_kwargs: None)
 
 
 @pytest.fixture(name="retry_settings", autouse=True)
@@ -34,10 +33,11 @@ def fixture_retry_settings(settings):
 
 
 @pytest.fixture(name="base_request")
-def fixture_base_request():
+def fixture_base_request(monkeypatch):
     """Mock the underlying requests.Session.request the retrying layer wraps."""
-    with patch.object(requests.Session, "request") as mock_request:
-        yield mock_request
+    mock_request = MagicMock()
+    monkeypatch.setattr(requests.Session, "request", mock_request)
+    yield mock_request
 
 
 def _session():
@@ -457,3 +457,101 @@ def test_a_path_holding_a_file_name_is_not_logged(base_request, console_logs):
             "duration_ms": ANY,
         },
     ]
+
+
+def _resana_session():
+    return RetryingSession("RESANA", logging.getLogger(LOGGER_NAME))
+
+
+def _resana_messages(caplog):
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == LOGGER_NAME and "Resana HTTP" in record.getMessage()
+    ]
+
+
+def test_resana_http_is_not_logged_at_info(base_request, caplog):
+    """Resana query/response bodies stay off production info logs."""
+    response = _response(200)
+    response.text = '{"folders":[]}'
+    base_request.return_value = response
+
+    with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
+        _resana_session().get(URL)
+
+    assert not _resana_messages(caplog)
+
+
+def test_resana_http_logs_query_and_response(base_request, caplog):
+    """A Resana GET logs its URL, query params, status, and response body."""
+    response = _response(200)
+    response.text = '{"folders":[]}'
+    base_request.return_value = response
+
+    with caplog.at_level(logging.DEBUG, logger=LOGGER_NAME):
+        _resana_session().get(URL, params={"page": 1, "itemsPerPage": 500})
+
+    messages = _resana_messages(caplog)
+    assert len(messages) == 1
+    assert "GET" in messages[0]
+    assert URL in messages[0]
+    assert "page" in messages[0]
+    assert "500" in messages[0]
+    assert '{"folders":[]}' in messages[0]
+    assert "status=200" in messages[0]
+
+
+def test_resana_http_logs_request_data(base_request, caplog):
+    """A Resana POST logs its form data and JSON response."""
+    response = _response(200)
+    response.text = '{"success": true}'
+    base_request.return_value = response
+
+    with caplog.at_level(logging.DEBUG, logger=LOGGER_NAME):
+        _resana_session().post(URL, data={"allFolders": "true"}, retry=True)
+
+    messages = _resana_messages(caplog)
+    assert len(messages) == 1
+    assert "allFolders" in messages[0]
+    assert '{"success": true}' in messages[0]
+
+
+def test_resana_streamed_download_does_not_read_response_text(base_request, caplog):
+    """A streamed Resana download must not consume response.text."""
+    response = MagicMock(spec=["status_code"])
+    response.status_code = 200
+    base_request.return_value = response
+
+    with caplog.at_level(logging.DEBUG, logger=LOGGER_NAME):
+        _resana_session().get(URL, stream=True, retry=False)
+
+    messages = _resana_messages(caplog)
+    assert len(messages) == 1
+    assert "<streamed>" in messages[0]
+
+
+def test_resana_http_logs_the_error_when_the_call_raises(base_request, caplog):
+    """A failed Resana attempt logs the error type instead of a response body."""
+    base_request.side_effect = Timeout("read timed out")
+
+    with caplog.at_level(logging.DEBUG, logger=LOGGER_NAME):
+        with pytest.raises(Timeout):
+            _resana_session().get(URL, retry=False)
+
+    messages = _resana_messages(caplog)
+    assert len(messages) == 1
+    assert "error=Timeout" in messages[0]
+
+
+def test_non_resana_session_does_not_log_resana_http(base_request, caplog):
+    """Drive and other services keep the existing http_request log only."""
+    response = _response(200)
+    response.text = "secret-body"
+    base_request.return_value = response
+
+    with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
+        _session().get(URL)
+
+    assert not _resana_messages(caplog)
+    assert all("secret-body" not in record.getMessage() for record in caplog.records)

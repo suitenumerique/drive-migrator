@@ -167,6 +167,9 @@ class RetryingSession(requests.Session):
             "request_id": kwargs["headers"]["X-Request-ID"],
         }
         started_at = time.monotonic()
+        payload = kwargs.get("data")
+        if payload is None:
+            payload = kwargs.get("json")
         try:
             response = super().request(method, url, *args, **kwargs)
         except Exception as error:
@@ -177,6 +180,15 @@ class RetryingSession(requests.Session):
                 error=type(error).__name__,
                 duration_ms=round((time.monotonic() - started_at) * 1000),
             )
+            if self.settings_prefix == "RESANA":
+                self.retry_logger.debug(
+                    "Resana HTTP %s %s params=%s data=%s error=%s",
+                    method.upper(),
+                    url,
+                    kwargs.get("params"),
+                    payload,
+                    type(error).__name__,
+                )
             raise
         logger.info(
             "http_request",
@@ -184,6 +196,17 @@ class RetryingSession(requests.Session):
             status=response.status_code,
             duration_ms=round((time.monotonic() - started_at) * 1000),
         )
+        if self.settings_prefix == "RESANA":
+            body = "<streamed>" if kwargs.get("stream") else response.text
+            self.retry_logger.debug(
+                "Resana HTTP %s %s params=%s data=%s status=%s body=%s",
+                method.upper(),
+                url,
+                kwargs.get("params"),
+                payload,
+                response.status_code,
+                body,
+            )
         return response
 
     # pylint: disable-next=arguments-differ
