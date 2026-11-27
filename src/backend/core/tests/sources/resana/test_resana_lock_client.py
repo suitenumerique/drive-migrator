@@ -419,6 +419,198 @@ def test_release_folder_access_calls_deverouille_dossier():
     )
 
 
+_GET_PERIMETER_ELEMENTS_DATA = {
+    "idDossier": "12677637",
+    "perimeterId": SLUG,
+    "ged_scope": "inEspace",
+    "uniqueJSON": "true",
+    "dossier_mode": "true",
+    "offcetDebut": "0",
+    "offset": "0",
+    "limit": "500",
+    "noLimitNombre": "1",
+}
+
+
+def test_list_files_calls_get_perimeter_elements():
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "tabInformation": [{"id": 111, "name": "open.odt", "droit": None}]
+    }
+
+    client.list_files(SLUG, "12677637")
+
+    client.session.post.assert_called_once_with(
+        f"{BASE_URL}/public/information/getPerimeterElements",
+        params={"slug": SLUG},
+        data=_GET_PERIMETER_ELEMENTS_DATA,
+        timeout=30,
+        retry=True,
+    )
+
+
+def _page(start, count):
+    return {
+        "tabInformation": [
+            {"id": file_id, "name": f"f{file_id}"}
+            for file_id in range(start, start + count)
+        ]
+    }
+
+
+def test_list_files_concatenates_full_pages():
+    """A full page is followed by the next offset until a short page."""
+    client = _make_client()
+
+    def _post(_url, **kwargs):
+        offset = int(kwargs["data"]["offset"])
+        response = MagicMock()
+        response.json.return_value = _page(offset, 500 if offset == 0 else 1)
+        response.raise_for_status = MagicMock()
+        return response
+
+    client.session.post.side_effect = _post
+
+    listed = client.list_files(SLUG, "12677637")
+
+    assert [item["id"] for item in listed] == [str(file_id) for file_id in range(501)]
+    assert client.session.post.call_count == 2
+
+
+def test_list_files_raises_when_a_page_is_repeated():
+    """An offset the portal ignores must not loop or drop the rest of the files."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = _page(0, 500)
+
+    with pytest.raises(ResanaLockError, match="repeated a page"):
+        client.list_files(SLUG, "12677637")
+
+
+def test_list_files_reads_tab_information():
+    """The portal lists files under tabInformation, not informations."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "tabInformation": [
+            {
+                "id": 222,
+                "titre": "secret.odt",
+                "droit": {"type": "utilisateur", "tabId": ["2040942"]},
+                "verrouillage": True,
+            }
+        ]
+    }
+
+    assert client.list_files(SLUG, "12677637") == [
+        {
+            "id": "222",
+            "name": "secret.odt",
+            "droit": {"type": "utilisateur", "tabId": ["2040942"]},
+            "verrouillage": True,
+        }
+    ]
+
+
+def test_list_files_keeps_droit_and_nested_informations():
+    """Files listed under a folder node are flattened, with their droit kept."""
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "tabInformation": [
+            {
+                "id": 111,
+                "name": "open.odt",
+                "droit": None,
+            }
+        ],
+        "folders": [
+            {
+                "id": "12677637",
+                "informations": [
+                    {
+                        "id": 222,
+                        "titre": "secret.odt",
+                        "droit": {"type": "utilisateur", "tabId": ["2040942"]},
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert client.list_files(SLUG, "12677637") == [
+        {"id": "111", "name": "open.odt", "droit": None},
+        {
+            "id": "222",
+            "name": "secret.odt",
+            "droit": {"type": "utilisateur", "tabId": ["2040942"]},
+        },
+    ]
+
+
+def test_list_files_falls_back_to_actualites_when_tab_information_is_empty():
+    """getPerimeterElements can still answer []: use the PHP GED folder listing."""
+    client = _make_client()
+    empty = MagicMock()
+    empty.json.return_value = {"tabInformation": []}
+    listed = MagicMock()
+    listed.json.return_value = {
+        "tabInformation": [
+            {
+                "id": 222,
+                "titre": "secret.odt",
+                "droit": {"type": "utilisateur", "tabId": ["2040942"]},
+            }
+        ]
+    }
+    client.session.post.side_effect = [empty, listed]
+
+    assert client.list_files(SLUG, "12677637") == [
+        {
+            "id": "222",
+            "name": "secret.odt",
+            "droit": {"type": "utilisateur", "tabId": ["2040942"]},
+        }
+    ]
+    assert client.session.post.call_args_list[1][0] == (
+        f"{BASE_URL}/public/information/listeActualitesPerimetre",
+    )
+    assert client.session.post.call_args_list[1][1]["data"] == {
+        "offcetDebut": "0",
+        "uniqueJSON": "true",
+        "idDossier": "12677637",
+        "dossier_mode": "true",
+        "noLimitNombre": "1",
+    }
+
+
+def test_list_files_parses_information_ids_from_html_listing():
+    """uniqueJSON can still be the PHP GED HTML snippet with li_information ids."""
+    client = _make_client()
+    empty = MagicMock()
+    empty.json.return_value = {"tabInformation": []}
+    html = MagicMock()
+    html.json.side_effect = ValueError("not JSON")
+    html.text = (
+        '<ul><li id="li_information_222"></li>'
+        '<li id="li_information_222"></li>'
+        '<li id="li_information_333"></li></ul>'
+    )
+    client.session.post.side_effect = [empty, html]
+
+    assert client.list_files(SLUG, "12677637") == [
+        {"id": "222", "name": ""},
+        {"id": "333", "name": ""},
+    ]
+
+
+def test_list_files_raises_when_the_payload_has_an_error():
+    client = _make_client()
+    client.session.post.return_value.json.return_value = {
+        "error": {"message": ["perimeterId est manquant !"]}
+    }
+
+    with pytest.raises(ResanaLockError, match="perimeterId"):
+        client.list_files(SLUG, "12677637")
+
+
 @pytest.mark.parametrize(
     "call", ["grant_folder_access", "release_folder_access"], ids=lambda c: c
 )

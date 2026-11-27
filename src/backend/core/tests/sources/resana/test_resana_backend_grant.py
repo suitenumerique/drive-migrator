@@ -1,9 +1,11 @@
 """Tests for begin_export() grant-then-recover of Resana root folders."""
 
 # pylint: disable=protected-access
+from unittest.mock import MagicMock
+
 import pytest
 
-from core.factories import WorkspaceFactory
+from core.factories import UserFactory, WorkspaceFactory
 from core.sources.resana.backend import ResanaSourceBackend
 from core.sources.resana.resana_lock_client import (
     ResanaChildDroitError,
@@ -264,3 +266,140 @@ def test_begin_export_raises_when_child_droit_remains_after_unlock(
     mock_lock.return_value.release_folder_access.assert_called_once_with(
         "2137419", "child"
     )
+
+
+def _structure_explore(uuid, workspace_id="ws-uuid"):
+    if uuid == workspace_id:
+        return [
+            {
+                "folders": [
+                    {"uuid": "folder-1", "name": "DOSSIER AVEC FICHIER USER 1"}
+                ],
+                "files": [],
+            }
+        ]
+    return [
+        {
+            "folders": [],
+            "files": [{"uuid": "ged-1", "name": "open", "extension": ".odt"}],
+        }
+    ]
+
+
+def test_get_workspace_structure_adds_php_only_file(monkeypatch, settings):
+    """A file GED explore omits is appended from the PHP listing."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(
+        source_type="resana",
+        migration_user=UserFactory(),
+        source_lock_state={"slug": "2137419"},
+    )
+
+    _mock_tm, _members, mock_lock, _logger = _stub_resana_clients(
+        monkeypatch, stub_members=False, configure_lock=False
+    )
+    mock_ged = MagicMock()
+    monkeypatch.setattr("core.sources.resana.backend.InterstisClient", mock_ged)
+    mock_ged.return_value.explore.side_effect = lambda uuid: _structure_explore(
+        uuid, workspace.source_id
+    )
+    mock_lock.return_value.list_folders.return_value = [
+        {
+            "id": "12677637",
+            "name": "DOSSIER AVEC FICHIER USER 1",
+            "dossier_mere": None,
+        }
+    ]
+    mock_lock.return_value.list_files.return_value = [
+        {
+            "id": "48006411",
+            "name": ("?-espace-administrateur,-contexte-pour-les-agents-de-code"),
+            "extension": ".pdf",
+        }
+    ]
+    result = ResanaSourceBackend().get_workspace_structure(workspace)
+
+    folder = result.children[0]
+    names = [item.name_with_extension for item in folder.files]
+    assert "open.odt" in names
+    extra = next(item for item in folder.files if item.id == "48006411")
+    assert extra.name_with_extension == (
+        "?-espace-administrateur,-contexte-pour-les-agents-de-code.pdf"
+    )
+    assert extra.raw_data == {"php": True, "slug": "2137419"}
+
+
+def test_get_workspace_structure_skips_php_name_duplicates(monkeypatch, settings):
+    """A PHP file already listed by GED is not appended again."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(
+        source_type="resana",
+        migration_user=UserFactory(),
+        source_lock_state={"slug": "2137419"},
+    )
+
+    _mock_tm, _members, mock_lock, _logger = _stub_resana_clients(
+        monkeypatch, stub_members=False, configure_lock=False
+    )
+    mock_ged = MagicMock()
+    monkeypatch.setattr("core.sources.resana.backend.InterstisClient", mock_ged)
+    mock_ged.return_value.explore.side_effect = lambda uuid: _structure_explore(
+        uuid, workspace.source_id
+    )
+    mock_lock.return_value.list_folders.return_value = [
+        {
+            "id": "12677637",
+            "name": "DOSSIER AVEC FICHIER USER 1",
+            "dossier_mere": None,
+        }
+    ]
+    mock_lock.return_value.list_files.return_value = [
+        {"id": "php-open", "name": "open.odt"}
+    ]
+    result = ResanaSourceBackend().get_workspace_structure(workspace)
+
+    assert [item.id for item in result.children[0].files] == ["ged-1"]
+
+
+def test_get_workspace_structure_skips_default_inbox_files(monkeypatch, settings):
+    """The portal default folder is not migrated, including its PHP-listed files."""
+    settings.RESANA_API_ENDPOINT = "https://resana.example.com/api"
+    settings.RESANA_WEB_ENDPOINT = "https://resana-web.example.test"
+    workspace = WorkspaceFactory(
+        source_type="resana",
+        migration_user=UserFactory(),
+        source_lock_state={"slug": "2137419"},
+    )
+
+    _mock_tm, _members, mock_lock, _logger = _stub_resana_clients(
+        monkeypatch, stub_members=False, configure_lock=False
+    )
+    mock_ged = MagicMock()
+    monkeypatch.setattr("core.sources.resana.backend.InterstisClient", mock_ged)
+    mock_ged.return_value.explore.side_effect = lambda uuid: (
+        [
+            {
+                "folders": [{"uuid": "inbox-uuid", "name": "A classer"}],
+                "files": [],
+            }
+        ]
+        if uuid == workspace.source_id
+        else [{"folders": [], "files": []}]
+    )
+    mock_lock.return_value.list_folders.return_value = [
+        {
+            "id": "inbox",
+            "name": "A classer",
+            "dossier_mere": None,
+            "defaut": "1",
+        }
+    ]
+    mock_lock.return_value.list_files.return_value = [
+        {"id": "inbox-file", "name": "hidden.odt"}
+    ]
+    result = ResanaSourceBackend().get_workspace_structure(workspace)
+
+    mock_lock.return_value.list_files.assert_not_called()
+    assert result.children[0].files == []
